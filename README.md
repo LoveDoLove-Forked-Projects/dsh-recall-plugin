@@ -1,4 +1,4 @@
-# dsh-recall-plugin ![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)
+# dsh-recall-plugin [![awesome · DSH plugin](https://awesome-dsh-plugin.com/badge.svg)](https://awesome-dsh-plugin.com/zh/p/limbo947/dsh-recall-plugin/)
 
 简体中文 | [English](README.en.md)
 
