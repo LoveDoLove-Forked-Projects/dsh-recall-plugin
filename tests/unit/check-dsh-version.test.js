@@ -9,7 +9,7 @@
 
 import { describe, it, expect } from 'vitest'
 import {
-  parseVersion, compareVersions, parseRange, satisfiesRange,
+  parseVersion, compareVersions, parseRange, parseRangeSet, satisfiesRange,
   buildReport, parseMirrorVersion, parseContractVersion,
 } from '../../scripts/check-dsh-version.mjs'
 
@@ -50,16 +50,66 @@ describe('compareVersions', () => {
 })
 
 describe('parseRange', () => {
-  it('解析 ^ / ~ / 精确三种形态', () => {
+  it('解析 ^ / ~ / 精确 三种形态', () => {
     expect(parseRange('^0.1.1-rc.2')).toEqual({ op: '^', base: { major: 0, minor: 1, patch: 1, pre: 'rc.2' } })
     expect(parseRange('~1.2.3')).toEqual({ op: '~', base: { major: 1, minor: 2, patch: 3, pre: null } })
     expect(parseRange('1.2.3')).toEqual({ op: '=', base: { major: 1, minor: 2, patch: 3, pre: null } })
   })
 
+  it('解析复合区间 >=x.y.z <x.y.z（含 prerelease 与 v 前缀）', () => {
+    const r = parseRange('>=0.1.1-rc.2 <0.2.0')
+    expect(r).toEqual({
+      op: 'compound',
+      lower: { major: 0, minor: 1, patch: 1, pre: 'rc.2' },
+      upper: { major: 0, minor: 2, patch: 0, pre: null },
+      upperInclusive: false,
+    })
+    // 前后空白、v 前缀、prerelease 上限也识别
+    expect(parseRange('  >=v0.1.1-rc.2  <v0.2.0-alpha.1  ')).toEqual({
+      op: 'compound',
+      lower: { major: 0, minor: 1, patch: 1, pre: 'rc.2' },
+      upper: { major: 0, minor: 2, patch: 0, pre: 'alpha.1' },
+      upperInclusive: false,
+    })
+  })
+
+  it('复合区间 <= 上限：默认不含转含，窗口顶精确含入 prerelease', () => {
+    const r = parseRange('>=0.1.1-rc.2 <=0.1.3-alpha.1')
+    expect(r).toEqual({
+      op: 'compound',
+      lower: { major: 0, minor: 1, patch: 1, pre: 'rc.2' },
+      upper: { major: 0, minor: 1, patch: 3, pre: 'alpha.1' },
+      upperInclusive: true,
+    })
+  })
+
   it('不支持的范围形态返回 null（fail-open）', () => {
-    for (const bad of ['>=1.0.0', '*', '^1.2', '1.2.x', '1.x', 'latest', '', null]) {
+    // 单条 >= 不带 < / <=、孤立 <=、反向或三段叠加都是失败：区间语义要求
+    // lower >= 与 upper < / <= 成对出现且顺序正确
+    for (const bad of ['>=1.0.0', '<=1.0.0', '*', '^1.2', '1.2.x', '1.x', 'latest', '', null, '<0.2.0 >=0.1.0', '>=0.1.0 >=0.2.0', '>=0.1.0 <0.2.0 <0.3.0']) {
       expect(parseRange(bad), JSON.stringify(bad)).toBeNull()
     }
+  })
+})
+
+describe('parseRangeSet', () => {
+  it('单条范围返回单段', () => {
+    expect(parseRangeSet('^0.1.1-rc.2')).toHaveLength(1)
+    expect(parseRangeSet('>=0.1.1-rc.2 <0.2.0')[0].op).toBe('compound')
+  })
+
+  it('|| 并成多段：各段独立解析，空白环绕容忍', () => {
+    const set = parseRangeSet('>=0.1.1-rc.2 <=0.1.3-alpha.1 || >=0.1.2-alpha.1 <=0.1.3-alpha.1 || 0.1.3-alpha.1')
+    expect(set).toHaveLength(3)
+    expect(set[0].upperInclusive).toBe(true)
+    expect(set[2].op).toBe('=')
+  })
+
+  it('无法解析的段被丢弃；整条全无法解析返回 []（fail-open）', () => {
+    expect(parseRangeSet('>=1.0.0 || ^1.2.3')).toHaveLength(1)
+    expect(parseRangeSet('abc || **')).toEqual([])
+    expect(parseRangeSet('')).toEqual([])
+    expect(parseRangeSet(null)).toEqual([])
   })
 })
 
@@ -85,6 +135,48 @@ describe('satisfiesRange', () => {
     expect(satisfiesRange('1.3.0', '~1.2.3')).toBe(false)
     expect(satisfiesRange('1.2.3', '1.2.3')).toBe(true)
     expect(satisfiesRange('1.2.4', '1.2.3')).toBe(false)
+  })
+
+  it('复合区间 >=x <y：下含上不含；prerelease 需同 tuple 门槛（npm 实况）', () => {
+    const r = '>=0.1.1-rc.2 <0.2.0'
+    expect(satisfiesRange('0.1.1-rc.2', r)).toBe(true)   // 等于下限，同 tuple 门槛放行
+    expect(satisfiesRange('0.1.1-rc.1', r)).toBe(false)  // 早于下限
+    expect(satisfiesRange('0.1.9', r)).toBe(true)        // 中段正式版（无门槛限制）
+    expect(satisfiesRange('0.1.2', r)).toBe(true)        // 0.1.2 正式版同样放行
+    // prerelease 门槛（node-semver 实测）：0.1.2-alpha.4 tuple=(0,1,2)，本区间
+    // 只有 (0,1,1) lower 与 (0,2,0) upper 带 prerelease → 不放行；0.2.0-alpha.1
+    // 同理被 upper（tuple 相同但 upper 自身 pre=null）拒之门外——曾误测为 true
+    expect(satisfiesRange('0.1.2-alpha.4', r)).toBe(false)
+    expect(satisfiesRange('0.2.0-alpha.1', r)).toBe(false)
+    expect(satisfiesRange('0.2.0', r)).toBe(false)       // 触上界
+    expect(satisfiesRange('v0.1.5', r)).toBe(true)       // v 前缀
+  })
+
+  it('DSH-Store 兼容窗口（0.1.1-rc.2 ～ 0.1.3-alpha.1，逐 tuple OR）：全目标命中、未验证线拒绝', () => {
+    const window = '>=0.1.1-rc.2 <=0.1.3-alpha.1 || >=0.1.2-alpha.1 <=0.1.3-alpha.1 || >=0.1.3-alpha.1 <=0.1.3-alpha.1'
+    // 声明的兼容版本全命中
+    expect(satisfiesRange('0.1.1-rc.2', window)).toBe(true)
+    expect(satisfiesRange('0.1.2-alpha.1', window)).toBe(true)
+    expect(satisfiesRange('0.1.2-alpha.4', window)).toBe(true)
+    expect(satisfiesRange('0.1.2-rc.1', window)).toBe(true)
+    expect(satisfiesRange('0.1.3-alpha.1', window)).toBe(true)
+    // 窗口内顺带放行（>=0.1.2-alpha.1 段含同 tuple prerelease 比较器）
+    expect(satisfiesRange('0.1.2', window)).toBe(true)
+    // 窗口外拒绝：下界前、窗口顶之后、0.2.0 全线
+    expect(satisfiesRange('0.1.1-rc.1', window)).toBe(false)
+    expect(satisfiesRange('0.1.3-rc.1', window)).toBe(false)
+    expect(satisfiesRange('0.1.3', window)).toBe(false)
+    expect(satisfiesRange('0.1.5', window)).toBe(false)
+    expect(satisfiesRange('0.2.0', window)).toBe(false)
+    expect(satisfiesRange('0.2.0-alpha.1', window)).toBe(false)
+  })
+
+  it('单段长区间写不全 prerelease 窗口：0.1.2-alpha.x 被门槛拒绝（改回单段会复发）', () => {
+    // 防回归：把窗口并回单段长区间（如误以为 <=0.1.3-alpha.1 即覆盖 0.1.2 线），
+    // prerelease 门槛会让 0.1.2-alpha.4 判定越界——与 node-semver/npm install 一致
+    const single = '>=0.1.1-rc.2 <=0.1.3-alpha.1'
+    expect(satisfiesRange('0.1.2-alpha.4', single)).toBe(false)
+    expect(satisfiesRange('0.1.1-rc.2', single)).toBe(true)
   })
 
   it('非法输入/不支持范围返回 null（fail-open）', () => {
@@ -181,6 +273,37 @@ describe('buildReport', () => {
     const r = buildReport({ local: '0.1.1-rc.2', mirror: '0.1.1-rc.2', contract: '0.1.1-rc.2', latest: '0.1.1-rc.2', peers: weird })
     expect(r.ok).toBe(true)
     expect(r.lines.join('\n')).toContain('无法解析')
+  })
+
+  it('OR 窗口（0.1.1-rc.2 ～ 0.1.3-alpha.1）不误报"无法解析"且 prerelease 实装命中', () => {
+    // 现状：peer 范围是逐 tuple OR 窗口，早期解析器只认 ^/~ 精确/单段会报警
+    const window = [
+      { name: '@deepseek-ai/dsh-shell', range: '>=0.1.1-rc.2 <=0.1.3-alpha.1 || >=0.1.2-alpha.1 <=0.1.3-alpha.1 || >=0.1.3-alpha.1 <=0.1.3-alpha.1', installed: '0.1.2-rc.1' },
+      { name: '@deepseek-ai/dsh-settings', range: '>=0.1.1-rc.2 <=0.1.3-alpha.1 || >=0.1.2-alpha.1 <=0.1.3-alpha.1 || >=0.1.3-alpha.1 <=0.1.3-alpha.1', installed: null },
+    ]
+    const r = buildReport({ local: '0.1.3-alpha.1', mirror: '0.1.3-alpha.1', contract: '0.1.3-alpha.1', latest: '0.1.3-alpha.1', peers: window })
+    expect(r.ok).toBe(true)
+    expect(r.lines.join('\n')).not.toContain('无法解析')
+    expect(r.lines.join('\n')).toContain('0.1.2-rc.1 在范围内')
+    expect(r.lines.join('\n')).toContain('跳过实装校验')
+  })
+
+  it('窗口顶之外的最新版：报越界并 exit 1（未验证线必须拦）', () => {
+    // npm 已发 0.1.4-alpha.1（未核验）：peer 窗口顶 0.1.3-alpha.1 必须报越界
+    const windowPeer = [{ name: '@deepseek-ai/dsh-shell', range: '>=0.1.1-rc.2 <=0.1.3-alpha.1 || >=0.1.2-alpha.1 <=0.1.3-alpha.1 || >=0.1.3-alpha.1 <=0.1.3-alpha.1', installed: '0.1.3-alpha.1' }]
+    const r = buildReport({ local: '0.1.3-alpha.1', mirror: '0.1.3-alpha.1', contract: '0.1.3-alpha.1', latest: '0.1.4-alpha.1', peers: windowPeer })
+    expect(r.ok).toBe(false)
+    expect(r.exitCode).toBe(1)
+    expect(r.lines.join('\n')).toContain('不覆盖 npm 最新 dsh 0.1.4-alpha.1')
+  })
+
+  it('单段长区间 peer 对 prerelease 实装判越界：门槛防回归', () => {
+    // 若有人把窗口误并回单段 >=x <=y（upperInclusive），0.1.2-alpha.4 必须按 npm
+    // 语义判越界而不是被宽松放行——本用例是「假修复复发」的哨兵
+    const single = [{ name: '@deepseek-ai/dsh-shell', range: '>=0.1.1-rc.2 <=0.1.3-alpha.1', installed: '0.1.2-alpha.4' }]
+    const r = buildReport({ local: '0.1.3-alpha.1', mirror: '0.1.3-alpha.1', contract: '0.1.3-alpha.1', latest: '0.1.3-alpha.1', peers: single })
+    expect(r.ok).toBe(false)
+    expect(r.lines.join('\n')).toContain('本地已装 0.1.2-alpha.4 不在 peer 范围')
   })
 
   it('非 dsh 线 peer（cordis/schemastery 独立版本线）：不做 npm 最新对比，仅本地实装校验', () => {

@@ -21,11 +21,15 @@
  * DSH_CHECK_MIRROR / DSH_CHECK_CONTRACT / DSH_CHECK_LATEST 可覆盖对应输入
  * （演示/测试用，见脚本头注释），不修改任何文件。
  *
- * 范围解析只支持本项目 peer 实际使用的 `^x.y.z[-pre]`、`~x.y.z[-pre]` 与
- * 精确 `x.y.z[-pre]` 三种形态（package.json 现状全为 ^）；遇到不认识的范围
- * 输出警告并跳过该项（fail-open——提醒脚本宁可漏报也不该因解析器抛错
- * 挡住主流程）。不引入 semver 依赖：脚本不进 CI、形态单一，自实现约 40 行
- * 且有单测钉住语义，保持 devDependencies 只有 vitest。
+ * 范围解析支持本项目 peer 实际使用的形态：`^x.y.z[-pre]`、`~x.y.z[-pre]`、
+ * 精确 `x.y.z[-pre]`、复合区间 `>=x.y.z[-pre] <x.y.z[-pre]` 与
+ * `>=x.y.z[-pre] <=x.y.z[-pre]`（`<=` 上限用于 DSH-Store 兼容窗口顶 0.1.3-alpha.1）；
+ * 整条范围可用 `||` 并成多段，各段独立判定、任一段满足即命中（npm 语义：
+ * prerelease 版本只有命中「同 (major,minor,patch) 且带 prerelease 比较器」的段
+ * 才参与比较，单段长区间无法代表多个 tuple，见 peer 范围写法）。遇到完全
+ * 无法解析的范围输出警告并跳过该项（fail-open——提醒脚本宁可漏报也不该因
+ * 解析器抛错挡住主流程）。不引入 semver 依赖：脚本不进 CI、形态单一，
+ * 自实现约 40 行且有单测钉住语义，保持 devDependencies 只有 vitest。
  */
 
 import fs from 'node:fs'
@@ -89,12 +93,28 @@ export function compareVersions(a, b) {
 }
 
 /**
- * 解析 ^ / ~ / 精确三种范围形态，返回 {op, base}；base 为已解析版本。
- * 其他形态（>=、||、通配等）返回 null——调用方输出警告并跳过该项。
+ * 解析 ^ / ~ / 精确 与复合区间（单段）形态：
+ *   "^x.y.z[-pre]" / "~x.y.z[-pre]" / "x.y.z[-pre]"      → {op, base}
+ *   ">=x.y.z[-pre] <x.y.z[-pre]"                          → {op:'compound', lower, upper, upperInclusive:false}
+ *   ">=x.y.z[-pre] <=x.y.z[-pre]"                         → {op:'compound', lower, upper, upperInclusive:true}
+ * 其他形态（w裸 >=、通配、反向 <lower、错组合）返回 null——由 parseRangeSet
+ * 汇总后整条无法解析时输出警告并跳过该项（fail-open）。
+ * 复合区间下限 >=（含）；上限 <（不含）或 <=（含）严格照 semver 语义：
+ * DSH-Store 上架兼容窗口必须写全下限（保留 0.1.1-rc.2 已验证基线）与上限
+ * （prerelease 顶用 <= 精确含入，如 0.1.3-alpha.1，阻止其后未验证的 rc/正式版）。
  */
 export function parseRange(range) {
   if (typeof range !== 'string') return null
   const text = range.trim()
+  const compound = /^\s*>=\s*v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?\s+(<=?)\s*v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?\s*$/.exec(text)
+  if (compound) {
+    return {
+      op: 'compound',
+      lower: { major: Number(compound[1]), minor: Number(compound[2]), patch: Number(compound[3]), pre: compound[4] || null },
+      upper: { major: Number(compound[6]), minor: Number(compound[7]), patch: Number(compound[8]), pre: compound[9] || null },
+      upperInclusive: compound[5] === '<=',
+    }
+  }
   const m = /^([~^])?\s*v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z][0-9A-Za-z.-]*))?$/.exec(text)
   if (!m) return null
   const base = { major: Number(m[2]), minor: Number(m[3]), patch: Number(m[4]), pre: m[5] || null }
@@ -102,15 +122,58 @@ export function parseRange(range) {
 }
 
 /**
- * 版本是否落在范围内；范围无法解析时返回 null（fail-open）。
- * ^ 语义按 npm：主版本 >0 时锁定主版本，0.x 线锁定次版本（^0.1.1 → <0.2.0），
- * ^0.0.x 锁定补丁——与本项目 peer 全为 ^0.1.1-rc.2 的现状一致。
+ * 把整条范围按 `||` 切段，返回各段的可解析对象数组（无法解析的段丢弃）。
+ * 整条全无法解析时返回 []（fail-open，调用方输出警告）；任一段可解析则
+ * 该段独立参与判定。为何需要分段：prerelease 版本只被「同 tuple 且带
+ * prerelease 比较器」的段放行（npm semver 规则），兼容窗口跨多个版本线
+ * 时必须逐 tuple 写成多段 OR，单段长区间覆盖不了 alpha/rc 系列。
  */
-export function satisfiesRange(version, range) {
-  const parsed = typeof version === 'string' ? parseVersion(version) : version
-  const r = parseRange(range)
-  if (!parsed || !r) return null
-  const { op, base } = r
+export function parseRangeSet(range) {
+  if (typeof range !== 'string') return []
+  return range
+    .split(/\s*\|\|\s*/)
+    .map((seg) => seg.trim())
+    .filter(Boolean)
+    .map((seg) => parseRange(seg))
+    .filter((r) => r !== null)
+}
+
+function sameTuple(a, b) {
+  return a.major === b.major && a.minor === b.minor && a.patch === b.patch
+}
+
+/**
+ * npm semver 的 prerelease 门槛：带 prerelease 标识的候选版本，只有所在段内
+ * 存在「同 (major,minor,patch) tuple 且自身带 prerelease」的比较器（^ / ~ /
+ * = 的基，或 compound 的 lower/upper）才参与比较。为什么需要这道门槛：
+ * 没有它，单段长区间（如 >=0.1.1-rc.2 <=0.1.3-alpha.1）会把未显式验证过的
+ * 0.1.2-alpha.x 一并放宽放行，而 npm install 实际会拦——脚本要与安装行为
+ * 一致，就不能只按大小比（issue #517 的根因就是这个门槛，不是范围语法）。
+ */
+function hasPrereleaseGate(r, parsed) {
+  if (r.op === 'compound') {
+    return (sameTuple(r.lower, parsed) && r.lower.pre !== null) ||
+      (sameTuple(r.upper, parsed) && r.upper.pre !== null)
+  }
+  return sameTuple(r.base, parsed) && r.base.pre !== null
+}
+
+/**
+ * 版本对单个已解析范围段的判定：^ / ~ / = / compound 四种。
+ * ^ 语义按 npm：主版本 >0 时锁定主版本，0.x 线锁定次版本（^0.1.1 → <0.2.0），
+ * ^0.0.x 锁定补丁。compound 为 [lower, upper]（upperInclusive 决定 < 或 <=），
+ * prerelease 排序遵循 compareVersions——窗口顶 0.1.3-alpha.1 需 <=（含）精确含入。
+ */
+function satisfiesSingle(parsed, r) {
+  if (parsed.pre !== null && !hasPrereleaseGate(r, parsed)) return false
+  const { op } = r
+  if (op === 'compound') {
+    if (compareVersions(parsed, r.lower) < 0) return false
+    return r.upperInclusive
+      ? compareVersions(parsed, r.upper) <= 0
+      : compareVersions(parsed, r.upper) < 0
+  }
+  const { base } = r
   if (compareVersions(parsed, base) < 0) return false
   if (op === '=') return compareVersions(parsed, base) === 0
   let upper
@@ -122,6 +185,18 @@ export function satisfiesRange(version, range) {
     else upper = { major: 0, minor: 0, patch: base.patch + 1, pre: null }
   }
   return compareVersions(parsed, upper) < 0
+}
+
+/**
+ * 版本是否落在范围内（支持 || 多段）；版本或范围（全部段）无法解析时返回
+ * null（fail-open）——提醒脚本宁可漏报也不该因解析失败挡住主流程。
+ */
+export function satisfiesRange(version, range) {
+  const parsed = typeof version === 'string' ? parseVersion(version) : version
+  if (!parsed) return null
+  const ranges = parseRangeSet(range)
+  if (ranges.length === 0) return null
+  return ranges.some((r) => satisfiesSingle(parsed, r))
 }
 
 // ---- 环境探测（文件系统 / npm 子进程） ----
@@ -320,9 +395,9 @@ export function buildReport({ local, mirror, contract, latest, peers }) {
   }
 
   for (const peer of peers || []) {
-    const r = parseRange(peer.range)
-    if (!r) {
-      lines.push(`  ⚠ ${peer.name} 范围 ${peer.range} 无法解析（脚本只认 ^ / ~ / 精确），请人工核验`)
+    const rs = parseRangeSet(peer.range)
+    if (rs.length === 0) {
+      lines.push(`  ⚠ ${peer.name} 范围 ${peer.range} 无法解析（脚本只认 ^ / ~ / 精确 / >=x <y 复合区间，可 || 并多段），请人工核验`)
       continue
     }
     const installedOk = peer.installed == null ? null : satisfiesRange(peer.installed, peer.range)

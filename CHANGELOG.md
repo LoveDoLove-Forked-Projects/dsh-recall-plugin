@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.4] - 2026-09-06
+
+### 变更
+
+- **DSH-Store 兼容性声明补全（issue #517）**：`package.json` 新增 `dsh.compatibility.dshReleases` 矩阵，将 `0.1.2-alpha.1`～`0.1.2-alpha.5`、`0.1.2-rc.1`、`0.1.3-alpha.1` 七项标记为 `compatible`；同步把 7 个 `@deepseek-ai/dsh-*` 的 `peerDependencies` 范围改为逐 tuple OR 窗口 `>=0.1.1-rc.2 <=0.1.3-alpha.1 || >=0.1.2-alpha.1 <=0.1.3-alpha.1 || >=0.1.3-alpha.1 <=0.1.3-alpha.1`——npm semver 的 prerelease 规则要求存在「同 (major,minor,patch) 且自身带 prerelease」的比较器才放行 prerelease 候选，单段长区间（含 `^0.1.1-rc.2` 的展开式）无法代表 `0.1.2-alpha.x` 系列，DSH-Store 因此判 0.1.2 线 peer 越界；逐 tuple 分段后各 prerelease 线各自放行，上界收窄至矩阵最后声明版 `0.1.3-alpha.1`（`<=` 含入），未验证的 `0.1.3` 后续与 `0.2.x` 全线均在窗口外。`scripts/check-dsh-version.mjs` 补齐 `||` 多段解析（`parseRangeSet`）、复合区间 `<=` 上限与 prerelease 门槛（同 tuple 校验——单段长区间不再放宽放行未验证 prerelease 线），替换此前对复合区间的「只认 ^ / ~ / 精确」警告，配套单测补齐 parseRange / parseRangeSet / satisfiesRange / buildReport 四层断言。
+
 ## [2.3.3] - 2026-09-05
 
 ### 修复
