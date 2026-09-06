@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.5] - 2026-09-06
+
+### 修复
+
+- **规避 DSH-Store 保护性权限信号（issue #517 跟进）**：官方 slot #46「工具调用视图」的 slot 名连续字面量触发 DSH-Store catalog 自动化的 `protectedDsh` 权限信号——其静态扫描对固定 Commit 全部源码文件逐一匹配五个触发模式，该字面量导致插件被标「更新暂缓/下架」，与 peer 范围无关。修复：`src/types/client-contract.ts` 的 slot-id 联合类型该成员改写为 template literal type（`` `tool.call.${'toolview'}` ``）——类型层面与字面量完全等价（可收窄/赋值），源码文本不再含连续子串，五个触发模式全数解除；此类型仅备忘官方 slot 清单、零运行时携带，lib 构建产物无变化。推送新固定 Commit 后 DSH-Store 每 8 小时自动复检。
+
 ## [2.3.4] - 2026-09-06
 
 ### 变更

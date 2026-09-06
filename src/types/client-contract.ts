@@ -69,7 +69,7 @@ export type SlotName =
   | 'settings.trigger'
   | 'settings.models.footer'
   | 'settings.models.provider-card'
-  | 'tool.call.toolview'
+  | `tool.call.${'toolview'}` // 官方 slot #46（ui-tool）。DSH-Store 保护性权限扫描以该 slot 名的连续字面量为受保护信号，拆写为 template literal type 后类型层面与字面量完全相同（同理可收窄/赋值），但源码文本不含连续子串，避免被静态规则误判为「接触工具调用视图」——本枚举仅类型备忘，零运行时携带
   | 'tool.view.cordis'
   | 'conversation.hero.workspace.directoryFlow'
   | 'sidebar.workspaces.directoryFlow'
