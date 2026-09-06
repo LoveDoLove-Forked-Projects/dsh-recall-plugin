@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.6] - 2026-09-06
+
+### 修复
+
+- **修复宿主启动预热的 subprocess 竞态（消除启动噪音）**：预热是唯一在 apply 期就执行 shell 命令的路径，cordis 按 fiber 逐个注入，recall 可能先于 pwsh-sandbox 的 subprocess 注入链完成，`rebuildOrphans` 的 git 命令随即命中「cannot get required service "subprocess" in inactive context」，每次重启刷一条 `recall rebuildOrphans failed`。修复：预热前置短轮询探活（纯编码 prelude 常量、无副作用，10s 窗口），执行器就绪后再跑预热链；超时未就绪则放弃预热——与原先吞错语义一致，只是不再报错刷屏。
+
 ## [2.3.5] - 2026-09-06
 
 ### 修复

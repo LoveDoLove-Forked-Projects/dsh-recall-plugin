@@ -423,6 +423,20 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // 启动预热：所有已存在工作区解析存储、重建索引与孤儿快照，并清理旧版
   // 项目内 blobs 目录（home 可用时）。不触发维护（开机预热应尽量轻）。
   ;(async () => {
+    // 预热是唯一在 apply 期就执行 shell 命令的路径：cordis 按 fiber 逐个
+    // apply，recall 可能先于 pwsh-sandbox 的 subprocess 注入链完成，此刻
+    // runShell 会命中「cannot get required service \"subprocess\" in inactive
+    // context」（cordis 无 ready 事件，只能轮询探活）。探活用 UTF8_PRELUDE
+    // 这类纯编码模板常量（空执行、无副作用），就绪后预热照跑；10s 内未
+    // 就绪则放弃预热——与原先 .catch 吞错放弃同语义，只是不再刷启动噪音。
+    let shellReady = false
+    for (let i = 0; i < 20 && !shellReady; i++) {
+      try {
+        await rt.runShell(rt.scripts.UTF8_PRELUDE, { timeoutMs: 10000, stdoutMaxBytes: 4096 })
+        shellReady = true
+      } catch { await new Promise((resolve) => setTimeout(resolve, 500)) }
+    }
+    if (!shellReady) return
     const warmupRoots = new Map()
     for (const session of ctx.sessions.list()) {
       const cwd = session && session.header && session.header.cwd
