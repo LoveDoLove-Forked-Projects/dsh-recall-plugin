@@ -7,6 +7,21 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.3-alpha.1 核验（2026-09-07）**：**npm 未发布**（dist-tags latest 仍 0.1.2-rc.1），本地
+> `dsh-v0.1.3-alpha.1` tag 源码构建（检出 `D:\workspace\DSH\deepseek-harness0.1.3-alpha.1`，
+> `pnpm install` + `pnpm run build`）后 `npm link` 全局实装，reference/ 镜像重拉归档
+> （13 文件，映射表未变；来源改记 tag 检出而非 master），`npm run check:upgrade` 三层门禁全绿
+> （check:dsh 漂移一致 + test:probe 31/31 + verify:host 装配断言通过）。重查关键产物证据链：
+> I1/I29 guard.d.ts shadowing priority 分配不变；I2 renderMessageImages 仍在、I5 ChatNodeKind
+> 全集探针断言全绿；I4 node.id/key 语义不变；I6 fork 签名逐字一致
+> （`fork({sessionId, atSeq?, increaseTitle?})`）；I7 archiveSession 路由 workspaceRegistry 仍在；
+> I28 SessionHeader 仍无 title；I30 installSection 未回归。**新契约点（非漂移）**：
+> ChatNodeOwnerProps 新增必填 `loadImage: MessageImageLoader` 下放（原 Omit 剔除形态撤销，插件未用、
+> 仍走 renderMessageImages，消费方无破坏）；sessionQuery.readSession 增强 `inheritedEventCount`
+> （读取侧可选字段）；事件集 `assistant/chunk` 移除 + `assistant/attempt` 新增（v2 迁移，插件只扫
+> user/message + turn/end 零交集）；SessionHandle 为 persistence seam 内部重构不外泄。
+> 结论：无插件破坏性变更，无需改码，升级后 `test:probe` 与 `verify:host` 机器化盯防继续有效。
+>
 > **0.1.2-alpha.4 核验（2026-09-02）**：`npm install -g @deepseek-ai/dsh@alpha`
 > 实装 alpha.4，reference/ 镜像重拉至 alpha.4 归档（13 文件，映射表未变），
 > `npm run check:upgrade` 三层门禁全绿（check:dsh 漂移一致 +
@@ -95,14 +110,20 @@
   尊重插件 priority 值，可恢复重试循环原始语义。`['user','steering']` 两 key 仍独立注册
   （kind 集合由 I5 探针盯防）。
 
-### I2 chat.node props：只有 renderMessageImages，无 loadImage
+### I2 chat.node props：renderMessageImages 为图片渲染入口（0.1.3 起 loadImage 下放）
 - **依赖的官方行为**：`renderMessageImages({ images: [{attachment}], align })` 是图片
-  渲染唯一入口；`loadImage` 被 `Omit<MessageImagesOwnerProps,'loadImage'>` 明确剔除。
-- **出处**：`dsh-client-ui-chat/lib/types/client/contract/slots.d.ts`
-  （`Omit<MessageImagesOwnerProps,'loadImage'>`；0.1.2-alpha.1 由 ui-conversation 迁入，字段不变）。
-- **探针/单测**：`tests/probe/api-surface.test.js`（renderMessageImages 存在 + Omit 整型匹配）。
+  渲染入口；`loadImage` 在 0.1.2-alpha.1 被 `Omit<MessageImagesOwnerProps,'loadImage'>`
+  明确剔除，**0.1.3-alpha.1 起作为必填 `loadImage: MessageImageLoader` 直接下放**
+  （session 授权图片加载器，供 chat-node 渲染附件展示槽用）。插件撤回重绘仍只走
+  `renderMessageImages`，读 `loadImage` 属误用。
+- **出处**：`dsh-client-ui-chat/lib/types/client/contract/slots.d.ts`（ChatNodeOwnerProps；
+  0.1.3-alpha.1 实证 `loadImage: MessageImageLoader` 与 `renderMessageImages` 并存、
+  Omit 剔除形态撤销；ui-conversation 构建产物仍保留历史 Omit 类型命名）。
+- **探针/单测**：`tests/probe/api-surface.test.js`（renderMessageImages 存在 + Omit 整型匹配；
+  0.1.3-alpha.1 产物下仍全绿——Omit 类型在 ui-conversation 产物中以历史形态保留）。
 - **失效症状**：图片永久无声空白（issue #9：读不存在的 loadImage，守卫 return，零报错）。
-- **复查动作**：重跑 test:probe；确认 images 仍传 image 块数组（非裸 attachment）。
+- **复查动作**：重跑 test:probe；确认 images 仍传 image 块数组（非裸 attachment）；
+  若未来去掉历史 Omit 类型导致探针红，改为断言 loadImage 下放形态即可。
 
 ### I3 session-scope slot props 合成：props.sessionId 由 kit 注入
 - **依赖的官方行为**：`props = {...kit, ...injected, ...slotInjected.props, ...ownerProps}`，

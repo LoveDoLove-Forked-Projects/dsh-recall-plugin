@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.2-rc.1**（tag `dsh-v0.1.2-rc.1`，commit `a66e4702`，2026-09-03 发布；rc 前基线 alpha.5 `db6bdc35`、alpha.4 `4e84901e` 已并入）
+> * 对应版本：**dsh 0.1.3-alpha.1**（tag `dsh-v0.1.3-alpha.1`，commit `d347e703`，2026-09-04 发布；**npm 未发布**，本地源码构建实装；rc 前基线 alpha.5 `db6bdc35`、alpha.4 `4e84901e`、rc.1 `a66e4702` 均已并入）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -135,7 +135,8 @@ interface ChatNodeOwnerProps {
   openFile(path: string): void
   inspectCall(callId: ToolCallId): void
   forkAt(seq: number): void
-  renderMessageImages: RenderMessageImages   // 图片唯一入口（I2：props 无裸 loadImage）
+  loadImage: MessageImageLoader   // **0.1.3-alpha.1 新增下放**（原 Omit 剔除字段；session 授权图片加载器，chat-node 渲染附件展示槽用；插件未用，仍走 renderMessageImages）
+  renderMessageImages: RenderMessageImages   // 图片渲染入口（I2 保留；props 曾剔除 loadImage、0.1.3 起随 loadImage 一并下放）
   fileMentions(owner: TurnTailOwnerProps): MarkdownFileMentions | undefined
   turnProcess?: TurnProcessOwnerProps        // 新增：折叠过程状态（插件未读）
 }
@@ -279,11 +280,11 @@ interface ChatNodeOwnerProps {
 
 ## 四、会话事件类型全集（51 种）
 
-已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.2-alpha.1）：
+已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.3-alpha.1）：
 
 ```
 agent-preset/selected   agent/inbox/spliced    approval/asked      approval/decided
-approval/policy         assistant/chunk        assistant/message   command/done
+approval/policy         assistant/attempt      assistant/message   command/done
 command/run             compaction/end         compaction/prune    compaction/start
 compaction/summary      feedback/record        goal/change         hook/invoked
 hook/result             llm/retry              llm/retry-started   model/selection(*新)
@@ -299,7 +300,7 @@ tool/result             turn/end               turn/start          user/message
 web/deepseek-search-llm-request
 ```
 
-0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**只增未改未删**——消费方按需扫描（如插件 scanCutSeq）天然向后兼容。
+0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v2 对旧 v0/v1 日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后 v2 密集重映射语义。
 
 ## 五、内置 Tool 包清单（19 个）
 
@@ -358,4 +359,17 @@ web/deepseek-search-llm-request
 > 若锚点落在 open turn（运行中的 agent 回合）官方会拒 fork 而非裁剪——撤回触发时若目标消息位于
 > 运行中回合内需留意（P0-1 agentBusy 拦截已挡运行中撤回，实际触发面小）。逐条结论见 compat-audit.md
 > 头部 rc.1 核验段；机器化断言：`check:upgrade` 三层门禁全绿（check:dsh 漂移一致 + test:probe 31/31 + verify:host 装配断言通过）。
+>
+> **0.1.3-alpha.1 升级核查（2026-09-07）**：**npm 未发布**（dist-tags latest 仍 0.1.2-rc.1），因此本地以
+> `dsh-v0.1.3-alpha.1` tag 源码构建（检出 `D:\workspace\DSH\deepseek-harness0.1.3-alpha.1`，`pnpm install` + `pnpm run build`）
+> 并经 `npm link` 全局实装 0.1.3-alpha.1（依赖全局 @deepseek-ai/dsh 的探针/核验全链路同源生效；契约#pragma
+> 评估先行于 [upgrade-assessments/dsh-0.1.3-alpha.1.md](upgrade-assessments/dsh-0.1.3-alpha.1.md)，本篇为实装核验）。
+> 关键产物证据链抽查与评估结论一致——fork 签名逐字一致（§1.1 sessions）、`renderMessageImages` 仍在且
+> **`ChatNodeOwnerProps` 新增必填 `loadImage: MessageImageLoader` 下放**（§1.2 chat.node；原 Omit 剔除形态撤销，
+> 插件未用 loadImage、仍走 renderMessageImages，消费方无破坏）、`sessionQuery.readSession` 仅增强 `inheritedEventCount`
+> （读取侧可选字段，§1.1 sessionQuery 不变）、SessionHeader 仍无 title（§1.1 sessionQuery）、事件集
+> `assistant/chunk` 移除 + `assistant/attempt` 新增（§四；插件只扫 user/message + turn/end，零交集）、
+> SessionHandle 为 persistence seam 内部重构不外泄（`ctx.sessions` 契约面不变）。机器化断言：`check:upgrade`
+> 三层门禁全绿（check:dsh 漂移一致 + test:probe 31/31 + verify:host 装配断言通过）。逐条结论见 compat-audit.md
+> 头部 0.1.3-alpha.1 核验段。结论：接口层面零破坏，无需改码。
 

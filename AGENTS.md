@@ -189,7 +189,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 
-* I2 chat.node props 无 `loadImage`，图片入口是 `renderMessageImages`。
+* I2 chat.node props 有 `renderMessageImages` 与 `loadImage`（0.1.3-alpha.1 起下放），图片渲染走 `renderMessageImages`。
 
 * I3 session-scope slot props 合成：`props.sessionId` 由 kit 注入。
 
