@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.7] - 2026-09-08
+
+### 变更
+
+- **dsh 0.1.3-alpha.2 兼容性声明（peer 范围扩窗）**：本地全局实装 `@deepseek-ai/dsh@0.1.3-alpha.2`（npm dist-tag alpha）后跑 `npm run check:upgrade` 三层门禁全绿（check:dsh 漂移一致 + test:probe 31 项探针 + verify:host 装配断言）；`package.json` 的 `dsh.compatibility.dshReleases` 矩阵补 `0.1.3-alpha.2` 为 `compatible`，7 个 `@deepseek-ai/dsh-*` 的 `peerDependencies` 范围沿 2.3.4 先例补 `>=0.1.3-alpha.2 <=0.1.3-alpha.2` 逐 tuple OR 段（npm semver prerelease 规则要求同 tuple 比较器才放行该 prerelease 线）。契约逐项 diff 零破坏（fork/sessionQuery/chat.node 槽位/settings 槽位/shell.resolve/session-event 域均不变），alpha.1 已知的冷会话性能回退（v1→v2 迁移全量内存物化）已被官方迁移流式化修复，插件冷读路径直接受益，无需任何代码改动——本插件源码零变更，`lib/` 产物与 2.3.6 相同。评估实证沉淀于 `docs/upgrade-assessments/dsh-0.1.3-alpha.2.md`，兼容性台账与契约文档已同步。
+
 ## [2.3.6] - 2026-09-06
 
 ### 修复
