@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.3-alpha.1**（tag `dsh-v0.1.3-alpha.1`，commit `d347e703`，2026-09-04 发布；**npm 未发布**，本地源码构建实装；rc 前基线 alpha.5 `db6bdc35`、alpha.4 `4e84901e`、rc.1 `a66e4702` 均已并入）
+> * 对应版本：**dsh 0.1.3-alpha.2**（tag `dsh-v0.1.3-alpha.2`，commit `82a5fd6`，2026-09-07 发布；**npm 已发布**（dist-tag `alpha`），`npm install -g` 全局实装；前序 0.1.3-alpha.1 `d347e703` 及 rc.1 `a66e4702` 等基线均已并入）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -372,4 +372,17 @@ web/deepseek-search-llm-request
 > SessionHandle 为 persistence seam 内部重构不外泄（`ctx.sessions` 契约面不变）。机器化断言：`check:upgrade`
 > 三层门禁全绿（check:dsh 漂移一致 + test:probe 31/31 + verify:host 装配断言通过）。逐条结论见 compat-audit.md
 > 头部 0.1.3-alpha.1 核验段。结论：接口层面零破坏，无需改码。
+>
+> **0.1.3-alpha.2 升级核查（2026-09-08）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.3-alpha.2），
+> `npm install -g @deepseek-ai/dsh@0.1.3-alpha.2` 全局实装（依赖同步 dsh-settings 0.1.3-alpha.2、
+> schemastery 3.18.2），reference/ 镜像重拉归档（13 文件映射表未变；仅 09-architecture.md 有官方
+> 文字修订——agent-loop 请求不可变语义、migration 只读 open 不发布后继/写 open 排他发布与 interrupted
+> turn/end 补齐规则细化，非 API 契约变化），`npm run check:upgrade` 三层门禁全绿（check:dsh 漂移一致 +
+> test:probe 31/31 + verify:host 装配断言通过）。重查关键产物证据链：I1/I29 guard.d.ts shadowing priority
+> 分配不变、I2 renderMessageImages 与 loadImage 并存不变（0.1.3-alpha.1 下放形态延续）、I5 ChatNodeKind
+> 全集探针断言全绿、I4 node.id/key 语义不变、I6 fork 签名逐字一致、I28 SessionHeader 仍无 title、I30
+> installSection 未回归——与 0.1.3-alpha.1 核验结论一致，alpha.2 无新增契约点。**兼容声明同步扩展**：
+> compat-audit 头部 0.1.3-alpha.1 核验段、compat matrix I1-I30 目标条目、package.json `dsh.compatibility.dshReleases`
+> 与 7 个 peerDependencies 范围各补 `0.1.3-alpha.2` tuple（沿 2.3.4 逐 tuple OR 窗口先例；CHANGELOG 待发版 2.3.7
+> 时补记）。结论：接口层面零破坏，无需改码。
 

@@ -7,6 +7,22 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.3-alpha.2 核验（2026-09-08）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.3-alpha.2，
+> `dsh-v0.1.3-alpha.2` tag commit `82a5fd6`，2026-09-07 发布），`npm install -g @deepseek-ai/dsh@0.1.3-alpha.2`
+> 全局实装（依赖 dsh-settings 0.1.3-alpha.2、schemastery 3.18.2），reference/ 镜像重拉归档
+> （13 文件，映射表未变；仅 09-architecture.md 官方文字修订——agent-loop 请求不可变语义、migration
+> 只读 open 不发布后继/写 open 排他发布与 interrupted turn/end 补齐规则细化，非 API 契约变化），
+> `npm run check:upgrade` 三层门禁全绿（check:dsh 漂移一致 + test:probe 31/31 + verify:host 装配断言通过，
+> peer 兼容声明随本次扩展见下）。重查关键产物证据链：I1/I29 guard.d.ts shadowing priority 分配不变；
+> I2 renderMessageImages 与 loadImage 并存不变（0.1.3-alpha.1 下放形态延续）；I5 ChatNodeKind 全集探针
+> 断言全绿；I4 node.id/key 语义不变；I6 fork 签名逐字一致（`fork({sessionId, atSeq?, increaseTitle?})`）；
+> I7 archiveSession 路由 workspaceRegistry 仍在；I28 SessionHeader 仍无 title；I30 installSection 未回归。
+> alpha.2 相对 alpha.1 **无新增契约点**（官方变更集中在 session migration 语义细化与 agent-loop 文档，
+> 与插件耦合点零交集）。**兼容声明同步扩展**：package.json `dshReleases` 矩阵补
+> `0.1.3-alpha.2: compatible`、7 个 peerDependencies 范围各补 tuple `|| >=0.1.3-alpha.2 <=0.1.3-alpha.2`
+> （沿 2.3.4 逐 tuple OR 窗口先例；CHANGELOG 待发版 2.3.7 时补记）。结论：无插件破坏性变更，无需改码，
+> 升级后 `test:probe` 与 `verify:host` 机器化盯防继续有效。
+>
 > **0.1.3-alpha.1 核验（2026-09-07）**：**npm 未发布**（dist-tags latest 仍 0.1.2-rc.1），本地
 > `dsh-v0.1.3-alpha.1` tag 源码构建（检出 `D:\workspace\DSH\deepseek-harness0.1.3-alpha.1`，
 > `pnpm install` + `pnpm run build`）后 `npm link` 全局实装，reference/ 镜像重拉归档
