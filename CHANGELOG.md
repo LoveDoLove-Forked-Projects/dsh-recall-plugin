@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.8] - 2026-09-09
+
+### 变更
+
+- **dsh 0.1.5-alpha.1 兼容性声明（peer 范围扩窗）**：本地全局实装 `@deepseek-ai/dsh@0.1.5-alpha.1`（npm dist-tag `alpha`）后跑三层门禁——`test:probe` 31 项探针全绿、`verify:host` 装配断言通过、`check:dsh` peer 越界已消除。`package.json` 的 `dsh.compatibility.dshReleases` 矩阵补 `0.1.5-alpha.1` 为 `compatible`（并修正 2.3.7 遗漏的 `0.1.3-alpha.2` 条目），7 个 `@deepseek-ai/dsh-*` 的 `peerDependencies` 范围沿 2.3.4 先例补 `>=0.1.5-alpha.1 <=0.1.5-alpha.1` 逐 tuple OR 段。契约逐项 diff 零破坏：本次三项高风险变更逐一排除——① 移除 `ctx.agent`（单数）不影响插件（插件只用 `ctx.agents` 复数注册表）；② `Inbox` 改 type-only 插件零引用；③ **会话格式 V3**（V2→V3 迁移插入 `system/message` 事件并 remap seq，但保留原始 message id）——插件天然免疫：读取全走官方恢复后内存态（seq 坐标系与 `fork({atSeq})` 同源）、消息定位以 `data.id` 为主键、`cutSeqCache` 内存态不跨版本。事件全集 51→54 种（新增 `system/message`、`feedback/message-put`/`message-delete`，`tool/code-dispatch*` 更名 `tool/ptc-dispatch*`）为备忘面同步，`src/types/dsh-contract.ts` 事件 union 与 `docs/dsh-contract.md` §四随之更新，插件 `scanCutSeq` 只扫 `user/message`+`turn/end` 零交集。本插件源码零功能变更（仅类型备忘 + peer 声明 + 文档），`lib/` 产物与 2.3.7 相同。评估实证沉淀于 `docs/upgrade-assessments/dsh-0.1.5-alpha.1.md`，兼容性台账（`docs/compat-audit.md`）、契约文档（`docs/dsh-contract.md`）、官方文档镜像（`docs/reference/`，05/09/13 三份随官方文字修订重拉）与 README 安装兼容声明已同步。
+
 ## [2.3.7] - 2026-09-08
 
 ### 变更
