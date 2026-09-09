@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.3-alpha.2**（tag `dsh-v0.1.3-alpha.2`，commit `82a5fd6`，2026-09-07 发布；**npm 已发布**（dist-tag `alpha`），`npm install -g` 全局实装；前序 0.1.3-alpha.1 `d347e703` 及 rc.1 `a66e4702` 等基线均已并入）
+> * 对应版本：**dsh 0.1.5-alpha.1**（tag `dsh-v0.1.5-alpha.1`，commit `5dda764`，2026-09-09 发布；**npm 已发布**（dist-tag `alpha`），`npm install -g` 全局实装；前序 0.1.3-alpha.2 `82a5fd6` 等基线均已并入；Session format 升级至 V3）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -278,29 +278,29 @@ interface ChatNodeOwnerProps {
 
 **client 半专用**（Host 不可见）：`connection`、`locale`、`modules`/`clientModules`、`slots`/`uiRenderer`、`layout`、`uiSession`、`uiConversation`/`conversation`、`commandUi`、`inputTriggers`、`modelDirectories`、`chatFileMentions`、`settingsSchema`/`settingsScope`、`theme`、`uiWorkspace`、`timer`（cordis-client-runner 提供，声明后可用 `ctx.timeout` 等计时动词）
 
-## 四、会话事件类型全集（51 种）
+## 四、会话事件类型全集（54 种）
 
-已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.3-alpha.1）：
+已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.5-alpha.1）：
 
 ```
 agent-preset/selected   agent/inbox/spliced    approval/asked      approval/decided
 approval/policy         assistant/attempt      assistant/message   command/done
 command/run             compaction/end         compaction/prune    compaction/start
-compaction/summary      feedback/record        goal/change         hook/invoked
-hook/result             llm/retry              llm/retry-started   model/selection(*新)
-permission/preset       plan/mode              request/context     request/header
-sandbox/mode            schedule/change        session-log-deepseek/delivery-accepted(*新)
-session/end-seed        session/title          session/title-llm-request
-step/end                step/start             subagent/descriptor
-subagent/model-selection-policy(*新)           team/member         team/message/delivered
-team/message/queued     team/task              todo/write          tool-workflow/agent-end
-tool-workflow/agent-start                      tool-workflow/run-end
-tool-workflow/run-start tool/call              tool/code-dispatch  tool/code-dispatch-start
-tool/result             turn/end               turn/start          user/message
-web/deepseek-search-llm-request
+compaction/summary      feedback/message-delete feedback/message-put feedback/record
+goal/change             hook/invoked           hook/result         llm/retry
+llm/retry-started       model/selection        permission/preset   plan/mode
+request/context         request/header         sandbox/mode        schedule/change
+session-log-deepseek/delivery-accepted         session/end-seed    session/title
+session/title-llm-request                      step/end            step/start
+subagent/descriptor     subagent/model-selection-policy            system/message(*新)
+team/member             team/message/delivered team/message/queued team/task
+todo/write              tool-workflow/agent-end                    tool-workflow/agent-start
+tool-workflow/run-end   tool-workflow/run-start                    tool/call
+tool/ptc-dispatch(*改)  tool/ptc-dispatch-start(*改)               tool/result
+turn/end                turn/start             user/message        web/deepseek-search-llm-request
 ```
 
-0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v2 对旧 v0/v1 日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后 v2 密集重映射语义。
+0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**0.1.5-alpha.1（Session format v3）三处变化**：① 新增 `system/message`（系统提示词纳入消息历史，取代 `request/header` 的 `header.system` 字段）；② `tool/code-dispatch`/`tool/code-dispatch-start` 更名为 `tool/ptc-dispatch`/`tool/ptc-dispatch-start`（PTC 词汇规范化，读取侧 V2→V3 迁移会把旧 `ptc-dispatch` 重命名回 `code-dispatch` 供旧消费方，但 v3 原生写入用 `ptc-dispatch`）；③ 新增 `feedback/message-put`/`feedback/message-delete`（反馈独立提交）。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v3 对旧 v0/v1/v2 日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后密集重映射语义（V2→V3 会插入 `system/message` 事件并 remap seq，但保留原始 message id——插件以 id 为主键定位消息、以恢复后 seq 推导 cutSeq，坐标系与 fork 同源，不受影响）。
 
 ## 五、内置 Tool 包清单（19 个）
 
@@ -385,4 +385,22 @@ web/deepseek-search-llm-request
 > compat-audit 头部 0.1.3-alpha.1 核验段、compat matrix I1-I30 目标条目、package.json `dsh.compatibility.dshReleases`
 > 与 7 个 peerDependencies 范围各补 `0.1.3-alpha.2` tuple（沿 2.3.4 逐 tuple OR 窗口先例；CHANGELOG 待发版 2.3.7
 > 时补记）。结论：接口层面零破坏，无需改码。
+>
+> **0.1.5-alpha.1 升级核查（2026-09-09）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.5-alpha.1），
+> `npm install -g @deepseek-ai/dsh@0.1.5-alpha.1` 全局实装，reference/ 镜像重拉归档（13 文件映射表未变；
+> 05/09/13 三份有官方文字修订——09-architecture.md 新增「桌面应用」节 + agent-loop 系统提示词改经 `system/message`
+> 历史传递的语义细化 + 事件持久集补 `system/message`，非插件依赖的 API 契约变化），`npm run test:probe` 31/31
+> 全绿 + `npm run verify:host` 装配断言通过。重查关键产物证据链：I1/I29 guard.d.ts shadowing priority 不变、
+> I2 renderMessageImages 与 loadImage 并存不变、I6 fork 签名逐字一致（`sessions.d.ts`）、I28 SessionHeader 仍无
+> title、I30 installSection 未回归。**本次核心：Session format V3**——V2→V3 迁移插入 `system/message` 事件并
+> remap seq（`dsh-session-format-v2-to-v3/lib/index.js` 实读），但**保留原始 message id**；插件免疫根因三条：
+> ① 读取全走官方恢复后的内存态（`sessions.get`/`readSession` 返回 V3 态，seq 坐标系与 `fork({atSeq})` 同源）；
+> ② 消息定位以 `data.id` 为主键（迁移保留原 id，快照 tag 主键不受 seq 位移影响）；③ `cutSeqCache` 为内存态
+> （随 apply 重建，不跨版本陈旧）。**新契约点（非漂移，插件零消费）**：事件集新增 `system/message` +
+> `feedback/message-put`/`feedback/message-delete`、`tool/code-dispatch*` 更名 `tool/ptc-dispatch*`（§四已同步，
+> `src/types/dsh-contract.ts` union 同步至 54 种）；移除 `ctx.agent`（单数，插件用 `ctx.agents` 复数注册表零引用）；
+> `Inbox` 改 type-only（插件零引用）。**兼容声明同步扩展**：package.json `dshReleases` 矩阵补 `0.1.3-alpha.2`
+> （修正 2.3.7 遗漏）+ `0.1.5-alpha.1`，7 个 peerDependencies 范围各补 `>=0.1.5-alpha.1 <=0.1.5-alpha.1` tuple。
+> 机器化断言：`check:dsh` peer 越界已消除（仅余镜像/契约版本字段，本次同步）。评估实证见
+> [upgrade-assessments/dsh-0.1.5-alpha.1.md](upgrade-assessments/dsh-0.1.5-alpha.1.md)。结论：接口层面零破坏，无需改码。
 

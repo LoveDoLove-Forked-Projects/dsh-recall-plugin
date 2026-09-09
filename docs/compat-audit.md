@@ -7,6 +7,25 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.5-alpha.1 核验（2026-09-09）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.5-alpha.1，
+> `dsh-v0.1.5-alpha.1` tag commit `5dda764`，2026-09-09 发布），`npm install -g @deepseek-ai/dsh@0.1.5-alpha.1`
+> 全局实装，reference/ 镜像重拉归档（13 文件映射表未变；05/09/13 有官方文字修订——09 新增桌面应用节 +
+> 系统提示词改经 `system/message` 历史传递的 agent-loop 语义细化，非 API 契约变化），`test:probe` 31/31 +
+> `verify:host` 装配断言通过（check:dsh 报镜像/契约漂移与 peer 越界，本次同步处理）。重查关键产物证据链：
+> I1/I29 guard.d.ts shadowing priority 分配不变；I2 renderMessageImages 与 loadImage 并存不变；I4 node.id/key
+> 语义不变；I6 fork 签名逐字一致（`sessions.d.ts`）；I7 archiveSession 路由仍在；I28 SessionHeader 仍无 title；
+> I30 installSection 未回归。**本次核心变更：Session format V3**（一进两改：新增 `system/message`、
+> `tool/code-dispatch*` 更名 `tool/ptc-dispatch*`、新增 `feedback/message-put`/`message-delete`，全集 51→54 种）——
+> V2→V3 迁移插入 system 事件并 remap seq，但**保留原始 message id**；插件对 seq 位移免疫（读取全走官方恢复后
+> 内存态、消息定位以 id 为主键、cutSeqCache 内存态不跨版本），scanCutSeq 用 `e.seq` 实际值非数组下标，天然鲁棒。
+> 另两项 API 调整零交集：移除 `ctx.agent`（单数）——插件只用 `ctx.agents` 复数注册表（rg 实证零处单数引用）；
+> `Inbox` 改 type-only——插件零处 `Inbox`/`hasPending`/`claim` 引用。**兼容声明同步扩展**：package.json
+> `dshReleases` 矩阵补 `0.1.3-alpha.2`（修正 2.3.7 遗漏）+ `0.1.5-alpha.1`、7 个 peerDependencies 范围各补
+> `>=0.1.5-alpha.1 <=0.1.5-alpha.1` tuple；`src/types/dsh-contract.ts` 事件 union 同步至 54 种（备忘面，零消费）。
+> 评估实证见 upgrade-assessments/dsh-0.1.5-alpha.1.md。结论：接口层面零破坏，无需改码，升级后 `test:probe`
+> 与 `verify:host` 机器化盯防继续有效；V3 迁移语义待 0.1.5 正式版发布后按本段定点复查（重点：旧 V2 会话
+> 撤回切割实弹 + `assistant/attempt`/`system/message` 是否进入插件消费面）。
+>
 > **0.1.3-alpha.2 核验（2026-09-08）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.3-alpha.2，
 > `dsh-v0.1.3-alpha.2` tag commit `82a5fd6`，2026-09-07 发布），`npm install -g @deepseek-ai/dsh@0.1.3-alpha.2`
 > 全局实装（依赖 dsh-settings 0.1.3-alpha.2、schemastery 3.18.2），reference/ 镜像重拉归档

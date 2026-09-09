@@ -7,16 +7,16 @@
 // 运行时守卫（typeof 检查）不能补救错误假设——字段本不存在时守卫只是静默
 // no-op（issue #9 实证），故类型按「文档承诺 + 探针钉真实实例」双锚。
 
-// ---- 会话事件（core/session，51 种）----
+// ---- 会话事件（core/session，54 种）----
 
-// 0.1.2-alpha.2 已知事件类型全集（dsh-contract.md §四；只增未改未删）
+// 0.1.5-alpha.1 已知事件类型全集（dsh-contract.md §四；Session format v3）
 export type SessionEventType =
   | 'agent-preset/selected'
   | 'agent/inbox/spliced'
   | 'approval/asked'
   | 'approval/decided'
   | 'approval/policy'
-  | 'assistant/chunk'
+  | 'assistant/attempt'
   | 'assistant/message'
   | 'command/done'
   | 'command/run'
@@ -24,6 +24,8 @@ export type SessionEventType =
   | 'compaction/prune'
   | 'compaction/start'
   | 'compaction/summary'
+  | 'feedback/message-delete'
+  | 'feedback/message-put'
   | 'feedback/record'
   | 'goal/change'
   | 'hook/invoked'
@@ -45,6 +47,7 @@ export type SessionEventType =
   | 'step/start'
   | 'subagent/descriptor'
   | 'subagent/model-selection-policy'
+  | 'system/message'
   | 'team/member'
   | 'team/message/delivered'
   | 'team/message/queued'
@@ -55,8 +58,8 @@ export type SessionEventType =
   | 'tool-workflow/run-end'
   | 'tool-workflow/run-start'
   | 'tool/call'
-  | 'tool/code-dispatch'
-  | 'tool/code-dispatch-start'
+  | 'tool/ptc-dispatch'
+  | 'tool/ptc-dispatch-start'
   | 'tool/result'
   | 'turn/end'
   | 'turn/start'
