@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.9] - 2026-09-10
+
+### 变更
+
+- **dsh 0.1.5-alpha.2 兼容性声明（peer 范围扩窗）**：本地全局实装 `@deepseek-ai/dsh@0.1.5-alpha.2`（npm dist-tag `alpha`，tag commit `b2e3b2a`）后跑三层门禁——`test:probe` 31 项探针全绿、`verify:host` 装配断言通过、`check:dsh` 镜像/契约漂移与 peer 越界已消除。`package.json` 的 `dsh.compatibility.dshReleases` 矩阵补 `0.1.5-alpha.2` 为 `compatible`，7 个 `@deepseek-ai/dsh-*` 的 `peerDependencies` 范围沿 2.3.8 先例补 `>=0.1.5-alpha.2 <=0.1.5-alpha.2` 逐 tuple OR 段。契约逐项 diff 零破坏：全局实装包 tree-SHA 比对 alpha.1↔alpha.2，插件消费的类型源（`dsh-session` types、ui-chat/ui-conversation `slots.d.ts`、session-controller `sessions.d.ts`、settings-plugins `slot-contract.d.ts`）全部未变。本次唯一需深挖项「Web 插件面板 API 调整——原 `conversation` Slot 迁移为 `main` 的 `conversation` key」逐一排除：顶层布局槽位确已改名（`ConversationSlotProps = PropsRuntime<'main.conversation'>`），但插件从不注册顶层 `conversation` slot，只用 `conversation.chat.node`（keyed/session，路径不变）与 `settings.plugin.item`（不变）；`ctx.get('conversation')`（refillDraft 回填）是服务访问（`InputHub`）非 slot，与被改名槽位是两回事。新增持久事件 `deliverables/presented`（模型显式文件交付，`dsh-tool-present` declaration merging）插件零消费。其余变更（Sidebar 文档预览、`/feedback` 明细、pi-ai 诊断、Base URL 校验、文件夹选择器、Composer 占位、子代理工具指导、MCP 分页、`fs-ext` 免编译、minimal 默认工具、设置本地化）均与撤回链路零交集。本插件源码零功能变更（仅 peer 声明 + 文档），`lib/` 产物与 2.3.8 相同。评估实证沉淀于 `docs/upgrade-assessments/dsh-0.1.5-alpha.2.md`，兼容性台账（`docs/compat-audit.md`）、契约文档（`docs/dsh-contract.md`）、官方文档镜像（`docs/reference/`，仅 09-architecture.md 一行措辞变化）与 README 安装兼容声明已同步。
+
 ## [2.3.8] - 2026-09-09
 
 ### 变更
