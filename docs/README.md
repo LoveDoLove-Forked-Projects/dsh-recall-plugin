@@ -12,7 +12,8 @@ docs/
 ├── reference/       # 官方文档本地镜像（随仓库提交；索引与重拉方式见 reference/README.md）
 ├── plans/               # 计划文档族（状态即目录：pending/ 待办，completed/ 已完成）
 │   ├── improvement-plan.md      # 总索引（单一事实源：计划清单、状态与全局顺序）
-│   ├── research-competitors.md  # 竞品调研（改进计划的调研底稿，静态归档，不参与状态分目录）
+│   ├── research-competitors.md  # 竞品调研第一/二轮（2026-08-26/28，静态归档，不参与状态分目录）
+│   ├── research-competitors-2026-09.md  # 竞品六维度评估第四轮（2026-09-09，三竞品新版本，增量输入 plan-competitor-ux）
 │   ├── pending/                 # 待实施 / 实施中
 │   │   └── plan-p2.md           # P2 打磨项（按需挑选）
 │   └── completed/               # 已实施（原地保留实施记录与验收依据，完成不删除）
@@ -30,7 +31,8 @@ docs/
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏/行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿/性能回退已修复）
-│   └── dsh-0.1.5-alpha.1.md    # 0.1.5-alpha.1 影响评估（2026-09-09，接口零破坏/会话格式 V3 天然免疫）
+│   ├── dsh-0.1.5-alpha.1.md    # 0.1.5-alpha.1 影响评估（2026-09-09，接口零破坏/会话格式 V3 天然免疫）
+│   └── dsh-0.1.5-alpha.2.md    # 0.1.5-alpha.2 影响评估（2026-09-10，依赖面源码零 diff/面板槽位迁移零交集）
 └── screenshots/     # README 与文档引用的截图素材（只增不删，删前查引用）
 ```
 

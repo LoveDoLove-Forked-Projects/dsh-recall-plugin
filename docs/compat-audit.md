@@ -7,6 +7,25 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.5-alpha.2 核验（2026-09-10）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.5-alpha.2，
+> `dsh-v0.1.5-alpha.2` tag commit `b2e3b2a`，2026-09-09 发布），`npm install -g @deepseek-ai/dsh@0.1.5-alpha.2`
+> 全局实装。`npm run check:upgrade` 三层门禁：`test:probe` 31/31 + `verify:host` 装配断言通过；`check:dsh`
+> 报镜像/契约漂移与 peer 越界，本次同步处理。**依赖面源码零 diff**：tree-SHA 比对 alpha.1↔alpha.2，插件消费的
+> 类型源（`dsh-session/lib/types/types.d.ts`、`dsh-client-ui-chat`/`dsh-client-ui-conversation` 的 `slots.d.ts`、
+> `dsh-api-session-controller` 的 `sessions.d.ts`、`dsh-client-ui-settings-plugins` 的 `slot-contract.d.ts`）
+> 全部未变；reference/ 镜像 13 源中仅 `09-architecture.md` 一行措辞变化（agentTeams「私有」→「公开发布」，
+> 与插件零交集），其余 12 源 SHA 未动。**本次唯一需深挖项：release notes「Web 插件面板 API 调整——原 `conversation`
+> Slot 迁移为 `main` 的 `conversation` key」**——实证：顶层布局槽位确已改名（`ConversationSlotProps =
+> PropsRuntime<'main.conversation'>`），但插件从不注册顶层 `conversation` slot，只用 `conversation.chat.node`
+> （keyed/session，路径不变）与 `settings.plugin.item`（不变）；`ctx.get('conversation')`（refillDraft 回填）
+> 是**服务**访问（`InputHub`，`ctx.conversation.input`）非 slot，与被改名的槽位是两回事，不受影响。其余变更
+> （Sidebar 文档预览、模型交付文件、`/feedback` 明细、pi-ai 配置、Base URL 校验、文件夹选择器、Composer 占位、
+> 子代理工具指导、MCP 分页、`fs-ext` 编译修复、minimal 默认工具、设置本地化）均与撤回链路零交集。**兼容声明同步扩展**：
+> package.json `dshReleases` 矩阵补 `0.1.5-alpha.2: compatible`、7 个 peerDependencies 各补 `>=0.1.5-alpha.2
+> <=0.1.5-alpha.2` tuple；reference/README「归档 dsh 版本」与 dsh-contract.md「对应版本」同步至 0.1.5-alpha.2。
+> 评估实证见 upgrade-assessments/dsh-0.1.5-alpha.2.md。结论：接口层面零破坏、行为层面无回归，无需改码；
+> alpha.1 遗留观察项（旧 V2 会话撤回切割实弹、带文件附件消息重绘、本地 POSIX 路径图片重绘）仍待人工冒烟。
+>
 > **0.1.5-alpha.1 核验（2026-09-09）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.5-alpha.1，
 > `dsh-v0.1.5-alpha.1` tag commit `5dda764`，2026-09-09 发布），`npm install -g @deepseek-ai/dsh@0.1.5-alpha.1`
 > 全局实装，reference/ 镜像重拉归档（13 文件映射表未变；05/09/13 有官方文字修订——09 新增桌面应用节 +

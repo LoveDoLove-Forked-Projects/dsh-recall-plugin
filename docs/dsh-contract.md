@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.5-alpha.1**（tag `dsh-v0.1.5-alpha.1`，commit `5dda764`，2026-09-09 发布；**npm 已发布**（dist-tag `alpha`），`npm install -g` 全局实装；前序 0.1.3-alpha.2 `82a5fd6` 等基线均已并入；Session format 升级至 V3）
+> * 对应版本：**dsh 0.1.5-alpha.2**（tag `dsh-v0.1.5-alpha.2`，commit `b2e3b2a`，2026-09-09 发布；**npm 已发布**（dist-tag `alpha`），`npm install -g` 全局实装；前序 0.1.5-alpha.1 `5dda764` 等基线均已并入；Session format 为 V3）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
