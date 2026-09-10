@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.10] - 2026-09-10
+
+### 变更
+
+- **dsh 0.1.5-rc.1 兼容性声明（peer 范围扩窗）**：本地全局实装 `@deepseek-ai/dsh@0.1.5-rc.1`（npm dist-tag `latest`/`next`，0.1.5 系列首个候选版本，tag commit `183f08e`）后跑三层门禁——`test:probe` 31 项探针全绿、`verify:host` 装配断言通过、`npm test` 307 项通过、`check:dsh` 镜像/契约漂移与 peer 越界已消除。`package.json` 的 `dsh.compatibility.dshReleases` 矩阵补 `0.1.5-rc.1` 为 `compatible`，7 个 `@deepseek-ai/dsh-*` 的 `peerDependencies` 范围沿 2.3.8/2.3.9 先例补 `>=0.1.5-rc.1 <=0.1.5-rc.1` 逐 tuple OR 段。契约核验：隔离安装 alpha.2 全量依赖树与全局 rc.1 内嵌包做 tree-SHA 比对，插件消费面 12 个包（`dsh-session`、ui-chat/ui-conversation `slots.d.ts`、session-controller `sessions.d.ts`、settings-plugins `slot-contract.d.ts`、`dsh-settings`/`dsh-shell`/`dsh-session-query`/`dsh-host-webserver`/`dsh-sandbox-policy`、`cordis`、`schemastery`）目录树哈希全部逐字节相同——rc.1 相对 alpha.2 是纯发布层推进，无契约变化。release notes 为 v0.1.2-rc.1 以来的汇总，三项开发者 API 调整（移除 `ctx.agent` 单数、`Inbox` 改 type-only、Web 面板 `conversation`→`main.conversation`）均已在 alpha.1/alpha.2 逐项排除，rc.1 无新增契约点。官方文档镜像按 rc.1 tag 重拉核验：13 源与 alpha.2 归档内容零差异。本插件源码零功能变更（仅 peer 声明 + 文档），`lib/` 产物与 2.3.9 相同。评估实证沉淀于 `docs/upgrade-assessments/dsh-0.1.5-rc.1.md`，兼容性台账（`docs/compat-audit.md`）、契约文档（`docs/dsh-contract.md`）、官方文档镜像索引（`docs/reference/README.md`）与 README 安装兼容声明已同步。
+
 ## [2.3.9] - 2026-09-10
 
 ### 变更
