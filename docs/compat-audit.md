@@ -7,6 +7,22 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.5-rc.1 核验（2026-09-10）**：**npm 已发布**（dist-tag `latest` 与 `next` 指向 0.1.5-rc.1，
+> `dsh-v0.1.5-rc.1` tag commit `183f08e`，2026-09-10 发布；0.1.5 系列首个候选版本，汇总自 v0.1.2-rc.1
+> 以来的变更），`npm install -g @deepseek-ai/dsh@0.1.5-rc.1` 全局实装。三层门禁：`test:probe` 31/31 +
+> `verify:host` 装配断言通过；`check:dsh` 报镜像/契约漂移与 peer 越界，本次同步处理。**依赖面源码零 diff**：
+> tree-SHA 比对 alpha.2↔rc.1，插件消费的包（`dsh-session`、`dsh-client-ui-chat`、`dsh-client-ui-conversation`、
+> `dsh-api-session-controller`、`dsh-client-ui-settings-plugins`、`dsh-settings`、`dsh-shell`、`dsh-session-query`、
+> `dsh-host-webserver`、`dsh-sandbox-policy`、`cordis`、`schemastery`）目录树哈希**全部逐字节相同**——rc.1 相对
+> alpha.2 是纯发布层推进（版本号 + 依赖 pin），无契约变化。reference/ 镜像按 rc.1 tag 重拉，13 源与 alpha.2
+> 归档**内容零差异**（仅 11 号文件换行符 CRLF/LF 噪声，`--ignore-cr-at-eol` 比对为空）。release notes 中三项
+> 开发者相关 API 调整（移除 `ctx.agent` 单数、`Inbox` 改 type-only、Web 面板 `conversation`→`main.conversation`）
+> 均已在 alpha.1/alpha.2 逐项排除（见对应核验段），rc.1 无新增契约点。**兼容声明同步扩展**：package.json
+> `dshReleases` 矩阵补 `0.1.5-rc.1: compatible`、7 个 peerDependencies 各补 `>=0.1.5-rc.1 <=0.1.5-rc.1` tuple；
+> reference/README「归档 dsh 版本」与 dsh-contract.md「对应版本」同步至 0.1.5-rc.1。评估实证见
+> upgrade-assessments/dsh-0.1.5-rc.1.md。结论：接口层面零破坏、行为层面无回归，无需改码；alpha.1 遗留观察项
+> （旧 V2 会话撤回切割实弹、带文件附件消息重绘、本地 POSIX 路径图片重绘）仍待人工冒烟。
+>
 > **0.1.5-alpha.2 核验（2026-09-10）**：**npm 已发布**（dist-tag `alpha` 指向 0.1.5-alpha.2，
 > `dsh-v0.1.5-alpha.2` tag commit `b2e3b2a`，2026-09-09 发布），`npm install -g @deepseek-ai/dsh@0.1.5-alpha.2`
 > 全局实装。`npm run check:upgrade` 三层门禁：`test:probe` 31/31 + `verify:host` 装配断言通过；`check:dsh`
