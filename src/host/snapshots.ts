@@ -91,8 +91,16 @@ export function parseDiffOutput(text: string, isWin: boolean, maxChanges: number
   return { changes, total: finalTotal, truncated: finalTotal > changes.length, treeId }
 }
 
+// 扫描结果的完整形态：cut 为切点 seq，found 为事件序列里是否存在该消息。
+// 「消息不存在」（读取面缺了 fork 继承前缀等）与「消息在、但其前无 turn/end」
+// （真·首条）在数值上都折成 null；读取路径的降级判断必须区分二者，故单列 found。
+export interface CutSeqScan {
+  cut: number | null
+  found: boolean
+}
+
 // 在事件序列里找“该消息之前最近一次 turn/end 的 seq”。
-export function scanCutSeq(events: SessionEvent[], messageId: string): number | null {
+export function scanCutSeqDetail(events: SessionEvent[], messageId: string): CutSeqScan {
   let anchor = -1
   for (let i = 0; i < events.length; i++) {
     const e = events[i]
@@ -101,12 +109,26 @@ export function scanCutSeq(events: SessionEvent[], messageId: string): number | 
       break
     }
   }
-  if (anchor < 0) return null
+  if (anchor < 0) return { cut: null, found: false }
   for (let i = anchor - 1; i >= 0; i--) {
     const e = events[i]
-    if (e && e.type === 'turn/end' && typeof e.seq === 'number') return e.seq
+    if (e && e.type === 'turn/end' && typeof e.seq === 'number') return { cut: e.seq, found: true }
   }
-  return null
+  return { cut: null, found: true }
+}
+
+export function scanCutSeq(events: SessionEvent[], messageId: string): number | null {
+  return scanCutSeqDetail(events, messageId).cut
+}
+
+// 释放 sessionQuery 观测租约。官方在租约对象上装 Symbol.dispose（prepared 缓存
+// 项靠它减引用，漏释放会卡住淘汰）；tsconfig 为 ES2022、无该符号的类型，运行时
+// 探测即可——旧版服务/旧 Node 无该符号时静默跳过。
+function disposeLease(lease: unknown): void {
+  const disposeSymbol = (Symbol as unknown as { dispose?: symbol }).dispose
+  if (!disposeSymbol || lease === null || typeof lease !== 'object') return
+  const dispose = (lease as Record<symbol, unknown>)[disposeSymbol]
+  if (typeof dispose === 'function') (dispose as () => void).call(lease)
 }
 
 // H1：回退失败后的救援编排（模块级纯逻辑，deps 注入副作用，供单测钉三分支）。
@@ -612,8 +634,17 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   }
 
   // 解析“整段回退”的会话切点：优先读 live 会话的内存事件（零 IO、毫秒级），
-  // 冷会话回退到 sessionQuery.readSession；结果按 (会话, 消息) 缓存——
-  // 消息一旦入日志，其之前的 turn/end 永不变化，缓存终身有效。
+  // 冷会话走 sessionQuery；结果按 (会话, 消息) 缓存——消息一旦入日志，其之前的
+  // turn/end 永不变化，缓存终身有效。
+  //
+  // 读取面降级链（0.1.5-rc.2 实测，I33）：readSession 对 seeded 会话（本插件每次
+  // 撤回 fork 出的子会话即此类）恒抛——官方内部用 Session.create 校验，快照模式
+  // 要求 seed 恰等于 fork 继承前缀，而读取侧交给它的是全量日志（继承前缀 + 自身
+  // 事件），inheritedEventCount ≠ log.length 直接报错。此前 catch 把异常静默折成
+  // null，与“真首条”不可分——子会话里点任何消息都显示“该消息是本会话中第一条
+  // 用户消息”（误报）。降级改用 observeSession：它经 Session.fromRestore 恢复
+  //（restore 模式不设该约束），租约的 events 是全量逻辑日志、继承前缀可见，切点
+  // 沿用原 seq 空间，对 fork(atSeq) 仍然有效。
   async function resolveCutSeq(sessionId: string | null, messageId: string | null): Promise<number | null> {
     if (!sessionId || !messageId) return null
     const cacheKey = String(sessionId) + '\u0000' + String(messageId)
@@ -625,11 +656,31 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     } else {
       const query = ctx.get<SessionQueryEngine>('sessionQuery')
       if (query) {
+        // 第一跳：readSession。抛错、或消息根本没出现在它给的事件里（读取面缺
+        // 继承前缀的版本差异）时都换下一跳——只有「消息在、其前无 turn/end」
+        // 才是可信的“首条”结论。
+        let fallback = false
         try {
           const log = await query.readSession(sessionId)
-          result = scanCutSeq(Array.isArray(log && log.events) ? log.events : [], messageId)
+          const detail = scanCutSeqDetail(Array.isArray(log && log.events) ? log.events : [], messageId)
+          result = detail.cut
+          fallback = !detail.found
         } catch (error) {
-          result = null
+          fallback = true
+        }
+        // 第二跳：observeSession（契约可选——旧版 dsh 无此 API 时维持原行为）。
+        // 租约必须显式释放；两跳都失败才落到 null。
+        if (fallback && typeof query.observeSession === 'function') {
+          try {
+            const lease = await query.observeSession(sessionId)
+            try {
+              result = scanCutSeq(lease && Array.isArray(lease.events) ? lease.events : [], messageId)
+            } finally {
+              disposeLease(lease)
+            }
+          } catch (error) {
+            result = null
+          }
         }
       }
     }
