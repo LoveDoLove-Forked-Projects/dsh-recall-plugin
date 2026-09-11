@@ -11,21 +11,31 @@
 ![DSH](https://img.shields.io/badge/DSH-0.1.1--rc.1-blue)
 ![DSH](https://img.shields.io/badge/DSH-Desktop-blue)
 ---
-**Under any message you've sent**, **click "↶ Recall"**, **and both your workspace files and the conversation history roll back to the moment right before that message was sent** (DSH 0.1.1-rc.2).
+Under any message you've sent, click "↶ Recall" — **both your workspace files and the conversation history roll back to the moment right before that message was sent** (DSH 0.1.1-rc.2).
 ---
+
+Files and conversation roll back together: the workspace is first snapshotted into an independent shadow git repository, and a recall uses it to restore files to their state before that message; the conversation is rewound through DSH's official `sessions.fork` to the turn boundary before it. Snapshots never touch your project's own git and live under `$DSH_HOME` by default; the original session is archived and can be recovered anytime. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
 
 [Changelog](CHANGELOG.md)
 
+## Table of Contents
+
+- [UI Preview](#ui-preview)
+- [Highlights](#highlights)
+- [Known Limitations](#known-limitations)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Snapshot Maintenance & Cleanup](#snapshot-maintenance--cleanup)
+- [How It Works](#how-it-works)
+- [Local Development (without publishing)](#local-development-without-publishing)
+- [License](#license)
+
 ## UI Preview
 
-- Recall button location
-
-![Recall button appears on hover](docs/screenshots/recall-button.png)
-
----
-| Confirmation panel · file change list | Confirmation panel · rollback scope |
+| Recall button | Confirmation panel · file change list |
 | --- | --- |
-| ![Confirmation panel · file change list](docs/screenshots/confirm-panel-1.png) | ![Confirmation panel · rollback scope](docs/screenshots/confirm-panel-2.png) |
+| ![Recall button appears on hover](docs/screenshots/recall-button.png) | ![Confirmation panel · file change list](docs/screenshots/confirm-panel-1.png) |
 
 - After a recall, the message text is auto-refilled into the input box for quick editing and resending (can be disabled in the settings card)
 - Settings · plugin config card (config form / exclusions / snapshot manager, saved changes apply live)
@@ -34,22 +44,18 @@
 
 ## Highlights
 
-- **Files + conversation, rolled back together**: recalling isn't just about chat history — files the agent modified go back to their original state too.
-- **Never touches your project's own git**: snapshots live in an independent shadow git repository; your branches, staging area, and uncommitted changes are untouched. `.git` and `node_modules` are excluded automatically.
-- **Keeps your project directory clean**: snapshots always live under `$DSH_HOME`, nothing is ever dropped into your project — regardless of the session's sandbox permission (workspace-write / read-only sessions snapshot and recall as usual). Only when home itself is unwritable (e.g. pointed at a read-only drive) does it fall back to an in-project `.dsh-recall-snapshots` directory (the page shows a notice when degraded); once home is writable again, data migrates back and the fallback directory is cleaned up.
-- **Byte-level fidelity** (2.1.1+): snapshots and recalls are immune to your project's `.gitattributes` EOL conversion — LF/CRLF line endings, `$Id$` keywords, and binary content round-trip byte-for-byte (the shadow repository pins `info/attributes` to disable all attribute-driven conversion).
-- **Change your mind as many times as you like**: after one recall you can recall again to an even earlier point; files overwritten during a recall always remain recoverable. Up to 500 snapshots per workspace are kept by default (oldest pruned beyond the cap — adjustable or disableable); once a session is permanently deleted, its snapshots are cleaned up accordingly.
-- **See the list before you act**: clicking recall first shows the list of files that will change (modified / restored / deleted); nothing is overwritten until you confirm.
-- **Busy-agent guard** (2.0+): preview and recall are refused while an agent is running in the target workspace, so files can't change under you mid-confirmation; if a new snapshot has appeared since the preview, execution forces a fresh preview (staleness check).
-- **Auto-rescue on rollback failure** (2.1+): a "pre-rollback" safety snapshot is taken before every recall; if the rollback fails midway, the workspace is automatically restored to its pre-rollback state — and if the rescue itself fails, you get a copy-paste-ready manual recovery command. No path ever leaves a half-rolled-back workspace behind.
-- **Disk-friendly**: snapshots use git delta compression — incremental, not full-directory copies. Files larger than 100MB are skipped automatically (the threshold is configurable in the settings card).
-- **Automatic housekeeping**: periodic `git gc` packs loose objects (lossless — not a single snapshot is lost); snapshots of deleted sessions are cleaned up automatically; optional cleanup by snapshot cap and by retention age (both configurable); build artifacts can be excluded globally via `exclude.txt` (see below).
-- **Failures speak up**: snapshot failures are classified by root cause (git missing / disk full / permission denied / lock conflict / directory conflict) with actionable guidance, surfaced as a toast at the top of the page (the same fault only bothers you once per 10 minutes, adjacent repeats merged with a count) — nothing fails silently; the failure reason lands in the "Recent errors" section of the settings card.
-- **Self-healing on failure**: after a snapshot fails, leftover objects are pruned automatically; 3 consecutive failures trigger an exponential-backoff circuit breaker (auto-retry after the cooldown); the failure path also sweeps stray git processes and stale locks — concurrent instances yield to each other via heartbeats instead of wedging each other (2.1+), and the disk never bloats from failed retries.
-- **Unindexable paths are skipped, not fatal**: embedded git repositories, unreadable files, and other paths that can't be indexed no longer fail the whole snapshot — the snapshot is still taken, and skipped paths are reported via toast (on recall they are neither restored nor deleted, same semantics as exclusions).
-- **Tree-view snapshot manager**: the "Snapshot Manager" on the settings page shows a **workspace → session → snapshot** three-level tree with expand/collapse and search support; sessions produced by recalls are grouped into "version families" (v1/v2/v3) along the fork chain. Each level has a delete button on its right, so you can clear all snapshots of a workspace or a session at once. Leaves show a summary of the message content the snapshot corresponds to, making it easy to locate "what this message changed back then".
+Abilities with a version in parentheses require that version or later; the rest have no special version requirement.
+
+- **Files + conversation, rolled back together**: recalling isn't just about chat history — files the agent modified go back to their original state too; immune to your project's `.gitattributes` conversion, with byte-level fidelity for line endings and binary content (2.1.1+).
+- **Never touches your project's own git, and keeps it clean**: snapshots live in an independent shadow git repository — branches, staging area, and uncommitted changes are untouched; storage stays under `$DSH_HOME` regardless of the session's sandbox permission (workspace-write / read-only sessions work as usual), falling back to an in-project `.dsh-recall-snapshots` only when home itself is unwritable.
+- **See the list before you act — and change your mind as often as you like**: recall first shows the list of files that will change (modified / restored / deleted); nothing runs until you confirm. After a recall you can recall again to an even earlier point, and files overwritten during a recall always remain recoverable (up to 500 snapshots per workspace by default).
+- **A guarded recall path** (2.0+; auto-rescue 2.1+): recall is refused while an agent is running, and a new snapshot after the preview forces a fresh preview; a "pre-rollback" safety snapshot is taken before every recall, a failed rollback is rescued automatically, and a failed rescue gives you a copy-paste-ready manual recovery command.
+- **Disk-friendly, self-maintaining**: snapshots use git delta compression and large files are skipped automatically (threshold configurable); periodic lossless `git gc`, session-deletion cleanup, and optional cleanup by cap or retention age — plus a **workspace → session → snapshot** tree manager on the settings page with search and per-level deletion.
+- **Failures speak up and heal** (self-healing 2.1+): failures are classified by root cause (git missing / disk full / permission denied / lock conflict / directory conflict) with actionable guidance (the same fault only bothers you once per 10 minutes; reasons land in the settings card's "Recent errors"); leftover objects are pruned, 3 consecutive failures trigger exponential backoff, concurrent instances yield via heartbeats, and unindexable paths are skipped with a notice instead of failing the whole snapshot (they are neither restored nor deleted on recall).
 
 ## Known Limitations
+
+Boundaries accepted by design and edge cases not yet covered — worth checking before you rely on them.
 
 - Snapshots are created **when a message is sent**; messages from before the plugin was enabled have no snapshot and show no recall button.
 - The first user message of a session cannot roll back the conversation (files only), because fork requires an earlier turn boundary.
@@ -82,6 +88,8 @@ pm2 restart <your-dsh-name>  # if managed by pm2
 **Uninstall**: `dsh plugin --profile web remove dsh-recall-plugin` (removes both the dependency and the mount layer). Snapshot data is kept under `dsh-recall-snapshots/` in home; delete that directory manually if you want it fully gone.
 
 ## Usage
+
+A full recall of one user message sent after the plugin was enabled goes like this.
 
 1. Hover over any user message sent **after the plugin was enabled** (including steering messages inserted while the agent is running) — "↶ Recall" appears to the left of the copy button.
 2. Click it → the confirmation panel shows the list of files that will change (modified / restored / deleted).
