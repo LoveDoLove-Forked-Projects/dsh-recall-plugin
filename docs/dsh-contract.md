@@ -8,6 +8,8 @@
 >
 > * 维护方式：dsh 升级后按第七节指引定点重核；本文档描述「一直成立的事实」，不设完成态
 >
+> * 配套：[compat-audit.md](./compat-audit.md)（耦合点矩阵，升级后定点复查）、[dsh-contract-verify.md](./dsh-contract-verify.md)（可应用契约的二次验证记录）
+>
 > * 上游源码路径均相对官方仓库根 `packages/`（简写），本机镜像在 `D:\workspace\dsh-plugin\deepseek-harness\packages\`
 
 ***
