@@ -7,15 +7,45 @@
  */
 
 import type { ReactApi, UtilApi } from './util.js'
-import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService } from '../types/client-contract.js'
+import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange } from '../types/api.js'
 
 // 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
-interface ChatBlock {
+export interface ChatBlock {
   type?: string
   text?: string
   attachment?: unknown
   [key: string]: unknown
+}
+
+// 被撤回消息里可回填为草稿附件的块引用：image / file 两类块都带 durable
+// attachment 引用（{attachmentId, ...}）。
+export interface DraftAttachmentRef {
+  attachmentId: string
+  name?: string
+}
+
+// 纯函数（模块级导出供单测）：从内容块提取附件引用。只认带非空 attachmentId 的
+// image/file 块；缺 name 的由回填侧按 mediaType 派生文件名。
+export function attachmentRefsFromBlocks(blocks: ChatBlock[]): DraftAttachmentRef[] {
+  const refs: DraftAttachmentRef[] = []
+  for (const block of blocks) {
+    if (!block || (block.type !== 'image' && block.type !== 'file')) continue
+    const ref = block.attachment as { attachmentId?: unknown; name?: unknown } | null | undefined
+    if (!ref || typeof ref.attachmentId !== 'string' || ref.attachmentId === '') continue
+    const entry: DraftAttachmentRef = { attachmentId: ref.attachmentId }
+    if (typeof ref.name === 'string' && ref.name !== '') entry.name = ref.name
+    refs.push(entry)
+  }
+  return refs
+}
+
+// 缺省附件文件名：媒体类型 → 「attachment-N.<subtype>」（image/png → png）
+export function defaultAttachmentName(mediaType: unknown, index: number): string {
+  const text = String(mediaType || '')
+  const slash = text.indexOf('/')
+  const sub = (slash >= 0 ? text.slice(slash + 1) : text).replace(/[^a-z0-9.+-]/gi, '')
+  return 'attachment-' + String(index + 1) + '.' + (sub || 'bin')
 }
 
 // kind 语义单表承载（文案/徽章类名/汇总顺序）：新增 kind 时只改这一处
@@ -155,15 +185,20 @@ export function buildRecallNode(
     return null
   }
 
-  // 撤回后把被撤回消息的文本回填到输入框，方便用户修改后重新发送。
-  // 官方 conversation 服务提供 input（InputHub）→ per-session shell →
-  // actions.setDraft，走与输入框自身同一条官方写入通道。fork + open 之后
-  // shell 可能需要一个 tick 才就绪（binding 异步解析），做有界重试：最多
-  // 8 次、间隔 150ms；拿不到服务时静默跳过。
-  function fillDraft(targetSessionId: string, draftText: string): void {
-    if (!draftText || !targetSessionId) return
+  // 撤回后把被撤回消息的文本与附件回填到输入框，方便用户修改后重新发送。
+  // 官方 conversation 服务提供 input（InputHub）→ per-session shell → actions，
+  // 走与输入框自身同一条官方写入通道。附件沿用官方 composer 的 addFiles 链路
+  // （ui-conversation 实证）：sessions.binding 门禁 → session.readAttachment 取回
+  // 字节 → conversation.createDrafts 注册草稿附件 → shell 的 addAttachments 进
+  // 输入态（未接纳时 releaseDraftAttachments 释放）。fork + open 之后 shell /
+  // binding 可能需要一个 tick 才就绪，做有界重试：最多 8 次、间隔 150ms；服务面
+  // 缺失时静默跳过（文本与附件各自独立降级，附件读不出不影响撤回主流程）。
+  function fillDraft(targetSessionId: string, draftText: string, attachmentFiles: Promise<File[]> | null): void {
+    if (!targetSessionId || (!draftText && attachmentFiles === null)) return
     let attempts = 0
+    let attachStarted = false
     const attempt = () => {
+      let textDone = draftText === ''
       try {
         // conversation 服务 0.1.2 才有（0.1.1-rc.2 无，ui-conversation 提供），
         // 不能进静态 inject——否则 0.1.1-rc.2 上声明缺失服务插件静默不启动。
@@ -173,20 +208,82 @@ export function buildRecallNode(
         if (conversation && conversation.input && typeof conversation.input.shell === 'function') {
           const shell = conversation.input.shell(targetSessionId)
           if (shell) {
-            if (shell.actions && typeof shell.actions.setDraft === 'function') {
-              shell.actions.setDraft(draftText)
-              return
+            if (!textDone) {
+              if (shell.actions && typeof shell.actions.setDraft === 'function') {
+                shell.actions.setDraft(draftText)
+                textDone = true
+              } else if (typeof shell.setDraft === 'function') {
+                shell.setDraft(draftText)
+                textDone = true
+              }
             }
-            if (typeof shell.setDraft === 'function') {
-              shell.setDraft(draftText)
-              return
+            if (!attachStarted && attachmentFiles !== null) {
+              attachStarted = startAttachDrafts(conversation, shell, targetSessionId, attachmentFiles)
             }
           }
         }
       } catch (e) { /* fall through to retry */ }
-      if (attempts++ < 8) setTimeout(attempt, 150)
+      const attachDone = attachmentFiles === null || attachStarted
+      if ((!textDone || !attachDone) && attempts++ < 8) setTimeout(attempt, 150)
     }
     attempt()
+  }
+
+  // 附件回填（后半程）：把早读好的 File 注册为子会话的草稿附件。返回「链路是否
+  // 已发起」——服务面缺失返回 false，交由调用方有界重试；发起后逐项失败只降级
+  // 该项，不再重试。
+  function startAttachDrafts(conversation: ConversationService, shell: ConversationInputShell, sessionId: string, files: Promise<File[]>): boolean {
+    if (typeof conversation.createDrafts !== 'function') return false
+    const actions = shell.actions
+    let add: ((ids: string[]) => unknown) | null = null
+    if (actions && typeof actions.addAttachments === 'function') add = (ids) => actions.addAttachments ? actions.addAttachments(ids) : false
+    else if (typeof shell.addAttachments === 'function') add = (ids) => shell.addAttachments ? shell.addAttachments(ids) : false
+    if (add === null) return false
+    ;(async () => {
+      let list: File[] = []
+      try { list = await files } catch (e) { return }
+      if (!Array.isArray(list) || list.length === 0) return
+      try {
+        const drafts = conversation.createDrafts ? conversation.createDrafts(sessionId, list) : []
+        const descriptors = Array.isArray(drafts) ? drafts : []
+        const ids = descriptors.map((draft) => draft && draft.id).filter((id): id is string => typeof id === 'string' && id !== '')
+        if (ids.length === 0) return
+        const accepted = add(ids)
+        // 官方 addFiles 的失败回滚：未接纳时释放已注册的草稿附件
+        if (accepted === false && typeof conversation.releaseDraftAttachments === 'function') conversation.releaseDraftAttachments(descriptors)
+      } catch (e) { /* 附件未回填；文本回填不受影响 */ }
+    })()
+    return true
+  }
+
+  // 附件早读（前半程）：撤回执行一开始调用——此刻源会话仍在册（归档在 fork
+  // 之后才发生）、附件引用可解析；fork + open 完成后再由 fillDraft 注册进子会话。
+  // readAttachment 的授权绑定在「消息所在会话」上（官方图片回显同款），故必须用
+  // 源会话 id。逐项 try/catch：单项失败跳过，不阻断其余附件。
+  function preloadAttachmentFiles(sourceSessionId: string, refs: DraftAttachmentRef[]): Promise<File[]> {
+    return (async () => {
+      const sessions = ctx.sessions
+      const binding = sessions && typeof sessions.binding === 'function' ? sessions.binding(sourceSessionId) : undefined
+      const session = binding && binding.session
+      if (!session || typeof session.readAttachment !== 'function') return []
+      const out: File[] = []
+      for (const ref of refs) {
+        try {
+          const result = await session.readAttachment(ref.attachmentId)
+          if (!result || result.ok !== true || !result.value || result.value.data === undefined || result.value.data === null) continue
+          const raw = result.value.data
+          const bytes = raw instanceof Uint8Array ? raw : Uint8Array.from(raw as ArrayLike<number>)
+          const meta = result.value.attachment
+          const mediaType = meta && typeof meta.mediaType === 'string' && meta.mediaType !== '' ? meta.mediaType : 'application/octet-stream'
+          const name = ref.name || (meta && typeof meta.name === 'string' && meta.name !== '' ? meta.name : defaultAttachmentName(mediaType, out.length))
+          // 拷贝出独立 ArrayBuffer 再建 File：Uint8Array<ArrayBufferLike> 不满足
+          // 新版 TS 的 BlobPart（SharedArrayBuffer 分支），且避免视图共享底层缓冲
+          const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
+          out.push(new File([buffer], name, { type: mediaType }))
+        } catch (e) { /* 单项失败跳过 */ }
+      }
+      return out
+    })()
   }
 
   function UserRecallNode(props: ChatNodeProps) {
@@ -207,6 +304,8 @@ export function buildRecallNode(
     // image.attachment.attachmentId —— 不是裸 attachment 对象
     const imageBlocks: Array<{ attachment: unknown }> = blocks.filter((b) => b && b.type === 'image' && b.attachment).map((b) => ({ attachment: b.attachment }))
     const rest: ChatBlock[] = blocks.filter((b) => !b || !(b.type === 'text' && typeof b.text === 'string') && !(b.type === 'image' && b.attachment))
+    // 回填用附件引用（image/file 块）：撤回后连同文本一起回填到输入框
+    const attachmentRefs = attachmentRefsFromBlocks(blocks)
 
     const [copied, setCopied] = React.useState(false)
     const [hasSnapshot, setHasSnapshot] = React.useState(false)
@@ -312,6 +411,11 @@ export function buildRecallNode(
       // PF-1：新版同时透传 previewTreeId（内容级指纹），Host 优先用它比对
       // 且免一次重复 diff；老 Host 忽略未知字段自动退回 total 校验。
       const previewTotal = typeof recall.total === 'number' ? recall.total : changes.length
+      // 附件早读：此刻源会话仍在册（归档在 fork 之后才发生）、附件引用可解析；
+      // 读成的 File 在 fork 出的子会话里由 fillDraft 注册为草稿附件（见上）。
+      const attachmentFiles = pluginConfig.refillDraft && attachmentRefs.length > 0 && sessionId
+        ? preloadAttachmentFiles(sessionId as string, attachmentRefs)
+        : null
       setRecall({ stage: 'executing', changes })
       api<ExecuteResponse>('execute', { messageId, sessionId, previewTotal, previewTreeId: recall.treeId || undefined, previewAt: Date.now() }).then(async (res) => {
         if (!res || !res.ok) {
@@ -377,7 +481,7 @@ export function buildRecallNode(
         // 把被撤回的消息文本回填到输入框（可在设置页关闭）
         // fillTarget 只在撤回链路上赋值（fork 出的 childId 或原 sessionId），
         // 断言收口——撤回执行必有会话上下文
-        if (pluginConfig.refillDraft) fillDraft(fillTarget as string, text)
+        if (pluginConfig.refillDraft) fillDraft(fillTarget as string, text, attachmentFiles)
         setHasSnapshot(false)
         // 注：快照 tag 在 Host 侧有意保留（幂等回退），刷新页面后该消息的
         // 撤回按钮会重新出现——这是「可再次回退到同一点」的特性而非 bug。

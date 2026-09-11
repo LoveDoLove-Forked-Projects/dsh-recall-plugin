@@ -96,11 +96,36 @@ export interface ChatNodeProps {
 
 // ---- 会话/工作区服务（client 侧）----
 
+// Session 对象层（sessions.binding(sessionId).session）：readAttachment 取回历史
+// 附件的原始字节 + mediaType——官方图片回显（HistoricalImageCache）走它，撤回
+// 回填的附件重建沿用同一通道。仅探测式消费：缺 binding/readAttachment 时附件
+// 回填整体降级，文本回填不受影响。
+export interface SessionAttachmentRef {
+  attachmentId?: string
+  mediaType?: string
+  name?: string
+  [key: string]: unknown
+}
+
+export type ReadAttachmentResult =
+  | { ok: true; value?: { attachment?: SessionAttachmentRef; data?: unknown } }
+  | { ok: false; error?: { code?: string; message?: string } }
+
+export interface SessionObjectLayer {
+  readAttachment?(attachmentId: string): Promise<ReadAttachmentResult>
+}
+
+export interface SessionBinding {
+  session?: SessionObjectLayer
+}
+
 export interface ClientSessionsService {
   fork(opts: { sessionId: string; atSeq?: number; increaseTitle?: boolean }): Promise<string>
   open(sessionId: string): unknown
   // settings-cards 的「切换版本会话」探测：官方会话列表快照（{ byId }）
   list?: { getSnapshot(): { byId?: Record<string, unknown> } }
+  // 会话对象层入口（官方 ui-conversation 对附件回读走 binding().session）
+  binding?(sessionId: string): SessionBinding | null | undefined
 }
 
 export interface ClientWorkspacesService {
@@ -115,14 +140,33 @@ export interface ClientWorkspacesService {
 // 官方写入通道；0.1.1-rc.2 无此服务（fillDraft 有界重试恒降级）
 
 export interface ConversationInputShell {
-  actions?: { setDraft(text: string): void }
+  actions?: {
+    setDraft(text: string): void
+    // 官方 composer 的 addFiles 走 shell.addAttachments（actions 面是同一实现
+    // 的公开通道）；返回 false 表示未接纳（调用方应释放已注册的草稿附件）
+    addAttachments?(ids: string[]): boolean | unknown
+  }
   setDraft?(text: string): void
+  addAttachments?(ids: string[]): boolean | unknown
+}
+
+// conversation.createDrafts(sessionId, files) 的草稿描述符：id 供
+// shell.addAttachments 进入输入态，kind 为 'image' / 'file'
+export interface DraftAttachmentDescriptor {
+  id?: string
+  kind?: string
+  [key: string]: unknown
 }
 
 export interface ConversationService {
   input?: {
     shell?(sessionId: string): ConversationInputShell | null | undefined
   }
+  // 把浏览器 File 注册为运行时草稿附件（图片=object URL 预览且随 prompt 发字节；
+  // 其他文件立即开始后台上传），返回按输入顺序的描述符。官方 composer 的
+  // addFiles 即 createDrafts → shell.addAttachments →（未接纳）releaseDraftAttachments。
+  createDrafts?(sessionId: string, files: File[]): DraftAttachmentDescriptor[]
+  releaseDraftAttachments?(drafts: DraftAttachmentDescriptor[]): void
 }
 
 // ---- styles 服务（0.1.1-rc.2 存在、0.1.2 已移除，探测 + <style> 降级）----

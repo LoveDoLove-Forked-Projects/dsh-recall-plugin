@@ -26,7 +26,7 @@ export const Config = Schema.object({
   // HOME 时（容器 root=/root 等）它落在工作区内，漏排除会让 git add -A
   // 把影子仓库自己吞进去、快照全部失败（issue #6）
   baseExcludes: Schema.array(Schema.string()).default(['.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/']).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）'),
-  refillDraft: Schema.boolean().default(true).description('撤回后把被撤回的消息文本回填到输入框'),
+  refillDraft: Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框'),
   snapshotEnabled: Schema.boolean().default(true).description('启用消息快照（关闭后不再新建，已有快照仍可撤回）'),
   archiveOriginal: Schema.boolean().default(true).description('撤回后归档原会话（关闭后原会话保留在列表中）'),
   retentionDays: Schema.number().default(0).description('按天数保留快照，超期自动删除；0 表示不启用'),

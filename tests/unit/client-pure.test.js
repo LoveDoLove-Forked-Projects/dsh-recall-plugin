@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { buildTree, clockText, sizeText, bytesToMb } from '../../src/client/util.js'
-import { KIND_INFO, summaryText } from '../../src/client/recall-node.js'
+import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName } from '../../src/client/recall-node.js'
 import { groupByLineage } from '../../src/client/snapshot-manager.js'
 import { nextShadowPriority } from '../../src/client/app.js'
 
@@ -161,5 +161,41 @@ describe('client 纯逻辑', () => {
     const family = map.get('A').family
     expect([...family].sort()).toEqual(['A', 'B', 'C'])
     expect(new Set([...map.values()].map((v) => v.index)).size).toBe(3)
+  })
+})
+
+describe('撤回回填的附件引用提取（I34）', () => {
+  it('attachmentRefsFromBlocks：image/file 两类块都提取，有 name 则保留', () => {
+    const refs = attachmentRefsFromBlocks([
+      { type: 'text', text: 'hi' },
+      { type: 'image', attachment: { attachmentId: 'sha256:a', mediaType: 'image/png' } },
+      { type: 'file', attachment: { attachmentId: 'sha256:b', name: '报告.pdf' } },
+    ])
+    expect(refs).toEqual([
+      { attachmentId: 'sha256:a' },
+      { attachmentId: 'sha256:b', name: '报告.pdf' },
+    ])
+  })
+
+  it('attachmentRefsFromBlocks：缺引用/空 id/非 image-file 块全部忽略，畸形输入不抛', () => {
+    expect(attachmentRefsFromBlocks([])).toEqual([])
+    const malformed = [
+      null,
+      {},
+      { type: 'image' },
+      { type: 'image', attachment: null },
+      { type: 'file', attachment: { attachmentId: '' } },
+      { type: 'file', attachment: { attachmentId: 42 } },
+      { type: 'json', attachment: { attachmentId: 'x' } },
+    ]
+    expect(attachmentRefsFromBlocks(malformed)).toEqual([])
+  })
+
+  it('defaultAttachmentName：媒体类型 → 扩展名，空/非法回退 bin', () => {
+    expect(defaultAttachmentName('image/png', 0)).toBe('attachment-1.png')
+    expect(defaultAttachmentName('application/pdf', 2)).toBe('attachment-3.pdf')
+    expect(defaultAttachmentName('image/svg+xml', 1)).toBe('attachment-2.svg+xml')
+    expect(defaultAttachmentName('', 0)).toBe('attachment-1.bin')
+    expect(defaultAttachmentName(null, 0)).toBe('attachment-1.bin')
   })
 })
