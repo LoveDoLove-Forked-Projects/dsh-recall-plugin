@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 新增
+
+- **探针：`sessions.fork` 切点推进行为 3 例**（I35 的文档化行为落成机器断言）：`tests/probe/api-surface.test.js` 新增「sessions.fork 切点推进行为」组，直钉 `dsh-api-session-controller` 构建产物的三条锚点——boundary 以「seq >= atSeq 的首条 `turn/end`」解析、`cut` 从 boundary+1 推进到下一个 `turn/start` 前、`seed` 取 `slice(0, cut)` 完整前缀。官方若改为「seed 排除未领取 inbox 项」（撤回残留排队消息的根治方向）或重构改名即红，提示复核 G1 清理逻辑是否可退役；0.1.1 旧版安装的实现锚点未核验，整体 skip（fork 签名探针仍覆盖旧包路径）。探针 31 → 34 例全绿，compat-audit I35 的「无直接探针」缺口随之闭环。
+
 ## [2.3.19] - 2026-09-12
 
 ### 修复

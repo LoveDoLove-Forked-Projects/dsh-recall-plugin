@@ -733,14 +733,15 @@
   `SessionFace = ISession & ObservableSnapshot<SessionSnapshot>`，`getSnapshot()` 读取面）；
   `dsh-client-ui-conversation/lib/client.js`（QueueDock 的 `placement === 'queued'` 过滤与
   `updateQueue` 行级操作）；`agent/inbox/spliced` 事件形状由本机会话日志解压实证。
-- **探针/单测**：无直接探针（fork 行为在 host 内部过程）；纯逻辑 `scanStaleQueueRpcIds` /
+- **探针/单测**：`tests/probe/api-surface.test.js`「sessions.fork 切点推进行为」3 例直钉构建
+  产物锚点（boundary 解析 / cut 窗口推进 / seed 前缀切片）；纯逻辑 `scanStaleQueueRpcIds` /
   `resolveStaleQueueRpcIds` 由 `tests/unit/snapshots-queue-residue.test.js` 钉，
   `pickStaleQueueItemIds` 由 `tests/unit/client-pure.test.js` 钉。
 - **失效症状**：拿不到 live 事件（冷会话）或 `updateQueue` 服务面缺失 → 不清理，残留排队消息
   仍显示（用户可在 QueueDock 手动删除）；撤回与回填主流程不受影响。
-- **复查动作**：dsh 升级后看 fork 的 cut 推进规则是否变化（若官方改为在 `turn/end` 处精确切分，
-  本清理自动退化为无匹配的空操作）；真机冒烟＝对「agent 运行中发送、随后被撤回」的消息撤回，
-  输入框上方不应出现排队消息。
+- **复查动作**：fork 的 cut 推进规则变化时上述探针即红（若官方改为在 `turn/end` 处精确切分，
+  本清理自动退化为无匹配的空操作，可评估退役）；真机冒烟＝对「agent 运行中发送、随后被撤回」
+  的消息撤回，输入框上方不应出现排队消息。
 
 
 ## 与 E1 verify-host 的对应关系
