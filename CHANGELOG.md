@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.11] - 2026-09-11
+
+### 变更
+
+- **dsh-* peerDependencies 从「逐 tuple OR 窗口」收敛为「按 minor 版本线开窗」**：7 个 `@deepseek-ai/dsh-*` 的 peer 范围由原先每个已核验版本一段的长 OR 串（`>=0.1.1-rc.2 <=0.1.3-alpha.1 || … || >=0.1.5-rc.1 <=0.1.5-rc.1`）改为每条 minor 线一段、上界开区间到下一 minor（`>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6`）。动机：原形态下 dsh 每发一个 prerelease（alpha.2→rc.1→…）都要人工追加一段，繁琐且易漏。新形态利用 npm semver 的 prerelease 门槛——同 (major,minor,patch) 段内只要有一个带 prerelease 的比较器，即放行该 tuple 的全部 prerelease 与正式版，故 0.1.5 线内的 rc.2、0.1.5 正式版等自动放行，无需再改 peer 声明；未验证的新 minor 线（0.1.6、0.2.0）仍被上界拦截。取舍：同线内未经门禁核验的新版本也会被 npm 放行安装，安全兜底从「peer 范围逐版白名单」转为「升级后跑 `check:upgrade` 三层门禁 + `check:dsh` 哨兵」——即 dsh 发新版后仍需人工核验，只是不再强制改 7 条 peer 串。`scripts/check-dsh-version.mjs` 的复合区间解析器原生支持 `>=x.y.z-pre <x.y.z` 形态，实跑验证放行/拦截语义正确（0.1.5 线全放行、0.1.6 起拦截），脚本零改动。`dshReleases` 兼容矩阵保持逐版本记录不变（它是台账、非安装门禁）。README 双语安装兼容声明同步。
+
 ## [2.3.10] - 2026-09-10
 
 ### 变更
