@@ -122,9 +122,21 @@ export interface SessionLogSnapshot {
   events: SessionEvent[]
 }
 
+// observeSession 的观测租约：events 是全量逻辑日志（含 fork 继承前缀）。官方在
+// 租约上装 Symbol.dispose，本文件不建模符号键（ES2022 lib 无该类型），释放由
+// snapshots.ts 的 disposeLease 运行时探测。
+export interface SessionObservationLease {
+  events?: SessionEvent[]
+}
+
 export interface SessionQueryEngine {
   listSessions(signal?: unknown): Promise<SessionRecord[]>
   readSession(sessionId: string): Promise<SessionLogSnapshot>
+  // seeded 会话（撤回 fork 出的子会话）上 readSession 恒抛——官方 Session.create
+  // 校验要求 seed 恰等于 fork 继承前缀，而读取侧给的是全量日志，必然不等
+  // （0.1.5-rc.2 实测）。observeSession 经 restore 恢复、无此约束；旧版 dsh 无此
+  // API（可选），缺失时调用侧维持原行为。
+  observeSession?(sessionId: string): Promise<SessionObservationLease>
 }
 
 // ---- shell（命令执行）----
@@ -161,26 +173,26 @@ export interface AgentRegistry {
   get?(id: string): AgentInfo | undefined
 }
 
-// ---- webServer（HTTP API 注册）----
+// ---- connection（载体无关 API 路由注册表；web 与桌面端统一）----
 
-// 插件实际消费的 HTTP 请求/响应面（req.url + async 迭代读 body；res.writeHead/end）
-export interface HttpRequest {
-  url?: string
-  [Symbol.asyncIterator](): AsyncIterator<Uint8Array>
+// 插件只消费 fetch 注册面。exact 匹配：注册 path 与请求 pathname 全等才有响应，
+// 未命中由宿主共享分发器返回 404——插件不再自建前缀分发（桌面端 composition
+// 禁用 webserver row，硬依赖 webServer 会让 fiber 永久 pending）。
+export type ConnectionFetchMethod = 'GET' | 'HEAD' | 'POST'
+export interface ConnectionFetchRoute {
+  readonly path: string
+  readonly methods: readonly ConnectionFetchMethod[]
+  readonly requestBody: 'buffered' | 'streaming'
+  readonly fetch: (request: Request) => Promise<Response>
 }
-export interface HttpResponse {
-  writeHead(status: number, headers?: Record<string, string>): unknown
-  end(body?: string): unknown
+export interface HostConnectionFetch {
+  // 返回异步 disposer，但注册本体挂在 connection 插件自身的 fiber 上（实现里
+  // owner = this.ctx，不是调用者）——调用方必须用 ctx.effect 包裹返回值，
+  // HMR 重载才不会撞「exact Fetch route ... is already registered」。
+  register(route: ConnectionFetchRoute): () => Promise<void>
 }
-
-export interface WebRoute {
-  kind: 'prefix' | 'exact'
-  path: string
-  handler: (req: HttpRequest, res: HttpResponse) => unknown
-}
-
-export interface WebServer {
-  register(route: WebRoute): () => void
+export interface HostConnectionHandle {
+  readonly fetch: HostConnectionFetch
 }
 
 // ---- settings（设置 namespace 注册 + 读写）----
@@ -215,16 +227,19 @@ export interface SettingsService {
 export interface HostContext {
   shell: ShellExecutor
   sessions: SessionStore
-  webServer: WebServer
   agents: AgentRegistry
   get<T = unknown>(name: string): T | undefined
-  inject(names: string[], callback: (ctx: SettingsInjectedContext) => void): unknown
+  inject(names: string[], callback: (ctx: InjectedContext) => void): unknown
   on(event: string, listener: (session: Session, event: SessionEvent) => void): unknown
-  effect(fn: () => void | (() => void)): unknown
+  effect(fn: () => void | (() => void | Promise<void>)): unknown
 }
 
-// ctx.inject(['settings'], ...) 回调上下文（0.1.2-alpha.2 迁移语义）
-export interface SettingsInjectedContext {
+// ctx.inject([...], cb) 回调上下文（cordis 可选/延迟注入：服务缺席不 pending，
+// 回调只在本次 names 就绪时执行）。字段是「注入服务合集」——settings 分支只读
+// settings、connection 分支只读 connection；合并在一个形状里仅为 inject 签名统一，
+// 回调内不得跨注入读取另一字段（本次注入中它并不可达）。
+export interface InjectedContext {
   settings: SettingsService
-  effect(fn: () => void | (() => void)): unknown
+  connection: HostConnectionHandle
+  effect(fn: () => void | (() => void | Promise<void>)): unknown
 }

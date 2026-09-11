@@ -22,7 +22,7 @@
  *   4. Config 是活 Schemastery object schema（合规清单 #3）；
  *   5. settings 桩在位时，全程 console.error 无 'recall settings namespace
  *      skipped'（settings 桩接入生效，skip 分支未被触发）；
- *   6. 卸载后 webServer 注册清零（合规清单 #2/#5，HMR 无 module 级残留）。
+ *   6. 卸载后 connection 路由注册清零（合规清单 #2/#5，HMR 无 module 级残留）。
  *
  * 定位与 CI 语义同 test:probe：优先 DSH_ROOT，否则 %APPDATA%\npm\...\dsh；
  * 无 dsh 环境整体 skip（退出 0），不 fail。本门禁不起真 git/真会话，只做
@@ -58,7 +58,7 @@ const { Context } = requireFromDsh('@deepseek-ai/cordis')
 const { apply, inject, name, Config } = await import(pathToFileURL(path.join(root, 'lib', 'index.js')).href)
 
 // ---- 最小服务桩：只实现插件实际调用的方法面（字段面来自 probe 已核验事实）----
-const registered = [] // webServer 路由注册记录（端点注册 + 卸载清零的载体）
+const registered = [] // connection fetch 路由注册记录（端点注册 + 卸载清零的载体）
 const ctx = new Context()
 
 // recordError 通道：拦截全程 console.error，供 settings skip 断言（断言 5）
@@ -83,13 +83,19 @@ let agentsTouched = 0
 await ctx.plugin({
   name: 'verify-host-stubs',
   apply(c) {
-    c.provide('webServer', {
-      register(route) {
-        registered.push(route)
-        return () => {
-          const i = registered.indexOf(route)
-          if (i >= 0) registered.splice(i, 1)
-        }
+    c.provide('connection', {
+      fetch: {
+        // 复刻官方 registerFetchRoute 的可观测语义：登记 route、返回异步
+        // disposer。真实实现里注册本体挂在 connection fiber 的 effect 上
+        // （owner = this.ctx），插件用 ctx.effect 包裹返回值——卸载时 cordis
+        // 调用该 disposer，路由随之清除。
+        register(route) {
+          registered.push(route)
+          return async () => {
+            const i = registered.indexOf(route)
+            if (i >= 0) registered.splice(i, 1)
+          }
+        },
       },
     })
     c.provide('shell', {
@@ -139,33 +145,35 @@ try {
   failures.push('ctx.plugin 装配抛错（inject/Config 声明可能不完整）：' + (error && error.message ? error.message : error))
 }
 
-// 2. 端点注册：webServer 注册了 /api/recall 前缀路由，且 handler 能响应
-const route = registered.find((r) => r && r.path === '/api/recall')
-assert(Boolean(route), 'webServer 注册了 /api/recall 路由')
-
-function fakeReq(url, body) {
-  const chunks = [Buffer.from(body || '{}', 'utf8')]
-  return {
-    url,
-    [Symbol.asyncIterator]() {
-      let i = 0
-      return { next: () => (i < chunks.length ? Promise.resolve({ value: chunks[i++], done: false }) : Promise.resolve({ done: true })) }
-    },
-  }
+// 2. 端点注册：connection.fetch 逐端点注册 exact 路由，且 fetch 能响应
+// 路由形状直接照官方 ConnectionFetchRoute 契约断言（path/methods/requestBody/fetch）
+const sampleRoute = registered.find((r) => r && r.path === '/api/recall/init')
+if (sampleRoute) {
+  assert(Array.isArray(sampleRoute.methods) && sampleRoute.methods.includes('POST'),
+    '路由 methods 含 POST（得到 ' + JSON.stringify(sampleRoute.methods) + '）')
+  assert(sampleRoute.requestBody === 'buffered',
+    '路由 requestBody=buffered（得到 ' + sampleRoute.requestBody + '）')
+  assert(typeof sampleRoute.fetch === 'function', '路由 fetch 是函数')
+} else {
+  failures.push('示例路由 /api/recall/init 未注册')
 }
-function fakeRes() {
-  const res = { status: 0, body: '', headers: {} }
-  res.writeHead = (status, headers) => { res.status = status; res.headers = headers || {} }
-  res.end = (body) => { res.body = body }
-  return res
+
+// 复刻宿主的共享分发：exact pathname 命中路由则调用其 fetch、未命中 404
+// （真实分发器 = connection 的 createSharedFetchHandler('/api')）
+async function dispatch(pathname, args) {
+  const route = registered.find((r) => r && r.path === pathname)
+  if (!route) return new Response(null, { status: 404 })
+  return route.fetch(new Request('http://dsh.internal' + pathname, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(args || {}),
+  }))
 }
 async function callEndpoint(endpointName, args) {
-  const req = fakeReq('/api/recall/' + endpointName, JSON.stringify(args || {}))
-  const res = fakeRes()
-  await route.handler(req, res)
+  const response = await dispatch('/api/recall/' + endpointName, args)
   let parsed = null
-  try { parsed = res.body ? JSON.parse(res.body) : null } catch (error) { parsed = null }
-  return { status: res.status, body: parsed }
+  try { parsed = await response.json() } catch (error) { parsed = null }
+  return { status: response.status, body: parsed }
 }
 
 const EXPECTED_ENDPOINTS = [
@@ -177,33 +185,37 @@ const EXPECTED_ENDPOINTS = [
 // has 判定）；其余端点全部走统一 { ok } 形状。白名单放行而非静默豁免。
 const EXPECTED_BODY_OK = new Set(['snapshot-info'])
 
-if (route) {
-  for (const ep of EXPECTED_ENDPOINTS) {
-    try {
-      const res = await callEndpoint(ep, {})
-      assert(res.status === 200, '端点 ' + ep + ' 已注册（status=' + res.status + '）')
-      // F-G5：统一响应形状——status=200 会被插件自身错误映射遮蔽（端点名
-      // 注册 ≠ handler 正常），body 带 ok 字段才证明走完 errBody 统一出口。
-      // snapshot-info 等极少数端点历史上无 ok 字段——以 EXPECTED_BODY_OK
-      // 白名单声明，新增无 ok 端点时显式登记而不是静默放行。
-      if (!EXPECTED_BODY_OK.has(ep)) {
-        assert(res.body && typeof res.body === 'object' && 'ok' in res.body,
-          '端点 ' + ep + ' 响应体带 ok 字段（得到: ' + JSON.stringify(res.body).slice(0, 120) + '）')
-      }
-    } catch (error) {
-      failures.push('端点 ' + ep + ' 调用抛错：' + (error && error.message ? error.message : error))
-    }
-  }
+const registeredPaths = registered.map((r) => r && r.path)
+const missingRoutes = EXPECTED_ENDPOINTS.filter((ep) => !registeredPaths.includes('/api/recall/' + ep))
+assert(missingRoutes.length === 0, 'connection.fetch 注册了全部端点路由（缺失: ' + missingRoutes.join(', ') + '）')
+assert(registered.length === EXPECTED_ENDPOINTS.length,
+  '注册路由数 == 端点数（' + registered.length + ' vs ' + EXPECTED_ENDPOINTS.length + '）——多余路由说明重复注册')
+
+for (const ep of EXPECTED_ENDPOINTS) {
   try {
-    const unknown = await callEndpoint('no-such-endpoint', {})
-    assert(unknown.status === 404, '未知端点返回 404（status=' + unknown.status + '）')
+    const res = await callEndpoint(ep, {})
+    assert(res.status === 200, '端点 ' + ep + ' 已注册（status=' + res.status + '）')
+    // F-G5：统一响应形状——status=200 会被插件自身错误映射遮蔽（端点名
+    // 注册 ≠ handler 正常），body 带 ok 字段才证明走完 errBody 统一出口。
+    // snapshot-info 等极少数端点历史上无 ok 字段——以 EXPECTED_BODY_OK
+    // 白名单声明，新增无 ok 端点时显式登记而不是静默放行。
+    if (!EXPECTED_BODY_OK.has(ep)) {
+      assert(res.body && typeof res.body === 'object' && 'ok' in res.body,
+        '端点 ' + ep + ' 响应体带 ok 字段（得到: ' + JSON.stringify(res.body).slice(0, 120) + '）')
+    }
   } catch (error) {
-    failures.push('未知端点探测抛错：' + (error && error.message ? error.message : error))
+    failures.push('端点 ' + ep + ' 调用抛错：' + (error && error.message ? error.message : error))
   }
-  // F-G5 漏声明即红（行为级）：preview 走 agentBusy → ctx.agents.list()，
-  // inject 声明完整时 agents 桩必被触达。删 'agents' 跑本脚本 → 此断言红。
-  assert(agentsTouched > 0, 'preview/execute 探测触发了 agents 访问（agentBusy 通路，访问 ' + agentsTouched + ' 次）——inject 漏声明 agents 时守卫 fail-open、此断言红')
 }
+try {
+  const unknown = await callEndpoint('no-such-endpoint', {})
+  assert(unknown.status === 404, '未知端点返回 404（status=' + unknown.status + '）')
+} catch (error) {
+  failures.push('未知端点探测抛错：' + (error && error.message ? error.message : error))
+}
+// F-G5 漏声明即红（行为级）：preview 走 agentBusy → ctx.agents.list()，
+// inject 声明完整时 agents 桩必被触达。删 'agents' 跑本脚本 → 此断言红。
+assert(agentsTouched > 0, 'preview/execute 探测触发了 agents 访问（agentBusy 通路，访问 ' + agentsTouched + ' 次）——inject 漏声明 agents 时守卫 fail-open、此断言红')
 
 // 3. Config 是活 Schemastery object schema（合规清单 #3：禁普通对象）
 assert(Config && typeof Config === 'function' && Config.type === 'object',
@@ -220,13 +232,13 @@ try {
 const before = registered.length
 try {
   // root fiber 的 dispose = restart()（async），必须 await 才会清空 effect
-  // 并触发各 effect 的 disposer（webServer.register 返回的注销函数）；
-  // 子插件 fiber 随 root 级联 dispose
+  // 并触发各 effect 的 disposer（connection.fetch.register 返回的异步注销
+  // 函数由 cordis 等待完成）；子插件 fiber 随 root 级联 dispose
   await ctx.fiber.dispose()
 } catch (error) {
   failures.push('ctx.fiber.dispose() 抛错：' + (error && error.message ? error.message : error))
 }
-assert(registered.length === 0, '卸载后 webServer 注册清零（' + before + ' → ' + registered.length + '）')
+assert(registered.length === 0, '卸载后 connection 路由注册清零（' + before + ' → ' + registered.length + '）')
 
 // 5. settings 桩接入：settings 服务在位时插件不应记录 skip（index.js
 // installSettingsSection 的 catch 分支文本），记录了说明桩没接通或

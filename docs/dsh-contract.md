@@ -18,7 +18,7 @@
 
 ### 1.1 Host 服务（经 `inject` 声明或 `ctx.get` 获取）
 
-插件 `inject = ['shell', 'sessions', 'webServer', 'agents']`。
+插件 `inject = ['shell', 'sessions', 'agents']`；`settings` / `sessionQuery` / `sandboxPolicy` 按需 `ctx.get`，`connection` 经 `ctx.inject([...], cb)` 可选注入（I32：桌面端 composition 禁用 webServer row，硬声明会让 fiber 永久 pending）。
 
 #### shell —— 命令执行（`shell/shell/src/types.ts`）
 
@@ -81,15 +81,24 @@ interface SessionLogSnapshot { session: SessionHeader; events: SessionEvent[] }
 
 `list(): Agent[]` 不变；`AgentStatus = 'idle' | 'running'`；`agent.id` / `agent.session.header.cwd` 可读。插件 `agentBusy`（P0-1）守卫式访问：`typeof reg.list === 'function'` + `status === 'running'` 判断。新版新增 `get/isOwnedBy/create/resume` 等方法与子代理身份机制，与插件读取面无交集。
 
-#### webServer —— HTTP API（`host/webserver/src/index.ts`）
+#### connection —— 载体无关 API 路由（`client/connection/src/index.ts`）
 
 ```ts
-class WebServer {
-  register(route: WebRoute): () => void   // kind: 'exact' | 'prefix'；重复注册抛错；返回注销函数
+interface HostConnectionHandle {
+  fetch: {
+    // exact 匹配（注册 path 与请求 pathname 全等才响应）；重复注册抛错；
+    // 返回异步 disposer（注册本体挂在 connection 插件 fiber 的 effect 上）
+    register(route: {
+      path: string
+      methods: readonly ('GET' | 'HEAD' | 'POST')[]
+      requestBody: 'buffered' | 'streaming'
+      fetch: (request: Request) => Promise<Response>
+    }): () => Promise<void>
+  }
 }
 ```
 
-插件用 `register({ kind: 'prefixes', path: '/api/recall', ... })` 挂前缀路由（`ctx.effect` 内注册，卸载自动清理）。**实测 0.1.2-alpha.1：插件** **`/api/recall/*`** **端点不受 Web UI 一次性 token 鉴权拦截**（鉴权作用于页面/静态资源层）。
+插件经 `ctx.inject(['connection'], cb)` **可选注入**（服务缺席不 pending，仅 Client API 降级不可用），为 12 个端点各注册一条 `POST /api/recall/<name>` 的 exact 路由（`requestBody: 'buffered'`；插件自留 1MB 请求体上限），并用 `cb.effect` 包裹 register 返回值把异步 disposer 接到 fiber 卸载（否则 HMR 重载撞「route already registered」）。web 端由 client-connection 把 `/api` 前缀挂到 webServer、桌面端由 dsh-desktop-host 用 `createSharedFetchHandler('/api')` 直接分发——客户端 URL 与方法两端完全一致。**实测 0.1.2-alpha.1：插件** **`/api/recall/*`** **端点不受 Web UI 一次性 token 鉴权拦截**（鉴权作用于页面/静态资源层）。**为什么不再用 webServer 前缀路由**：桌面端 composition 对 `webserver` row 置 `disabled: true`，顶层 inject 硬声明会让 fiber 永久 pending（「entry did not activate」），详见 compat-audit I32。
 
 #### settings（经 settings 辅助接入，`settings/settings/src/index.ts`）
 
@@ -260,7 +269,7 @@ interface ChatNodeOwnerProps {
 
 **session 域**：`sessionQuery`★（SessionQueryEngine）、`sessionPersistence`、`sessionProjections`、`sessionProjectionCache`、`sessionTitle`、`sessionTelemetry`、`sessionLogDownload`
 
-**host/web**：`webServer`★、`directoryPicker`、`web`（WebRuntime）、`webhookRuntime`
+**host/web**：`connection`★（载体无关 fetch/rpc 注册表，web 与桌面端同源）、`webServer`、`directoryPicker`、`web`（WebRuntime）、`webhookRuntime`
 
 **llm**：`llm`（LlmRuntime）、`tokenMeter`、`deepseekLlmApiExtensions`
 

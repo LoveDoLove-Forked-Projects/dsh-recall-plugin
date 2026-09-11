@@ -41,7 +41,7 @@ export const RECALL_NO_SESSION = 'NO_SESSION' as const
 export const RECALL_PARTIAL_DELETE = 'PARTIAL_DELETE' as const
 // 未知管理操作（manage 端点 op 未识别）
 export const RECALL_UNKNOWN_OP = 'UNKNOWN_OP' as const
-// 未知 API 端点（webServer 路由 404）
+// 未知 API 端点（/api/recall/<name> 无对应端点；exact 路由未命中由宿主返回 404）
 export const RECALL_UNKNOWN_ENDPOINT = 'UNKNOWN_ENDPOINT' as const
 
 // 语义锚点：H2 的索引损坏经 status 端点 errors 通道暴露（recordError 文本

@@ -2,8 +2,8 @@
  * dsh-recall-plugin — Host 入口（持久插件形态，bundle 行挂载）
  *
  * 职责：装配各域模块（config / store / snapshots / maintenance / session-info /
- * routes-core / routes-manage），通过 webServer 注册 /api/recall/* HTTP API
- * 供 Client 半调用，并接线 session/event 快照触发与启动预热。
+ * routes-core / routes-manage），经 connection 的载体无关 fetch 路由注册
+ * /api/recall/* API 供 Client 半调用，并接线 session/event 快照触发与启动预热。
  *
  * 这是持久 npm 插件包的主入口（exports["."]），由 cordis.patch.yml 的
  * insert 行挂载进 profile composition，DSH 重启后自动生效。业务逻辑已拆到
@@ -25,7 +25,7 @@ import { createRoutesCore } from './routes-core.js'
 import { createRoutesManage } from './routes-manage.js'
 import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as E from './errors.js'
-import type { HostContext, SessionQueryEngine, HttpRequest, HttpResponse } from '../types/dsh-contract.js'
+import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
 import type { Runtime, StoreInfo } from '../types/state.js'
 import type { StoreDumpInfo } from './dump-parse.js'
 import type { ResolvedConfig } from '../types/config.js'
@@ -33,13 +33,16 @@ import type { ManageListItem } from '../types/api.js'
 
 export const name = 'dsh-recall-plugin'
 
-// 硬依赖：shell（PowerShell 执行）、sessions（会话/沙箱策略）、
-// webServer（Client 半的 HTTP API 通道）。agents（dsh-base 无条件装配的
-// agent 注册表）为 P0-1 运行中 agent 拦截读运行状态所需——cordis 4 要求
-// 服务在 inject 中声明才可经 ctx.agents 访问，漏声明会抛
-// "cannot get property ... without inject" 导致检查静默 fail-open（冒烟发现）。
+// 硬依赖：shell（PowerShell 执行）、sessions（会话/沙箱策略）、agents（dsh-base
+// 无条件装配的 agent 注册表，P0-1 运行中 agent 拦截读运行状态所需——cordis 4
+// 要求服务在 inject 中声明才可经 ctx.agents 访问，漏声明会抛
+// "cannot get property ... without inject" 导致检查静默 fail-open，冒烟发现）。
+// Client 半的 API 通道走 connection 的载体无关 fetch 路由，刻意不进硬声明：
+// 桌面端 composition 禁用 webserver row，硬依赖会让 fiber 永久 pending
+// （「entry did not activate」）；connection 用 ctx.inject 可选注入——服务缺席
+// （旧版 dsh）时静默降级为「无 API 通道」，host 侧快照与维护不受影响。
 // 其余服务按需 ctx.get。
-export const inject = ['shell', 'sessions', 'webServer', 'agents']
+export const inject = ['shell', 'sessions', 'agents']
 
 // 入口配置 schema：cordis 加载器据此校验 insert 行 config 并填充默认值，
 // 非法配置在插件加载时响亮失败（官方「插件配置」文档要求）。
@@ -49,8 +52,6 @@ export { Config }
 // 设置页「插件配置」卡片的用户覆盖经 settings namespace 热更新进 cfg
 // （见下方 installSettingsSection 接线）
 export function apply(ctx: HostContext, config: ResolvedConfig) {
-  const webServer = ctx.webServer
-
   const cfg = createConfig(config)
   const rt = createRuntime(ctx, cfg)
   const snaps = createSnapshots(ctx, rt, cfg)
@@ -112,6 +113,8 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
 
   // 请求体上限：端点里 exclude-set 接受用户任意文本，无上限时可被无限
   // POST 撑爆内存。1MB 远超正常配置体量，超限干净报错而不是悄悄截断。
+  // connection 的 buffered 模式另有部署级上限（默认 300MiB），此处保留插件
+  // 自己的更严语义——两道闸互不冲突。
   const MAX_BODY_BYTES = 1048576
 
   // 快照管理列表的结果缓存（apply 级跨请求共享）：30s 缓存让二次打开即时；
@@ -131,22 +134,13 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // 会话标题/文本两段式读取（live 秒回，冷会话由 Client 异步补齐）
   const sessionInfo = createSessionInfo(ctx)
 
-  async function readJsonBody(req: HttpRequest): Promise<Record<string, unknown>> {
-    const chunks: Uint8Array[] = []
-    let size = 0
-    for await (const chunk of req) {
-      size += chunk.length
-      if (size > MAX_BODY_BYTES) throw new Error(E.RECALL_BODY_TOO_LARGE)
-      chunks.push(chunk)
-    }
-    const text = Buffer.concat(chunks).toString('utf8')
-    if (!text.trim()) return {}
-    return JSON.parse(text)
-  }
-
-  function sendJson(res: HttpResponse, status: number, body: unknown): void {
-    res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-    res.end(JSON.stringify(body))
+  // 响应统一 JSON，content-type 与原 sendJson 同款（含 charset）——客户端按
+  // r.json() 解析，编码声明与迁移前保持一致。
+  function jsonResponse(body: unknown, status = 200): Response {
+    return new Response(JSON.stringify(body), {
+      status,
+      headers: { 'content-type': 'application/json; charset=utf-8' },
+    })
   }
 
   // 统一错误映射：业务失败与系统异常分离，文案与诊断解耦。code 给
@@ -358,11 +352,12 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     return records
   }
 
-  // ---- 端点表组装：核心路由 + 管理路由，合并进单一 endpoints 对象供
-  // webServer 前缀路由分发（端点名是 path 第一段，故无跨域命名冲突）。
+  // ---- 端点表组装：核心路由 + 管理路由，合并进单一 endpoints 对象，
+  // 由下方 connection exact 路由逐端点注册（端点名 = /api/recall/ 后第一段，
+  // 无跨域命名冲突）。
   const deps = {
     ctx, rt, snaps, maint, state, cfg, supported,
-    enqueue, agentBusy, runLimited, readJsonBody, sendJson, errBody,
+    enqueue, agentBusy, runLimited, errBody,
     listExcludeFiles, dumpStores, locateSnapshotOnDisk, collectAllSnapshotRecords,
     listCache, excludeCache, usageCache, sessionInfo, titleFromEvents, messageTextFromEvents,
     // readSettings 传活绑定而非当前引用（A1）：dsh-settings 服务晚挂载时
@@ -376,25 +371,41 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     ...createRoutesManage(deps),
   }
 
-  ctx.effect(() => webServer.register({
-    kind: 'prefix',
-    path: '/api/recall',
-    handler: async (req, res) => {
-      const path = (req.url || '').split('?')[0]
-      const name = path.replace(/^\/api\/recall\/?/, '').split('/')[0]
-      const endpoint = (endpoints as Record<string, (args: unknown) => Promise<unknown>>)[name]
-      if (!endpoint) {
-        sendJson(res, 404, { ok: false, code: E.RECALL_UNKNOWN_ENDPOINT, message: 'unknown endpoint: ' + name })
-        return
-      }
-      try {
-        const args = await readJsonBody(req)
-        sendJson(res, 200, await endpoint(args))
-      } catch (error) {
-        sendJson(res, 200, errBody(error))
-      }
+  // 端点分发：connection 的载体无关 exact 路由（web 与桌面端共用同一份注册）。
+  // web 端由 client-connection 把 /api 前缀挂到 webServer 之下，桌面端由
+  // dsh-desktop-host 用 createSharedFetchHandler('/api') 直接分发——客户端的
+  // 请求路径 /api/recall/<name> 与方法 POST 在两种环境完全一致。
+  const handleRecall = async (request: Request): Promise<Response> => {
+    const name = new URL(request.url).pathname.replace(/^\/api\/recall\/?/, '').split('/')[0]
+    const endpoint = (endpoints as Record<string, (args: unknown) => Promise<unknown>>)[name]
+    if (!endpoint) {
+      // exact 路由未命中时宿主直接 404；本分支只在 pathname 形态异常时兜底
+      return jsonResponse({ ok: false, code: E.RECALL_UNKNOWN_ENDPOINT, message: 'unknown endpoint: ' + name })
     }
-  }))
+    try {
+      const text = await request.text()
+      if (Buffer.byteLength(text, 'utf8') > MAX_BODY_BYTES) throw new Error(E.RECALL_BODY_TOO_LARGE)
+      const args = text.trim() ? JSON.parse(text) : {}
+      return jsonResponse(await endpoint(args))
+    } catch (error) {
+      return jsonResponse(errBody(error))
+    }
+  }
+
+  // connection 可选注入：register 的注册本体挂在 connection 插件 fiber 上
+  // （实现里 owner = this.ctx，不是调用者），返回值必须用 effect 包裹——否则
+  // HMR 重载会撞「exact Fetch route ... is already registered」；disposer 是
+  // 异步的，cordis 的 effect cleanup 会等待它完成。
+  ctx.inject(['connection'], (connectionCtx) => {
+    for (const name of Object.keys(endpoints)) {
+      connectionCtx.effect(() => connectionCtx.connection.fetch.register({
+        path: '/api/recall/' + name,
+        methods: ['POST'],
+        requestBody: 'buffered',
+        fetch: handleRecall,
+      }))
+    }
+  })
 
   // 快照事件与启动预热仅在受支持平台注册（见上方 supported 短路说明）
   if (!supported) return
