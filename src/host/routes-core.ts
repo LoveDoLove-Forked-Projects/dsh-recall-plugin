@@ -157,7 +157,11 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       if (!result.ok) return result
       // 文件回退后再解析切点：切点只依赖会话日志，与快照是否删除无关（命中缓存，瞬时）
       const cutSeq = await snaps.resolveCutSeq(sessionId, id)
-      return { ok: true, count: result.count, cutSeq }
+      // 顺带解析 fork 会带进子会话的残留排队项身份（见 snapshots.ts
+      // scanStaleQueueRpcIds 的窗口说明）：Client 在 fork 出子会话后按它清理，
+      // 否则输入框上方会凭空多出一条被撤回消息的「排队消息」。
+      const staleQueueRpcIds = await snaps.resolveStaleQueueRpcIds(sessionId, cutSeq)
+      return { ok: true, count: result.count, cutSeq, staleQueueRpcIds }
     },
 
     // 设置页排障：最近错误（Host 侧 console.error 的页面可见副本）。

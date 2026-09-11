@@ -10,7 +10,7 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 
 1. **影子仓库**：每个工作区在 `~/.dsh/dsh-recall-snapshots/<工作区路径SHA256>/git/` 有独立 git 仓库，`--work-tree` 指向项目目录——项目零污染（无 .git、无快照落地）。home 不可写时降级到项目内 `.dsh-recall-snapshots/`。
 2. **tag 即快照**：每条用户消息触发一次 `write-tree + commit-tree + tag snap-<消息ID>`。不建分支、不动工作区；消息 ID 即快照主键，索引丢失可从 tag 名反推重建（`rebuildOrphans`，时间从 tag creatordate 恢复）。index.json/lineage.json 走 tmp+rename 原子写；index 损坏时 fail-loud——改名 `.corrupt-<ts>` 隔离并告警，不静默当空。
-3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。原会话归档（可恢复，`archiveOriginal` 可关），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。
+3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。原会话归档（可恢复，`archiveOriginal` 可关），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息，故 execute 顺带下发 `staleQueueRpcIds`，Client 在子会话上按 rpcId 调官方 `updateQueue(remove)` 清掉（G1）。
 
 ## 项目架构与文件地图（改动先看这里）
 

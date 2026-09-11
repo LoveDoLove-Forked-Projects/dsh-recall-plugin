@@ -712,6 +712,37 @@
   缩略图（smoke-checklist 可追加项）。
 
 
+### I35 fork 切点携带 inbox 入队事件：撤回后被撤回的消息以「排队消息」复活
+- **依赖的官方行为**：`sessions.fork({ sessionId, atSeq })` 的切点不是「切点事件本身」——host 侧
+  取 `boundary = events.find(e => e.type === 'turn/end' && e.seq >= atSeq)`，再令
+  `cut = boundary.seq + 1` 并**向后跳过非 `turn/start` 的事件**，seed = `events.slice(0, cut)`。
+  于是「boundary 那条 turn/end 之后、下一个 turn/start 之前」的整段事件都会进入子会话。排队
+  投递的用户消息，其 inbox 入队事件（`agent/inbox/spliced`，`target: 'next-turn'`，
+  `data.inserted[].source.rpcId`）必然落在「上一个 turn/end」与「领取它的那个 turn/start」
+  之间——正好落进该窗口。
+- **症状**：撤回后 fork 出的子会话重放 seed 时重建出该 inbox 项，UI 的 QueueDock 在输入框上方
+  显示一条与被撤回消息同内容的「排队消息」（与回填的草稿重复）。日志实证：父会话 seq 93
+  `turn/end` → 94 入队（`rpcId 4aa8cdb6`）→ 95 `turn/start` → 96 领取后移除 → 100
+  `user/message` 落日志；子会话 seed 恰止于 94，重放出同一入队项。
+- **插件对策**：Host 侧 `scanStaleQueueRpcIds` 扫窗口内 inbox 入队项、取 user 来源的 `rpcId`，
+  经 execute 响应的 `staleQueueRpcIds` 下发；Client 侧按 `placement === 'queued'` + rpcId 匹配，
+  逐项调官方 `updateQueue(itemId, { kind: 'remove' })`（等价 QueueDock 的「删除排队消息」）。
+  用 rpcId 而非内容比对：撤回后新发的消息带自己的 rpcId，不被误删。
+- **出处**：`dsh-api-session-controller/lib/index.js`（fork 的 boundary/cut 推进）；
+  `dsh-api-session-controller/lib/types/client/contract/session.d.ts`（`ISession.updateQueue`、
+  `SessionFace = ISession & ObservableSnapshot<SessionSnapshot>`，`getSnapshot()` 读取面）；
+  `dsh-client-ui-conversation/lib/client.js`（QueueDock 的 `placement === 'queued'` 过滤与
+  `updateQueue` 行级操作）；`agent/inbox/spliced` 事件形状由本机会话日志解压实证。
+- **探针/单测**：无直接探针（fork 行为在 host 内部过程）；纯逻辑 `scanStaleQueueRpcIds` /
+  `resolveStaleQueueRpcIds` 由 `tests/unit/snapshots-queue-residue.test.js` 钉，
+  `pickStaleQueueItemIds` 由 `tests/unit/client-pure.test.js` 钉。
+- **失效症状**：拿不到 live 事件（冷会话）或 `updateQueue` 服务面缺失 → 不清理，残留排队消息
+  仍显示（用户可在 QueueDock 手动删除）；撤回与回填主流程不受影响。
+- **复查动作**：dsh 升级后看 fork 的 cut 推进规则是否变化（若官方改为在 `turn/end` 处精确切分，
+  本清理自动退化为无匹配的空操作）；真机冒烟＝对「agent 运行中发送、随后被撤回」的消息撤回，
+  输入框上方不应出现排队消息。
+
+
 ## 与 E1 verify-host 的对应关系
 
 装配层条目（I10 inject 门禁、端点注册、Config schema、卸载清零）由

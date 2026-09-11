@@ -7,7 +7,7 @@
  */
 
 import type { ReactApi, UtilApi } from './util.js'
-import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
+import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService, ConversationInputShell, QueuedMessageLike } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange } from '../types/api.js'
 
 // 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
@@ -46,6 +46,65 @@ export function defaultAttachmentName(mediaType: unknown, index: number): string
   const slash = text.indexOf('/')
   const sub = (slash >= 0 ? text.slice(slash + 1) : text).replace(/[^a-z0-9.+-]/gi, '')
   return 'attachment-' + String(index + 1) + '.' + (sub || 'bin')
+}
+
+// 文件卡片的展示信息（官方 UserStyleBubble 对 file 块渲染成「图标 + 文件名 +
+// 扩展名/大小」卡片；插件的自定义渲染器必须自己复刻，否则 file 块会落到
+// JSON 兜底里变成一坨原文）。
+export interface FileCardInfo {
+  name: string
+  ext: string
+  size: string
+}
+
+// 扩展名徽标文本：取最后一个点之后的部分，大写并截断到 4 字符（PDF/JSON/DOCX）；
+// 无扩展名或点名结尾回退 'FILE'。
+function fileExtOf(name: string): string {
+  const dot = name.lastIndexOf('.')
+  const raw = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : ''
+  const ext = raw.replace(/[^a-z0-9]/gi, '').toUpperCase()
+  return ext ? ext.slice(0, 4) : 'FILE'
+}
+
+// 附件体积文本：官方卡片写「6.7KB」这种紧凑形态（无空格、KB 起一位小数），
+// 与设置页磁盘占用的 sizeText（MB 起、带空格）是两种语境，不复用。
+function fileCardSizeText(bytes: unknown): string {
+  const n = typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0 ? bytes : NaN
+  if (Number.isNaN(n)) return ''
+  if (n < 1024) return String(Math.round(n)) + 'B'
+  if (n < 1048576) return (n / 1024).toFixed(1) + 'KB'
+  if (n < 1073741824) return (n / 1048576).toFixed(1) + 'MB'
+  return (n / 1073741824).toFixed(1) + 'GB'
+}
+
+// 纯函数（模块级导出供单测）：file 块 → 文件卡片信息。只认 type === 'file'；
+// 引用形状异常（缺 attachment）时给兜底名，绝不返回 null —— file 块一旦漏回
+// JSON 兜底就是「整块原文」的可见回归，宁可渲染一张信息不全的卡片。
+export function fileCardInfo(block: ChatBlock | null | undefined): FileCardInfo | null {
+  if (!block || block.type !== 'file') return null
+  const ref = block.attachment as { name?: unknown; bytes?: unknown } | null | undefined
+  const name = ref && typeof ref === 'object' && typeof ref.name === 'string' && ref.name !== '' ? ref.name : '未命名文件'
+  return { name, ext: fileExtOf(name), size: fileCardSizeText(ref && typeof ref === 'object' ? ref.bytes : undefined) }
+}
+
+// 纯函数（模块级导出供单测）：从会话队列快照里挑出「fork 残留」的排队项 id。
+// 只认 placement==='queued' 且 rpcId 命中 Host 下发集合的项——rpcId 是官方
+// prompt 的提交身份，与被撤回消息的 inbox 入队记录一一对应，用户撤回之后新
+// 发的消息带自己的 rpcId，不会被误删。
+export function pickStaleQueueItemIds(queue: unknown, rpcIds: unknown): string[] {
+  if (!Array.isArray(queue) || !Array.isArray(rpcIds)) return []
+  const wanted = new Set(rpcIds.filter((id): id is string => typeof id === 'string' && id !== ''))
+  if (wanted.size === 0) return []
+  const out: string[] = []
+  for (const row of queue) {
+    const item = row as QueuedMessageLike | null | undefined
+    if (!item || item.placement !== 'queued') continue
+    const id = item.id
+    if (typeof id !== 'string' || id === '') continue
+    if (typeof item.rpcId !== 'string' || !wanted.has(item.rpcId)) continue
+    out.push(id)
+  }
+  return out
 }
 
 // kind 语义单表承载（文案/徽章类名/汇总顺序）：新增 kind 时只改这一处
@@ -286,6 +345,50 @@ export function buildRecallNode(
     })()
   }
 
+  // 撤回后清理 fork 子会话里被 seed 重放出来的排队消息：官方 fork 的切点会
+  // 把「被撤回消息的 inbox 入队事件」一并复制进子会话（Host 侧
+  // scanStaleQueueRpcIds 的窗口说明），子会话重建 inbox 后输入框上方就凭空
+  // 多出一条排队消息。按 rpcId 精准移除——官方队列帧对所有 user 来源行透传
+  // source.rpcId（queueItemsFromInbox/promptRpcId 实证），seed 重放行同样携带，
+  // 就是 QueueDock 的「删除排队消息」。
+  // 队列快照走 control 帧，fork 解析后还要等 open/staging 完成才到达（实测可
+  // 晚于数秒——2 秒重试窗口两次实测全部落空，残留卡片直到用户手删才消失），
+  // 故用长窗口轮询：每 250ms 一次、至多 30 秒，命中即停。窗口耗尽仍无匹配
+  // （服务面缺失/快照未到/rpcId 契约漂移）不再静默吞掉：console.warn 留排查
+  // 痕迹，toast 告知手动路径（卡片右上角「删除排队消息」）；toast 按文本节流，
+  // 同一文案 10 分钟至多打扰一次。
+  function purgeStaleQueueItems(targetSessionId: string, rpcIds: unknown): void {
+    if (!Array.isArray(rpcIds) || rpcIds.length === 0) return
+    const deadline = Date.now() + 30000
+    let stopped = false
+    const attempt = () => {
+      if (stopped) return
+      let fired = false
+      try {
+        const binding = sessionsSvc && typeof sessionsSvc.binding === 'function' ? sessionsSvc.binding(targetSessionId) : null
+        const face = binding && binding.session
+        if (face && typeof face.getSnapshot === 'function' && typeof face.updateQueue === 'function') {
+          const snapshot = face.getSnapshot()
+          const ids = pickStaleQueueItemIds(snapshot ? snapshot.queue : null, rpcIds)
+          if (ids.length > 0) {
+            fired = true
+            // 逐项失败只影响该项（与官方 QueueDock 的行级操作同语义）
+            for (const itemId of ids) face.updateQueue(itemId, { kind: 'remove' }).catch(() => {})
+          }
+        }
+      } catch (error) { /* 服务面未就绪：继续等待 */ }
+      if (fired) { stopped = true; return }
+      if (Date.now() >= deadline) {
+        stopped = true
+        console.warn('[dsh-recall-plugin] 残留排队消息自动清理未生效（30s 内队列快照未出现匹配项）：', rpcIds)
+        showThrottledToast('撤回前的一条排队消息未被自动清理，可点击该卡片右上角的删除按钮手动移除')
+        return
+      }
+      setTimeout(attempt, 250)
+    }
+    attempt()
+  }
+
   function UserRecallNode(props: ChatNodeProps) {
     const node = props && props.node
     // 图片渲染入口：官方 ChatNodeSeat 传给本 slot 的 props 契约只有
@@ -303,7 +406,11 @@ export function buildRecallNode(
     // 官方契约：images 传 image 块数组（{attachment}），官方内部取
     // image.attachment.attachmentId —— 不是裸 attachment 对象
     const imageBlocks: Array<{ attachment: unknown }> = blocks.filter((b) => b && b.type === 'image' && b.attachment).map((b) => ({ attachment: b.attachment }))
-    const rest: ChatBlock[] = blocks.filter((b) => !b || !(b.type === 'text' && typeof b.text === 'string') && !(b.type === 'image' && b.attachment))
+    // file 块（文档/表格等非图片附件）：官方 UserStyleBubble 渲染成文件卡片
+    // （图标 + 文件名 + 扩展名/大小），插件覆盖了整个用户节点渲染，必须自己
+    // 复刻——否则它落进下方 rest 的 JSON 兜底，消息里只剩一坨原文（可见回归）。
+    const fileBlocks: ChatBlock[] = blocks.filter((b) => b && b.type === 'file')
+    const rest: ChatBlock[] = blocks.filter((b) => !b || !(b.type === 'text' && typeof b.text === 'string') && !(b.type === 'image' && b.attachment) && b.type !== 'file')
     // 回填用附件引用（image/file 块）：撤回后连同文本一起回填到输入框
     const attachmentRefs = attachmentRefsFromBlocks(blocks)
 
@@ -462,6 +569,10 @@ export function buildRecallNode(
               if (typeof sessionsSvc.open === 'function') sessionsSvc.open(childId)
               chatReverted = true
               fillTarget = childId
+              // 子会话从 seed 继承了一份「被撤回消息的 inbox 入队记录」，不清理
+              // 就会在输入框上方显示成一条排队消息（Host 已解析出它对应的
+              // rpcId 集合）
+              purgeStaleQueueItems(childId, res.staleQueueRpcIds)
               // F1：上报撤回链（childId ↔ parentId），Host 持久化供版本家族展示；
               // 上报失败不阻断撤回主流程（家族是纯增量 UI）。
               api<unknown>('lineage-record', { childId, parentId: sessionId }).catch(() => {})
@@ -481,7 +592,14 @@ export function buildRecallNode(
         // 把被撤回的消息文本回填到输入框（可在设置页关闭）
         // fillTarget 只在撤回链路上赋值（fork 出的 childId 或原 sessionId），
         // 断言收口——撤回执行必有会话上下文
-        if (pluginConfig.refillDraft) fillDraft(fillTarget as string, text, attachmentFiles)
+        if (pluginConfig.refillDraft) {
+          fillDraft(fillTarget as string, text, attachmentFiles)
+          // 文件附件（非图片）没有回读通道：官方 session.attachment 只认图片引用
+          // （Host 侧 referencedImage + readImage，file 块直接判 ATTACHMENT_NOT_
+          // REFERENCED），插件侧读不到字节就必然填不回输入框。文本与图片照常
+          // 回填，这里只把「少了什么」讲清楚，免得用户以为回填是完整的。
+          if (fileBlocks.length > 0) showThrottledToast('被撤回消息里的文件附件无法自动回填（官方接口只支持图片回读），请重新选择文件')
+        }
         setHasSnapshot(false)
         // 注：快照 tag 在 Host 侧有意保留（幂等回退），刷新页面后该消息的
         // 撤回按钮会重新出现——这是「可再次回退到同一点」的特性而非 bug。
@@ -499,6 +617,18 @@ export function buildRecallNode(
       const render = renderMessageImages as (args: { images: Array<{ attachment: unknown }>; align: string }) => import('react').ReactNode
       bubbleChildren.push(React.createElement(React.Fragment, { key: 'images' },
         render({ images: imageBlocks, align: 'end' })
+      ))
+    }
+    // 文件卡片与图片同属「附件在上、文本在下」的官方布局
+    for (let i = 0; i < fileBlocks.length; i++) {
+      const info = fileCardInfo(fileBlocks[i])
+      if (!info) continue
+      bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-filecard', key: 'file-' + i },
+        React.createElement('span', { className: 'dsh-recall-filecard-icon' }, info.ext),
+        React.createElement('span', { className: 'dsh-recall-filecard-body' },
+          React.createElement('span', { className: 'dsh-recall-filecard-name', title: info.name }, info.name),
+          React.createElement('span', { className: 'dsh-recall-filecard-meta' }, info.size ? info.ext + ' ' + info.size : info.ext)
+        )
       ))
     }
     if (text !== '') bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-bubble', key: 'text' }, text))

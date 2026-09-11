@@ -111,8 +111,27 @@ export type ReadAttachmentResult =
   | { ok: true; value?: { attachment?: SessionAttachmentRef; data?: unknown } }
   | { ok: false; error?: { code?: string; message?: string } }
 
+// 会话队列快照里的排队项：插件只读三个字段——placement 判定是否排队、
+// id 作为 updateQueue 的寻址、rpcId 用来精准识别 fork 残留项。
+export interface QueuedMessageLike {
+  id?: string
+  placement?: string
+  rpcId?: string
+}
+
+// SessionFace（官方 sessions.binding(id).session）暴露的会话状态快照：插件只读
+// queue。撤回后清理 fork 残留排队项时要读当前队列（见 recall-node 的
+// purgeStaleQueueItems），拿不到就不清理，不阻断主流程。
+export interface SessionSnapshotLike {
+  queue?: QueuedMessageLike[]
+}
+
 export interface SessionObjectLayer {
   readAttachment?(attachmentId: string): Promise<ReadAttachmentResult>
+  getSnapshot?(): SessionSnapshotLike | null | undefined
+  // 官方队列变更动词。只用 remove：删掉 fork seed 重放出来的残留排队项，
+  // 相当于用户在 QueueDock 上点「删除排队消息」。
+  updateQueue?(itemId: string, action: { kind: 'remove' }): Promise<unknown>
 }
 
 export interface SessionBinding {

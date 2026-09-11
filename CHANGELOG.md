@@ -2,6 +2,30 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.19] - 2026-09-12
+
+### 修复
+
+> 本次为 2.3.17 起改动的首次 npm 发布：2.3.17 / 2.3.18 未单独发版，其全部改动随本版本一并上线。
+
+- **2.3.17 的「排队消息」自动清理在真机上从未生效**（本机 `~/.dsh/sessions` 会话日志解压实证：两次撤回的残留排队项分别在 fork 后 92 秒与 9 秒才出现移除事件——均为手动删除，自动清理的重试窗口内子会话日志无任何队列事件）。两个静默失败面，各修一半：
+  - **Client 侧重试窗口太短**：队列快照走 control 帧，`fork` 解析后还要等 `open`/staging 完成才到达——实测可晚于数秒，原 10×200ms（2 秒）窗口全部落空后静默放弃，残留卡片一直挂着。修复：扩为 30 秒长轮询（250ms 间隔，命中即停）；窗口耗尽仍无匹配时不再静默——`console.warn` 留排查痕迹，toast 提示「撤回前的一条排队消息未被自动清理，可点击该卡片右上角的删除按钮手动移除」（toast 按文本节流，同一文案 10 分钟至多一次）。
+  - **Host 侧解析只认 live 内存事件**：`resolveStaleQueueRpcIds` 此前在 `sessions.get()` 拿不到对象或其 `events` 字段缺失（版本漂移）时恒返回空数组，Client 收到空集合就什么都不做；而切点解析 `resolveCutSeq` 有磁盘降级链兜底、切点永远正常，恰好掩盖了这个缺失。修复：补齐与 `resolveCutSeq` 同款的两跳降级（`sessionQuery.readSession` → `observeSession`，后者覆盖 seeded 父会话——撤回链的父会话本身可能就是上一次撤回 fork 出的子会话；租约 `Symbol.dispose` 释放），两跳都失败才返回空数组。
+  - 顺带核验了匹配键契约：宿主队列帧构造（`queueItemsFromInbox` / `promptRpcId`）对所有 `user` 来源行透传 `source.rpcId`，seed 重放行同样携带，`placement: 'queued'` 与 `{ kind: 'remove' }` 动作均与官方 QueueDock 行为一致，无需扩展。
+
+## [2.3.18] - 2026-09-12
+
+### 修复
+
+- **用户消息里的文件块被渲染成原始 JSON**：插件覆盖了整个用户节点渲染（`conversation.chat.node` keyed 渲染器），此前只对 text/image 两类块做呈现——图片走官方 `renderMessageImages`、文本走气泡，其余块一律落进 JSON 兜底 `<pre>`。于是带文档/表格附件（`type: 'file'`）的消息（含撤回后重绘的那些）整块显示成 `{"type":"file","attachment":{…}}` 原文，而官方渲染是文件卡片。修复：新增 `fileCardInfo` 纯函数（文件名 / 扩展名徽标——大写截断 4 字符、无扩展名回退 `FILE` / 体积文本 `6.7KB` 官方风）与 `.dsh-recall-filecard*` 样式，file 块渲染成与官方 `UserStyleBubble` 同形的卡片（品牌色徽标 + 文件名单行省略 + 「MD 6.7KB」元信息），按「附件在上、文本在下」的官方布局排布，并从 JSON 兜底中剔除。新增 4 例单测。
+- **被撤回消息里的文件附件回填静默缺失**：官方 `session.attachment`（`readAttachment`）只服务图片——Host 侧按 `referencedImage` 找引用、`readImage` 取字节，file 块直接判 `ATTACHMENT_NOT_REFERENCED`；插件读不到字节就填不回输入框，此前静默跳过。修复：撤回成功后若被撤回消息含 file 块，toast 明示「文件附件无法自动回填（官方接口只支持图片回读），请重新选择文件」，不再让用户以为回填是完整的（文本与图片回填照旧）。
+
+## [2.3.17] - 2026-09-12
+
+### 修复
+
+- **撤回后输入框上方凭空多出一条「排队消息」**：官方 `sessions.fork({ atSeq })` 的切点不是「切点事件本身」，而是从该 `turn/end` 推进到**下一个 `turn/start` 之前**的整段事件——排队投递的用户消息，其 inbox 入队事件（`agent/inbox/spliced`，`target: 'next-turn'`）必然落在「上一个 `turn/end`」与「领取它的那个 `turn/start`」之间，正好被复制进子会话 seed；子会话重建 inbox 后，QueueDock 就把这条本该随撤回消失的消息显示成排队消息，与回填到输入框的内容重复（本机 `~/.dsh/sessions` 会话日志解压实证：父会话 seq 93 `turn/end` → 94 入队 → 95 `turn/start` → 96 领取后移除 → 100 `user/message` 落日志，子会话 seed 恰止于 94）。修复分两半：Host 侧新增 `scanStaleQueueRpcIds` 扫切点窗口内的 inbox 入队项、取出 `source.kind === 'user'` 项的 `rpcId`（prompt 提交身份），经 execute 响应新增的 `staleQueueRpcIds` 下发；Client 侧 fork 出子会话并 open 后 `purgeStaleQueueItems` 读 `sessions.binding(childId).session.getSnapshot().queue`，按 `placement === 'queued'` + rpcId 命中逐项调官方 `updateQueue(itemId, { kind: 'remove' })`（即 QueueDock 的「删除排队消息」）。用 rpcId 而非内容比对——撤回后新发的消息带自己的 rpcId，不会被误删。queue 快照走控制流、fork 后可能晚一两拍才到，故做 10×200ms 有界重试；拿不到 live 事件（冷会话）或服务面缺失时静默放弃（残留项仍可在 QueueDock 手动删除），不影响回填与撤回主流程。新增 `tests/unit/snapshots-queue-residue.test.js`（6 例）与 `pickStaleQueueItemIds` 3 例，`routes-stale` 补 stub 与透传断言，compat-audit 新增 I35。
+
 ## [2.3.16] - 2026-09-11
 
 ### 变更

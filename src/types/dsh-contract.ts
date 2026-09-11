@@ -75,12 +75,24 @@ export interface SessionEvent {
   data?: SessionEventData
 }
 
+// 事件来源：kind 区分 user/plugin/tool…；rpcId 是浏览器 prompt 的提交身份，
+// 同一批内容在「inbox 入队」与「user/message 落日志」两处共用同一个值。
+export interface SessionEventSource {
+  kind?: string
+  rpcId?: string
+  [key: string]: unknown
+}
+
 // 插件实际消费的事件 data 字段（读取侧可选；text 块拼接见 messageTextFromEvents）
 export interface SessionEventData {
   id?: string | number
-  source?: { kind?: string }
+  source?: SessionEventSource
   title?: string
   content?: Array<{ type?: string; text?: string }>
+  // agent/inbox/spliced：本次插进 inbox 的项。source.kind === 'user' 的项即
+  // 一次排队投递——撤回的 fork 切点会把这类事件一并复制进子会话（见
+  // snapshots.ts scanStaleQueueRpcIds），故这是清理残留排队项的唯一线索。
+  inserted?: Array<{ source?: SessionEventSource }>
   [key: string]: unknown
 }
 

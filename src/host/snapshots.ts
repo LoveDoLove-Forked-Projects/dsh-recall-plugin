@@ -121,6 +121,38 @@ export function scanCutSeq(events: SessionEvent[], messageId: string): number | 
   return scanCutSeqDetail(events, messageId).cut
 }
 
+// 扫描 fork 切点窗口内入队的用户消息，取出其 prompt RPC 身份。
+//
+// 官方 fork 的切点是「boundary 那条 turn/end 之后、下一个 turn/start 之前」
+// 的整段事件（routes-core 把 resolveCutSeq 的返回值当 atSeq 传下去）。一条
+// 排队投递的用户消息，其 inbox 入队事件必然落在「上一个 turn/end」与「领取
+// 它的那个 turn/start」之间——正好是这个窗口。于是这段入队记录被复制进子
+// 会话 seed，子会话重建 inbox 后输入框上方就多出一条本该被撤回掉的排队消息。
+//
+// 这里把窗口内 user 来源入队项的 rpcId 收集出来，交给 Client 在子会话上按
+// rpcId 精准移除（官方 QueueDock 的「删除排队消息」即同一动词）。rpcId 是
+// prompt 的提交身份，与用户撤回后新发消息的 rpcId 不同，不会误伤。
+export function scanStaleQueueRpcIds(events: SessionEvent[], cutSeq: number | null): string[] {
+  if (!Array.isArray(events)) return []
+  if (typeof cutSeq !== 'number' || !Number.isFinite(cutSeq)) return []
+  const out: string[] = []
+  for (const e of events) {
+    if (!e || typeof e.seq !== 'number' || e.seq <= cutSeq) continue
+    // 窗口在下一个 turn/start 处闭合，与 fork 的 cut 推进规则一致；窗口内
+    // 没有 turn/start（切点之后就是末尾）时自然扫到事件结束。
+    if (e.type === 'turn/start') break
+    if (e.type !== 'agent/inbox/spliced') continue
+    const inserted = e.data && Array.isArray(e.data.inserted) ? e.data.inserted : []
+    for (const item of inserted) {
+      const source = item && item.source
+      if (!source || source.kind !== 'user') continue
+      const rpcId = source.rpcId
+      if (typeof rpcId === 'string' && rpcId !== '' && out.indexOf(rpcId) < 0) out.push(rpcId)
+    }
+  }
+  return out
+}
+
 // 释放 sessionQuery 观测租约。官方在租约对象上装 Symbol.dispose（prepared 缓存
 // 项靠它减引用，漏释放会卡住淘汰）；tsconfig 为 ES2022、无该符号的类型，运行时
 // 探测即可——旧版服务/旧 Node 无该符号时静默跳过。
@@ -219,6 +251,7 @@ export interface SnapshotsApi {
   diffFor(messageId: string): Promise<DiffResult | null>
   rollbackFor(messageId: string): Promise<RollbackResult>
   resolveCutSeq(sessionId: string | null, messageId: string | null): Promise<number | null>
+  resolveStaleQueueRpcIds(sessionId: string | null, cutSeq: number | null): Promise<string[]>
   feedbackFor(sessionId: string | null | undefined, messageId: string): Promise<SnapshotFeedback | {}>
   loadLineage(root: string): Promise<LineageEntry[]>
   recordLineage(root: string, childId: string, parentId: string): Promise<void>
@@ -688,5 +721,36 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     return result
   }
 
-  return { saveIndex, loadIndex, readExclude, writeExclude, rebuildOrphans, captureSnapshot, diffFor, rollbackFor, resolveCutSeq, feedbackFor, loadLineage, recordLineage }
+  // fork 残留排队项的身份解析：优先扫 live 会话的内存事件（零 IO、毫秒级）；
+  // live 不可用时退回 sessionQuery 磁盘读取链——撤回虽必然发生在会话正被查看
+  // 时，但「live 可用」与「live.events 字段在位」是两回事：cutSeq 有磁盘降级
+  // 链兜底、切点永远正常，会掩盖 events 字段的版本漂移，而这里一旦返回空数组，
+  // Client 侧的自动清理就永不触发。两跳与 resolveCutSeq 同款：readSession 对
+  // seeded 会话（撤回链的父会话本身可能是上一次撤回的子会话）恒抛，换
+  // observeSession（restore 模式，事件含继承前缀，seq 空间一致）。两跳都失败
+  // 才返回空数组（= 不清理），残留项仍可手动删除。
+  async function resolveStaleQueueRpcIds(sessionId: string | null, cutSeq: number | null): Promise<string[]> {
+    if (!sessionId || typeof cutSeq !== 'number' || !Number.isFinite(cutSeq)) return []
+    const live = sessions.get(sessionId)
+    if (live && Array.isArray(live.events)) return scanStaleQueueRpcIds(live.events, cutSeq)
+    const query = ctx.get<SessionQueryEngine>('sessionQuery')
+    if (!query) return []
+    try {
+      const log = await query.readSession(sessionId)
+      if (log && Array.isArray(log.events)) return scanStaleQueueRpcIds(log.events, cutSeq)
+    } catch (error) { /* 第一跳失败（含 seeded 会话约束）：换下一跳 */ }
+    if (typeof query.observeSession !== 'function') return []
+    try {
+      const lease = await query.observeSession(sessionId)
+      try {
+        return lease && Array.isArray(lease.events) ? scanStaleQueueRpcIds(lease.events, cutSeq) : []
+      } finally {
+        disposeLease(lease)
+      }
+    } catch (error) {
+      return []
+    }
+  }
+
+  return { saveIndex, loadIndex, readExclude, writeExclude, rebuildOrphans, captureSnapshot, diffFor, rollbackFor, resolveCutSeq, resolveStaleQueueRpcIds, feedbackFor, loadLineage, recordLineage }
 }

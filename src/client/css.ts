@@ -14,6 +14,14 @@ export const CSS = [
   '.dsh-recall-stack{flex-direction:column;align-items:flex-end;gap:8px;min-width:0;max-width:min(525px,82%);display:flex}',
   '.dsh-recall-bubble{background:var(--dsw-specific-bubble);max-width:100%;color:var(--dsw-alias-label-primary);border-radius:22px;padding:10px 16px;font-size:16px;line-height:1.5;white-space:pre-wrap;word-break:break-word}',
   '.dsh-recall-json{margin:0;max-width:100%;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary);white-space:pre-wrap;word-break:break-word;border:1px solid var(--dsw-alias-border-l1);border-radius:10px;padding:8px 10px;background:var(--dsw-alias-markdown-code-block)}',
+  // 文件卡片（消息里的 file 块，非图片附件）：复刻官方 UserStyleBubble 的附件卡
+  // ——品牌色扩展名徽标 + 文件名（单行省略）+ 「MD 6.7KB」元信息行；令牌沿用
+  // 卡片体系（layer-3 底 + 发丝描边），与图片附件的「附件在上」布局并列。
+  '.dsh-recall-filecard{display:flex;align-items:center;gap:10px;max-width:100%;box-sizing:border-box;background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l4);border-radius:12px;padding:8px 12px}',
+  '.dsh-recall-filecard-icon{flex:none;width:34px;height:34px;border-radius:8px;background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-foreground);font-size:11px;font-weight:600;line-height:1;letter-spacing:.02em;display:flex;align-items:center;justify-content:center}',
+  '.dsh-recall-filecard-body{display:flex;flex-direction:column;gap:2px;min-width:0}',
+  '.dsh-recall-filecard-name{color:var(--dsw-alias-label-primary);font-size:14px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+  '.dsh-recall-filecard-meta{color:var(--dsw-alias-label-tertiary);font-size:12px;line-height:1.4}',
   '.dsh-recall-actions{align-items:center;gap:10px;height:28px;display:flex}',
   '.dsh-recall-time{color:var(--dsw-alias-label-tertiary);white-space:nowrap;padding-right:12px;font-size:14px;line-height:1.5}',
   '.dsh-recall-action{width:28px;height:28px;color:var(--dsw-alias-label-tertiary);cursor:pointer;background:0 0;border:none;border-radius:28px;justify-content:center;align-items:center;padding:6px;display:inline-flex}',

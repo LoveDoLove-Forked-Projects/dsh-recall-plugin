@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { buildTree, clockText, sizeText, bytesToMb } from '../../src/client/util.js'
-import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName } from '../../src/client/recall-node.js'
+import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName, pickStaleQueueItemIds, fileCardInfo } from '../../src/client/recall-node.js'
 import { groupByLineage } from '../../src/client/snapshot-manager.js'
 import { nextShadowPriority } from '../../src/client/app.js'
 
@@ -197,5 +197,55 @@ describe('撤回回填的附件引用提取（I34）', () => {
     expect(defaultAttachmentName('image/svg+xml', 1)).toBe('attachment-2.svg+xml')
     expect(defaultAttachmentName('', 0)).toBe('attachment-1.bin')
     expect(defaultAttachmentName(null, 0)).toBe('attachment-1.bin')
+  })
+})
+
+describe('撤回后清理 fork 残留排队项', () => {
+  const queue = [
+    { id: 'q-stale', placement: 'queued', rpcId: 'r-stale' },
+    { id: 'q-own', placement: 'queued', rpcId: 'r-own' },
+    { id: 'q-steering', placement: 'steering', rpcId: 'r-stale' },
+  ]
+
+  it('只挑 placement=queued 且 rpcId 命中下发集合的项（插话行与用户新发消息不动）', () => {
+    expect(pickStaleQueueItemIds(queue, ['r-stale'])).toEqual(['q-stale'])
+    expect(pickStaleQueueItemIds(queue, ['r-stale', 'r-own'])).toEqual(['q-stale', 'q-own'])
+  })
+
+  it('无命中/空集合/非法输入一律返回空数组', () => {
+    expect(pickStaleQueueItemIds(queue, [])).toEqual([])
+    expect(pickStaleQueueItemIds(queue, ['r-miss'])).toEqual([])
+    expect(pickStaleQueueItemIds(null, ['r-stale'])).toEqual([])
+    expect(pickStaleQueueItemIds(queue, null)).toEqual([])
+    expect(pickStaleQueueItemIds([null, {}, { id: 7 }, { id: 'q', placement: 'queued' }], ['r-stale'])).toEqual([])
+  })
+})
+
+describe('用户消息里的文件块渲染信息（fileCardInfo）', () => {
+  it('常规文件：文件名 / 扩展名 / 官方风体积文本', () => {
+    expect(fileCardInfo({ type: 'file', attachment: { attachmentId: 'sha256:x', name: 'Krea-2-图生图提示词反推模板.md', bytes: 6822 } }))
+      .toEqual({ name: 'Krea-2-图生图提示词反推模板.md', ext: 'MD', size: '6.7KB' })
+  })
+
+  it('扩展名大写且截断到 4 字符；无扩展名/点名结尾回退 FILE', () => {
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'a.json', bytes: 2048 } }).ext).toBe('JSON')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'archive.tar.gz', bytes: 2048 } }).ext).toBe('GZ')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'README', bytes: 10 } }).ext).toBe('FILE')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'trailing.', bytes: 10 } }).ext).toBe('FILE')
+  })
+
+  it('体积文本：B/KB/MB/GB 边界，非法值留空', () => {
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'a.md', bytes: 512 } }).size).toBe('512B')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'a.md', bytes: 1048576 } }).size).toBe('1.0MB')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'a.md', bytes: 3 * 1073741824 } }).size).toBe('3.0GB')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'a.md' } }).size).toBe('')
+    expect(fileCardInfo({ type: 'file', attachment: { name: 'a.md', bytes: -5 } }).size).toBe('')
+  })
+
+  it('非 file 块返回 null（不抢图片/文本的渲染），缺引用给兜底名（不漏进 JSON 兜底）', () => {
+    expect(fileCardInfo({ type: 'text', text: 'hi' })).toBe(null)
+    expect(fileCardInfo({ type: 'image', attachment: {} })).toBe(null)
+    expect(fileCardInfo(null)).toBe(null)
+    expect(fileCardInfo({ type: 'file' })).toEqual({ name: '未命名文件', ext: 'FILE', size: '' })
   })
 })
