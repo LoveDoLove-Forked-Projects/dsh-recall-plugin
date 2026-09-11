@@ -17,7 +17,10 @@
 > `0.1.5-rc.2: compatible`；peer 范围沿用按 minor 线开窗（`>=0.1.5-alpha.1 <0.1.6`）天然放行同 tuple 的 rc.2，
 > 无需改 peer 串；reference/README 与 dsh-contract.md 版本字段同步至 0.1.5-rc.2。评估实证见
 > upgrade-assessments/dsh-0.1.5-rc.2.md。结论：接口层面零破坏、行为层面无回归，无需改码；本版发布（2.3.12）
-> 同时修复 DSH Desktop 安装校验对历史包 peer 的解析失败（见 CHANGELOG 2.3.12）。
+> 同时修复 DSH Desktop 安装校验对历史包 peer 的解析失败（见 CHANGELOG 2.3.12）。**2.3.14 追加**：0.1.5-rc.2
+> 实弹暴露 `sessionQuery.readSession` 对 seeded 会话（撤回 fork 出的子会话）恒抛——子会话内撤回预览对全部
+> 消息误报「该消息是本会话中第一条用户消息」（I33）；修复＝降级 `observeSession` 读取全量逻辑日志，
+> 真机 API（dsh web + `/api/recall/preview`）复验通过。
 >
 > **0.1.5-rc.1 核验（2026-09-10）**：**npm 已发布**（dist-tag `latest` 与 `next` 指向 0.1.5-rc.1，
 > `dsh-v0.1.5-rc.1` tag commit `183f08e`，2026-09-10 发布；0.1.5 系列首个候选版本，汇总自 v0.1.2-rc.1
@@ -609,6 +612,104 @@
 - **复查动作**：dsh 升级后 `npm run test:probe`（新探针红即 entries/形状漂移）；
   若 guard 改为尊重插件 priority，动态避让成为主路径，需与 dsh-turn-fold 实弹
   复验共存。
+
+### I32 载体无关路由：host 插件不得硬依赖 webServer（桌面端 composition 禁用该 row）
+- **依赖的官方行为**：桌面端（DSH Desktop）复用 web 组合但禁用网络与浏览器启动行——
+  `desktop.cordis.patch.yml` 对 `webserver`/`web-runtime`/`web-startup` 等 row 置
+  `disabled: true`，`connection` row 保留并把 inject 覆盖为 `[credentials]`；
+  `dsh-desktop-host` 取 `ctx.get('connection')` 后用 `createSharedFetchHandler('/api')`
+  直接分发 `/api/*`。因此 host 插件把 webServer 写进顶层 inject 会让 fiber 永久
+  pending（`waiting for service: webServer` → 「1 entry did not activate」整树加载失败）。
+  API 路由必须走 connection 的载体无关 exact fetch 路由：route =
+  `{ path: '/api/<...>', methods: ['GET'|'HEAD'|'POST'], requestBody: 'buffered' | 'streaming',
+  fetch: (request: Request) => Promise<Response> }`——web 端由 client-connection 把 `/api`
+  挂到 webServer、桌面端由 desktop-host 分发，客户端 URL 与方法两端一致。
+- **注册生命周期（本项目踩点）**：`connection.fetch.register` 的本体挂在 connection
+  插件 fiber 的 effect 上（实现里 `owner = this.ctx`，不是调用者），返回**异步
+  disposer**。插件侧必须 `ctx.inject(['connection'], cb)`（可选注入，服务缺席不 pending，
+  仅 Client API 降级不可用）+ `cb.effect(() => cb.connection.fetch.register(route))` 包裹，
+  否则 HMR 重载会撞 `exact Fetch route ... is already registered`、卸载后路由残留。
+- **出处**：`@deepseek-ai/dsh-desktop-host/config/desktop.cordis.patch.yml`（webserver
+  `disabled: true`；connection 行覆盖 inject）；`dsh-desktop-host/lib/index.js` L337/L344/L379
+  （`ctx.get('connection')` → `createSharedFetchHandler('/api')` → `/api/` 前缀分发）；
+  `dsh-client-connection/lib/index.js`（`get fetch()` 的 owner 闭包、`registerFetchRoute`
+  的 `owner.effect` 包裹与重复注册抛错）；类型面 `dsh-client-connection/lib/types/rpc.d.ts`
+  （`ConnectionFetchRoute` / `HostConnectionFetch.register(): () => Promise<void>`）。
+- **探针/单测**：`scripts/verify-host.mjs` 以 connection 桩断言——每端点一条 exact 路由、
+  路由形状（methods 含 POST / requestBody=buffered / fetch 可调用）、fetch 分发响应 200
+  且 body 带 `ok`、未知 path 404、卸载后注册清零（异步 disposer 由 cordis 等待）；
+  `src/types/dsh-contract.ts` 按官方 `.d.ts` 建模消费面（HttpRequest/HttpResponse 已删）。
+- **失效症状**：① webServer 加回顶层 inject → 桌面端 fiber 永久 pending、插件树加载失败
+  （错误页 / 无撤回按钮）；② connection 改为硬 inject → 旧版 dsh 或未装配 connection 的
+  部署同样 pending（现为可选注入，缺席时仅 Client API 不可用）；③ 忘记 effect 包裹
+  register → HMR 重载报 route 已注册、或卸载后路由残留。
+- **复查动作**：dsh 升级后 `npm run verify:host`（路由注册/形状/清零断言）；桌面端冒烟
+  看启动日志无 pending；官方若新增 Fetch 路由约束（path 前缀、方法集），以
+  `dsh-client-connection` 的 `assertFetchRoute` 源码为准同步。
+
+
+### I33 seeded 会话的会话读取：readSession 恒抛，须降级 observeSession（撤回 fork 子会话误报「第一条用户消息」）
+- **依赖的官方行为**：`sessionQuery.readSession` 内部以
+  `Session.create(id, events, header, inheritedEventCount)` 做回放校验；官方 `Session` 构造器在
+  快照模式（`Session.create` 装配）下要求 seeded 头 `inheritedEventCount === log.length`
+  （「seeded session constructor seed must equal its inherited prefix」）。而读取面交给它的是
+  全量逻辑日志——`snapshotLive` 走 `session.snapshotEvents()` 无参＝`slice(0, log.length)` 全量，
+  冷读 `handle.read(0)` 返回完整存储日志（继承前缀物理存在）——inheritedEventCount 是 fork 时的
+  前缀长度，两者必然不等，`readSession` 对任何 seeded 会话直接抛错。正确读取面是
+  `sessionQuery.observeSession(id)`：经 `Session.fromRestore` 恢复（restore 模式无该约束），
+  租约 `events` 为全量逻辑日志（含继承前缀）；读毕必须释放（`Symbol.dispose`，prepared 缓存项
+  靠它减引用）。
+- **项目踩点（2.3.13 → 2.3.14 修复）**：`resolveCutSeq` 此前把读取异常静默折成 null，与「真首条」
+  不可分——在撤回 fork 出的子会话（本插件自己造的 seeded 会话）里点**任何**消息都显示
+  「该消息是本会话中第一条用户消息」，重启/重装不恢复（确定性，非缓存）。真机实测（dsh web
+  0.1.5-rc.2 + 插件走 `/api/recall/preview`）：修前子会话 6 条消息 cutSeq 全 null、父会话全部正常
+  （43/62/88/156）；修后子会话 156/43/62/88/197、真首条（你好）仍 null，父会话不变。降级链：
+  readSession →（抛错 / 事件里缺该消息）→ observeSession；只有「消息在、其前无 turn/end」不降级；
+  两跳都失败才落到 null。
+- **出处**：`dsh-session/lib/index.js`（构造器 seeded 校验；`snapshotEvents(fromSeq=0,
+  toSeqExclusive=this.seq)` 全量语义；`ownEvents()` 前缀后切片）；`dsh-session-query/lib/index.js`
+  （readSession 的 `Session.create(loaded.events, ...)` 校验、`snapshotLive`、
+  `readColdSessionLog`、`observeSession` 租约）；`dsh-session-persistence-jsonl/lib/index.js`
+  （handle.read 的 slice 语义、`inheritedEventCount` getter、`encodeMaterialization`）。
+- **探针/单测**：`tests/unit/snapshots-cutseq.test.js`（抛错降级 / 缺消息降级 / 真首条不降级 /
+  两跳失败保底 null / 旧版无 observeSession 维持原行为 / 租约释放与缓存命中）；真机验证＝
+  `dsh web --no-open` 后 POST `/api/recall/preview`（本次核验即此法）。
+- **失效症状**：seed​ed 会话（撤回子会话、或任何 fork 调用产生的会话）内撤回预览对全部消息都显示
+  「该消息是本会话中第一条用户消息、无法回退对话」；文件回退仍可执行（cutSeq null 只是跳过对话
+  回退），重启不恢复。
+- **复查动作**：dsh 升级后跑 `npm test`（本档单测）；真机冒烟＝在撤回产生的子会话里对非首条消息
+  preview，面板应显示「对话将一并回退」而非「第一条用户消息」；官方若修 readSession 或调整
+  sessionQuery 读取面，以 `dsh-session-query/lib/index.js` 源码为准同步本降级链。
+
+
+### I34 撤回回填的附件重建：readAttachment + createDrafts + addAttachments（探测式消费，全链降级）
+- **依赖的官方行为**：撤回回填把被撤回消息的附件（image/file 块，均带 durable
+  `attachment.attachmentId` 引用）也放回输入框，链路与官方 composer 的 `addFiles` 等价：
+  1) `sessions.binding(sessionId).session.readAttachment(attachmentId)`——wire 调
+  `remote.session.attachment({ sessionId, attachmentId })`，返回
+  `{ attachment: { mediaType, ... }, data: Uint8Array }`（官方历史图片回显
+  `HistoricalImageCache.loadCanonical` 同款调用）；
+  2) `conversation.createDrafts(sessionId, files)`——浏览器 `File` → 运行时草稿附件
+  （图片=object URL 预览，其他文件立即后台上传），返回按输入顺序的描述符；
+  3) `shell.actions.addAttachments(ids)`（官方 composer 走 `shell.addAttachments`；
+  未接纳返回 false 时 `conversation.releaseDraftAttachments(drafts)` 回滚）。
+- **会话授权（本项目踩点）**：`readAttachment` 的 sessionId 是「消息所在会话」——被撤回消息
+  不在 fork 出的子会话日志里，故插件在 execute 一开始用**源会话**早读字节（此刻源会话仍在册、
+  归档尚未发生），fork + open 后再把 `File` 注册进**子会话**的草稿。直读子会话会拿不到授权。
+- **出处**：`dsh-cordis-client-runner/lib/client.js`（ISession 声明：`readAttachment` 签名与
+  `ImageAttachmentRef` 返回）；`dsh-api-session-controller/lib/types/client/sessions/session.js`
+  （readAttachment 实现：`remote.session.attachment({sessionId, attachmentId})` + base64 解码）；
+  `dsh-client-ui-conversation/lib/client.js`（`SessionInputShell.actions.addAttachments`、
+  `ConversationController.createDrafts / releaseDraftAttachments`、composer `addFiles` 组合、
+  `HistoricalImageCache` 对 readAttachment 的用法）。
+- **探针/单测**：无直接探针——官方这些 client 面未随附 `.d.ts`（ui-conversation 无类型文件、
+  session-controller 的 client 目录仅 `.js`），字段以源码核验；纯逻辑
+  `attachmentRefsFromBlocks` / `defaultAttachmentName` 由 `tests/unit/client-pure.test.js` 钉。
+- **失效症状**：撤回回填只回来文本、附件不回（服务面缺失时静默降级；不影响撤回主流程与文本回填；
+  旧版 dsh 恒降级）。
+- **复查动作**：dsh 升级后对照上述三处源码是否漂移（方法名、返回形状、`addAttachments` 的布尔
+  语义、`createDrafts` 的 descriptor 形状）；真机冒烟＝对带图片的消息撤回，输入框应出现附件
+  缩略图（smoke-checklist 可追加项）。
 
 
 ## 与 E1 verify-host 的对应关系

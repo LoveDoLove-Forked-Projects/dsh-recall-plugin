@@ -18,7 +18,7 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 
 | 文件                              | 职责                                                                                                                                                                                                                                                                                                                               | 什么时候改它           |
 | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------- |
-| `src/host/index.ts`             | Host 入口（`name`/`inject`/`Config`/`apply`）：装配域模块、注册 `/api/recall` 前缀路由（端点表 = routes-core + routes-manage）、settings namespace `dsh-recall`（`installSettingsSection`/`installSection` 双版本接线 + watch 热更 cfg）、`session/event` 触发快照与启动预热、端点共享辅助（enqueue / agentBusy / dumpStores / locateSnapshotOnDisk / collectAllSnapshotRecords 等） | 加接线、改事件触发、改共享辅助  |
+| `src/host/index.ts`             | Host 入口（`name`/`inject`/`Config`/`apply`）：装配域模块、注册 `/api/recall` 载体无关 exact 路由（connection fetch 注册表，端点表 = routes-core + routes-manage）、settings namespace `dsh-recall`（`installSettingsSection`/`installSection` 双版本接线 + watch 热更 cfg）、`session/event` 触发快照与启动预热、端点共享辅助（enqueue / agentBusy / dumpStores / locateSnapshotOnDisk / collectAllSnapshotRecords 等） | 加接线、改事件触发、改共享辅助  |
 | `src/host/routes-core.ts`       | 核心端点：init / snapshot-info / preview / execute / status / lineage-record（P0-1 运行中 agent 拦截、P0-3 STALE 时效校验、H1 救援编排在此生效；preview/execute 与快照/gc 同一条串行队列）                                                                                                                                                                            | 改撤回主链路           |
 | `src/host/routes-manage.ts`     | 管理端点：exclude-get/set、config-get/set/reset、manage（list/titles/messages/usage/delete/deleteAll/gc/lineage）+ 按过滤批量删除辅助                                                                                                                                                                                                              | 改设置页后端           |
 | `src/host/config.ts`            | 配置域：Schemastery `Config` schema（9 字段）+ `DEFAULTS` 运行时兜底镜像 + `createConfig`（env 覆盖最高优先）。**改默认值两处同步改**                                                                                                                                                                                                                             | 加/改配置项           |
@@ -79,7 +79,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 特注：
 
-* `inject` 当前声明 `['shell', 'sessions', 'webServer', 'agents']`——`agents` 是 P0-1 运行中 agent 拦截所需；cordis 4 漏声明即抛「cannot get property without inject」并被访问点守卫吞掉、静默 fail-open（I10，verify-host 有行为级断言盯防）。
+* `inject` 当前声明 `['shell', 'sessions', 'agents']`——`agents` 是 P0-1 运行中 agent 拦截所需；cordis 4 漏声明即抛「cannot get property without inject」并被访问点守卫吞掉、静默 fail-open（I10，verify-host 有行为级断言盯防）。**webServer 刻意不在 inject**：桌面端 composition 禁用它，硬依赖会让 fiber 永久 pending（I32）；API 路由走 connection 的载体无关 fetch 路由，`ctx.inject` 可选注入、服务缺席仅 Client API 降级。
 
 * `DSH_RECALL_GC_SNAPS/HOURS` env 绕过 schema 仅作 Config 覆盖，与 #3 有张力——新参数一律走 Config 字段。
 
@@ -87,7 +87,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * 发布前重点复核：#3 无新硬编码、#4 patch 默认值语义、#5 HMR 假设、#8 新增官方 API 调用点的字段已核验。
 
-漂移控制：每 release 周期按 `docs/reference/README.md` 重拉镜像（重拉后同步更新该文件「归档日期」与「归档 dsh 版本」字段），变化同步进本清单、[docs/compat-audit.md](docs/compat-audit.md) 台账与「已知坑」；发布前跑 `npm run check:dsh`（P2-5）做版本巡检——本地 dsh 与镜像漂移、peer 范围越界都会输出提醒。**dsh 升级后跑** **`npm run check:upgrade`（串联三层门禁）并按 compat-audit 台账 I1-I30 定点复查**，替代全文重读「已知坑」。
+漂移控制：每 release 周期按 `docs/reference/README.md` 重拉镜像（重拉后同步更新该文件「归档日期」与「归档 dsh 版本」字段），变化同步进本清单、[docs/compat-audit.md](docs/compat-audit.md) 台账与「已知坑」；发布前跑 `npm run check:dsh`（P2-5）做版本巡检——本地 dsh 与镜像漂移、peer 范围越界都会输出提醒。**dsh 升级后跑** **`npm run check:upgrade`（串联三层门禁）并按 compat-audit 台账 I1-I34 定点复查**，替代全文重读「已知坑」。
 
 ## 关键设计决策（为什么这样写）
 
@@ -179,13 +179,13 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * **冒烟路径**：中文路径工作区 → 发消息（出快照）→ 改文件 → 撤回（清单正确、文件恢复、对话回退、标题不变）→ 设置页快照管理（树形展开/折叠、叶子消息内容、三级/批量删除、立即 gc）。完整待办清单（各批次实弹验收项）见 [docs/plans/completed/smoke-checklist.md](docs/plans/completed/smoke-checklist.md)（2026-08-29 七节全部通过；新批次验收项追加新节）；执行记录（环境/结果/发现/发版判定）见同目录 [smoke-checklist-records.md](docs/plans/completed/smoke-checklist-records.md)。
 
-* **测试分层**：单测（纯逻辑，CI 同跑）→ 探针（官方 API 字段断言，把合规清单 #8 机器化）→ verify-host（装配层门禁）→ 活体冒烟（不替代关系，逐层补盲）。dsh 升级后本地跑 `npm run check:upgrade`（串联 check:dsh + test:probe + verify:host），并按 compat-audit 台账 I1-I30 定点复查。
+* **测试分层**：单测（纯逻辑，CI 同跑）→ 探针（官方 API 字段断言，把合规清单 #8 机器化）→ verify-host（装配层门禁）→ 活体冒烟（不替代关系，逐层补盲）。dsh 升级后本地跑 `npm run check:upgrade`（串联 check:dsh + test:probe + verify:host），并按 compat-audit 台账 I1-I34 定点复查。
 
 ## 已知坑（踩过的，别再踩）
 
 > 细节（依赖的官方行为 / 出处 / 探针·单测 / 失效症状 / 复查动作）全部住在
 > [docs/compat-audit.md](docs/compat-audit.md) 的「子系统 × 不变量 × 探针」矩阵
-> （I1-I29），这里只留一行一条索引；**dsh 升级后按台账 I1-I29 定点复查，不全文重读本节**。
+> （I1-I34），这里只留一行一条索引；**dsh 升级后按台账 I1-I34 定点复查，不全文重读本节**。
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 
@@ -244,4 +244,14 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 * I28 `SessionHeader` 无 `title` 字段（标题在 `session/title` 事件日志）——冷标题无法走 listSessions，titles 半项废弃钉（官方未来加 title 探针红提示重启优化）。
 
 * I29 dsh 0.1.2 client 服务层迁移：`client/runtime` 包删除、slots/sessions/workspaces 迁入 ui-renderer 与新增 api 包后，插件 client 对象必须 `inject: [...]` 声明 + `ctx.<name>` 属性访问服务，`ctx.get('slots')` 在未声明作用域下静默 undefined 导致 apply 首行退出——症状「Host 活 Client 死」UI 全消失无报错（guard 门禁 0.1.1-rc.2 已存在，触发点是服务层重组）；guard 对 shadowing slot 强制分配 priority（插件传入值被覆盖，重试循环失效但无害）。详见 compat-audit I29。
+
+* I30 settings 独立辅助函数移除：0.1.2-alpha.2 起 `installSettingsSection` 改 `SettingsProvider.installSection`——按运行时注入实例的 API 分派（旧版走 `register` 复刻接线），静态 import 判断会误判。
+
+* I31 `slots.entries(key)` 是只读快照、`slots.inject(key, cb)` 回调同步/延迟两态——priority 动态避让只在无 guard 环境真实生效（I1 的冲突递减重试在 inject 延迟路径是死代码）。
+
+* I32 Host 不得硬依赖 webServer：桌面端 composition 禁用 `webserver` row，硬 inject 令 fiber 永久 pending（「entry did not activate」）；API 路由走 connection 的载体无关 exact fetch 路由（`ctx.inject` 可选注入 + `effect` 包裹 register 的异步 disposer）。
+
+* I33 seeded 会话（撤回 fork 子会话）的读取：`sessionQuery.readSession` 内部 `Session.create` 快照校验要求 seed === fork 继承前缀，对全量读取的 seeded 会话恒抛；异常被静默折成 null 与「真首条」不可分 → 子会话里点任何消息都误报「第一条用户消息」（重启不恢复）。修法＝降级 `observeSession`（restore 无此约束，取全量事件并释放租约）。详见 compat-audit I33。
+
+* I34 撤回回填的附件重建走官方 composer 等价链路（`sessions.binding().session.readAttachment` → `conversation.createDrafts` → `shell.actions.addAttachments`，未接纳则 `releaseDraftAttachments`）；`readAttachment` 授权绑定「消息所在会话」——须在 execute 开头发起时用**源会话**早读字节，fork 后再把 File 注册进子会话草稿，不能在子会话里直读（被撤回消息不在其日志中）。全链 typeof 探测降级。详见 compat-audit I34。
 

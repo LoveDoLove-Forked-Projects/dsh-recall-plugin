@@ -7,14 +7,13 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)
 ![Build](https://img.shields.io/badge/pure%20JS-green)
 
-![DSH](https://img.shields.io/badge/DSH-0.1.1--rc.2-blue)
-![DSH](https://img.shields.io/badge/DSH-0.1.1--rc.1-blue)
+[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.5-rc.2)
 ![DSH](https://img.shields.io/badge/DSH-Desktop-blue)
 ---
-Under any message you've sent, click "↶ Recall" — **both your workspace files and the conversation history roll back to the moment right before that message was sent** (DSH 0.1.1-rc.2).
+Under any message you've sent, click "↶ Recall" — **your workspace files and the conversation history roll back to just before that message was sent**.
 ---
 
-Files and conversation roll back together: the workspace is first snapshotted into an independent shadow git repository, and a recall uses it to restore files to their state before that message; the conversation is rewound through DSH's official `sessions.fork` to the turn boundary before it. Snapshots never touch your project's own git and live under `$DSH_HOME` by default; the original session is archived and can be recovered anytime. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
+Files and conversation roll back together: the workspace is first snapshotted into an independent shadow git repository, and a recall uses it to restore files to their state before that message; the conversation is rewound through DSH's official `sessions.fork` to the turn boundary before it, with the original session archived and recoverable. After a recall, the message's text and attachments are placed back into the input box, ready to edit and resend. Snapshots never touch your project's own git and live under `$DSH_HOME` by default. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
 
 [Changelog](CHANGELOG.md)
 
@@ -37,7 +36,7 @@ Files and conversation roll back together: the workspace is first snapshotted in
 | --- | --- |
 | ![Recall button appears on hover](docs/screenshots/recall-button.png) | ![Confirmation panel · file change list](docs/screenshots/confirm-panel-1.png) |
 
-- After a recall, the message text is auto-refilled into the input box for quick editing and resending (can be disabled in the settings card)
+- After a recall, the message's text and attachments are placed back into the input box for quick editing and resending (can be disabled in the settings card)
 - Settings · plugin config card (config form / exclusions / snapshot manager, saved changes apply live)
 
 ![Settings](docs/screenshots/settings-exclude-2.png)
@@ -49,6 +48,7 @@ Abilities with a version in parentheses require that version or later; the rest 
 - **Files + conversation, rolled back together**: recalling isn't just about chat history — files the agent modified go back to their original state too; immune to your project's `.gitattributes` conversion, with byte-level fidelity for line endings and binary content (2.1.1+).
 - **Never touches your project's own git, and keeps it clean**: snapshots live in an independent shadow git repository — branches, staging area, and uncommitted changes are untouched; storage stays under `$DSH_HOME` regardless of the session's sandbox permission (workspace-write / read-only sessions work as usual), falling back to an in-project `.dsh-recall-snapshots` only when home itself is unwritable.
 - **See the list before you act — and change your mind as often as you like**: recall first shows the list of files that will change (modified / restored / deleted); nothing runs until you confirm. After a recall you can recall again to an even earlier point, and files overwritten during a recall always remain recoverable (up to 500 snapshots per workspace by default).
+- **Resend right after a recall** (2.3.15+): a recall places the message's text and attachments back into the input box — images and files return as well, so you can edit and send again without picking the attachments over.
 - **A guarded recall path** (2.0+; auto-rescue 2.1+): recall is refused while an agent is running, and a new snapshot after the preview forces a fresh preview; a "pre-rollback" safety snapshot is taken before every recall, a failed rollback is rescued automatically, and a failed rescue gives you a copy-paste-ready manual recovery command.
 - **Disk-friendly, self-maintaining**: snapshots use git delta compression and large files are skipped automatically (threshold configurable); periodic lossless `git gc`, session-deletion cleanup, and optional cleanup by cap or retention age — plus a **workspace → session → snapshot** tree manager on the settings page with search and per-level deletion.
 - **Failures speak up and heal** (self-healing 2.1+): failures are classified by root cause (git missing / disk full / permission denied / lock conflict / directory conflict) with actionable guidance (the same fault only bothers you once per 10 minutes; reasons land in the settings card's "Recent errors"); leftover objects are pruned, 3 consecutive failures trigger exponential backoff, concurrent instances yield via heartbeats, and unindexable paths are skipped with a notice instead of failing the whole snapshot (they are neither restored nor deleted on recall).
@@ -107,7 +107,7 @@ All options can be edited visually in the "**Settings → Plugin Config → Reca
 | `maxSnapshotsPerWorkspace` | 500 | Maximum snapshots kept per workspace; oldest pruned beyond the cap. 0 = unlimited |
 | `retentionDays` | 0 | Keep snapshots for this many days; older ones are deleted. 0 = disabled (works independently of the cap) |
 | `baseExcludes` | `.git`, `node_modules/`, `.dsh-recall-snapshots/`, `dsh-recall-snapshots/` | Base exclusion list (gitignore syntax, lower priority than exclude.txt) |
-| `refillDraft` | true | Refill the recalled message text into the input box after a recall |
+| `refillDraft` | true | Refill the recalled message (text and attachments) into the input box after a recall |
 | `snapshotEnabled` | true | Master snapshot switch (off = no new snapshots; existing snapshots remain recallable) |
 | `archiveOriginal` | true | Archive the original session after a recall (off = the original session stays in the session list) |
 

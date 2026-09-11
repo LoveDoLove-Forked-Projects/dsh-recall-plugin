@@ -2,6 +2,30 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.16] - 2026-09-11
+
+### 变更
+
+- **插件描述与双语 README 文案重写**：包描述由「是什么 / 怎么做」改为「能做什么」——撤回自己发过的消息，工作区文件与对话历史一起回到那条消息发出之前，消息的文本与附件自动放回输入框（文件走独立影子 git 快照、对话走官方 `sessions.fork`、原会话归档可找回）。双语摘要补齐「撤回后可重发」；英文侧去掉过时的 DSH 版本标注；徽章由历史版本（`0.1.2-rc.1` / `0.1.3-alpha.1`，英文侧 `0.1.1-rc.x`）统一为当前核验版本 `0.1.5-rc.2`（兼容范围仍以「安装」节的 peer 声明为权威）；两侧同步新增「撤回完就能重发」亮点与预览区的回填要点。功能、接口与构建产物零变化。
+
+## [2.3.15] - 2026-09-11
+
+### 新增
+
+- **撤回回填扩展为「文本 + 附件」**：此前撤回只把被撤回消息的文本回填到输入框，消息里的附件（图片/文件）不会回来；现在两者一起回填，改完可直接重发。实现沿用官方 composer 自己的附件链路（`dsh-client-ui-conversation` 的 `addFiles` 实证）：**早读**——撤回执行一开始（源会话仍在册、附件引用可解析时）经 `sessions.binding(sessionId).session.readAttachment(attachmentId)` 取回原始字节与 mediaType，重建为浏览器 `File`（缺文件名按 mediaType 派生 `attachment-N.<subtype>`）；**后写**——fork + open 完成后在子会话里 `conversation.createDrafts(sessionId, files)` 注册草稿附件、`shell.actions.addAttachments(ids)` 进入输入态（未接纳时 `releaseDraftAttachments` 释放，与官方 `addFiles` 的失败回滚一致）。附件读取授权绑定「消息所在会话」，故必须用源会话早读——被撤回消息不在 fork 出的子会话日志中，直读子会话拿不到授权。附件读取与草稿注册均逐项 try/catch、服务面全部 typeof 探测：任一步缺失只降级附件，文本回填与撤回主流程不受影响（旧版 dsh 无 `conversation`/`createDrafts`/`readAttachment` 时恒降级）。`refillDraft` 开关语义同步为「文本与附件」（设置描述与 README 双语同步）；新增 `attachmentRefsFromBlocks` / `defaultAttachmentName` 纯函数与 3 例单测，compat-audit 新增 I34。客户端 bundle 结构与既有行为零变化。
+
+## [2.3.14] - 2026-09-11
+
+### 修复
+
+- **撤回 fork 出的子会话内，撤回预览对任何消息都误报「该消息是本会话中第一条用户消息」**：`resolveCutSeq` 冷读取走 `sessionQuery.readSession`，官方实现内部却用 `Session.create(events, header, inheritedEventCount)` 做回放校验——快照模式要求 seeded 头的 `inheritedEventCount` 恰等于 `log.length`（「seeded session constructor seed must equal its inherited prefix」），而读取面交给它的是全量逻辑日志（`snapshotEvents()` 无参＝继承前缀＋自身事件；冷读返回完整存储日志），两者必然不等，`readSession` 对任何 seeded 会话（本插件每次撤回 fork 出的子会话即此类）直接抛错；此前的 `catch` 把异常静默折成 null，与「真首条」不可分——于是子会话里点**任何**消息，面板都显示「该消息是本会话中第一条用户消息，无法回退对话；确认后仅回退项目文件」。修复：`resolveCutSeq` 增加降级链——`readSession` 抛错、或消息根本没出现在它给的事件里（读取面缺继承前缀的版本差异）时，改用 `sessionQuery.observeSession`（经 `Session.fromRestore` 恢复，restore 模式无该约束）读取全量逻辑日志；租约以 `Symbol.dispose` 显式释放（prepared 缓存项靠它减引用，漏释放会卡淘汰）；只有「消息在、其前无 turn/end」才是可信的“首条”，两跳都失败才落到 null。`scanCutSeq` 拆出 `scanCutSeqDetail`（cut + found）供降级判断；契约补 `observeSession` 与 `SessionObservationLease`（可选——旧版 dsh 无此 API 时维持原行为）。**真机复验**（dsh web 0.1.5-rc.2 + POST `/api/recall/preview`）：修前子会话 6 条消息 cutSeq 全 null、父会话正常；修后子会话 156/43/62/88/197、真首条（你好）仍 null、父会话不变。新增 `tests/unit/snapshots-cutseq.test.js`（6 例），compat-audit 新增 I33。插件功能、客户端与其余行为零变化。
+
+## [2.3.13] - 2026-09-11
+
+### 修复
+
+- **DSH Desktop 上插件树加载失败（fiber 永久 pending）**：桌面端 composition（`desktop.cordis.patch.yml`）把 `webserver` row 置 `disabled: true`（Electron 用 file:// + IPC 替代 HTTP），插件 host 侧顶层 `inject` 含 `webServer`，fiber 因此停在 `pending (waiting for service: webServer)` → 「1 entry did not activate」整树加载失败。修复：① 顶层 inject 收敛为 `['shell', 'sessions', 'agents']`；② 删除 `ctx.webServer` 前缀路由注册，改走官方「载体无关」路由注册表 `ctx.connection.fetch.register`——12 个端点各注册一条 `POST /api/recall/<name>` 的 exact 路由（`requestBody: 'buffered'`、插件自留 1MB 请求体上限、`{ ok:false, code, message }` 错误包装与 200 语义不变）；③ `connection` 经 `ctx.inject(['connection'], cb)` 可选注入（服务缺席不 pending，仅 Client API 降级不可用），并用 `cb.effect` 包裹 register 返回的**异步 disposer**——注册本体挂在 connection 插件 fiber 的 effect 上（`owner = this.ctx`），不包会在 HMR 重载时撞「exact Fetch route ... is already registered」。web 端由 client-connection 把 `/api` 挂到 webServer 之下、桌面端由 dsh-desktop-host 以 `createSharedFetchHandler('/api')` 直接分发，客户端 URL 与方法两端完全一致，**客户端 bundle 零改动**。契约类型按官方 `.d.ts` 换为 `ConnectionFetchRoute` / `HostConnectionFetch`（HttpRequest/HttpResponse/WebRoute/WebServer 删除）；`verify:host` 门禁改 connection 桩并新增路由形状（methods/requestBody/fetch）、exact 分发 404、异步 disposer 清零断言；`compat-audit` 新增 I32、`dsh-contract.md` 与 AGENTS.md 同步。插件功能与 `lib/client.js` 零变化。
+
 ## [2.3.12] - 2026-09-11
 
 ### 变更

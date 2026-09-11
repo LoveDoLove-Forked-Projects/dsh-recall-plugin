@@ -5,13 +5,12 @@
 [![npm version](https://img.shields.io/npm/v/dsh-recall-plugin?style=flat-square&label=npm&color=3178C6)](https://www.npmjs.com/package/dsh-recall-plugin)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-recall-plugin?style=flat-square&label=downloads&color=1F883D)](https://www.npmjs.com/package/dsh-recall-plugin)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-[![DSH](https://img.shields.io/badge/DSH-0.1.2--rc.1-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.2-rc.1)
-[![DSH](https://img.shields.io/badge/DSH-0.1.3--alpha.1-red)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.3-alpha.1)
+[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.5-rc.2)
 ---
 在任意一条你发过的消息下方点「↶ 撤回」——**工作区文件和对话历史一起回到那条消息发出之前的状态**。
 ---
 
-撤回时文件与对话一起回退：工作区先被快照进一个独立的影子 git 仓库，撤回就用它把文件恢复到那条消息发出之前；对话通过 DSH 官方的 `sessions.fork` 切到该消息之前的 turn 边界。快照全程不触碰项目自身的 git，存储默认落在 `$DSH_HOME` 下；原会话归档保留，随时可找回。最主要的边界：快照只在**消息发送时**创建，插件启用前的历史消息没有快照、不显示撤回按钮。
+撤回时文件与对话一起回退：工作区先被快照进一个独立的影子 git 仓库，撤回就用它把文件恢复到那条消息发出之前；对话通过 DSH 官方的 `sessions.fork` 切到该消息之前的 turn 边界，原会话归档保留、随时可找回。撤回后，这条消息的文本与附件会自动放回输入框，改完即可重发。快照全程不触碰项目自身的 git，存储默认落在 `$DSH_HOME` 下。最主要的边界：快照只在**消息发送时**创建，插件启用前的历史消息没有快照、不显示撤回按钮。
 
 [更新日志](CHANGELOG.md)
 
@@ -34,6 +33,7 @@
 | --- | --- |
 | ![悬停出现撤回按钮](docs/screenshots/recall-button.png) |  ![确认面板 · 变更文件清单](docs/screenshots/confirm-panel-1.png) |
 
+- 撤回后，这条消息的文本与附件自动放回输入框，改完即可重发（可在设置卡片关闭）
 - 设置页 · 插件配置卡片（配置表单 / 排除表 / 快照管理，保存即热生效）
 
  ![设置页](docs/screenshots/settings-exclude-2.png) 
@@ -46,6 +46,7 @@
 - **文件 + 对话，整段回退**：撤回的不只是聊天记录，agent 改过的文件也一并回到原样；不受项目 `.gitattributes` 转换影响，换行与二进制内容字节级保真（2.1.1+）。
 - **不碰你项目自己的 git，目录保持干净**：快照存在独立的影子 git 仓库里，分支、暂存区、未提交改动统统不受影响；存储默认落在 `$DSH_HOME` 下，与会话的沙箱权限无关（workspace-write / read-only 照常工作），仅当 home 不可写才降级到项目内 `.dsh-recall-snapshots`。
 - **先看清单再动手，可反复后悔**：撤回前展示将变更的文件清单（修改 / 恢复 / 删除），确认后才执行；撤回后还能再撤到更早，被覆盖的文件一直找得回来（默认每工作区保留 500 条）。
+- **撤回完就能重发**（2.3.15+）：撤回会把这条消息的文本与附件一起放回输入框——图片、文件原样回来，改完直接发送，不必重新挑一遍附件。
 - **撤回全程有防护**（2.0+，救援 2.1+）：agent 运行中拒绝撤回，预览后出现新快照会强制重新预览；执行前自动打「回退前」安全快照，回退失败自动救援，救援失败给出可直接复制执行的手动恢复命令。
 - **磁盘友好、自动维护**：快照走 git delta 增量压缩，大文件自动跳过（阈值可配）；定期无损 `git gc`，会话删除联动清理，可按条数与保留天数自动清理；设置页提供**工作区 → 会话 → 快照**三级树形管理，支持搜索与分级删除。
 - **失败不静默、能自愈**（自愈 2.1+）：失败按根因分类（git 缺失 / 磁盘满 / 无权限 / 锁冲突 / 目录冲突）给出可行动提示，同类故障 10 分钟只打扰一次，失败原因进设置卡片「最近错误」；自动清理残骸、连续 3 次失败指数退避、多实例按心跳互让；无法索引的路径跳过并告知，不中断整条快照（撤回时也不触碰它们）。
@@ -109,7 +110,7 @@ dsh plugin --profile web remove dsh-recall-plugin
 | `maxSnapshotsPerWorkspace` | 500 | 每个工作区保留的最大快照数，超限自动删除最旧的；0 = 不限制 |
 | `retentionDays` | 0 | 按天数保留快照，超期自动删除；0 = 不启用（与条数上限各自独立生效） |
 | `baseExcludes` | `.git`、`node_modules/`、`.dsh-recall-snapshots/`、`dsh-recall-snapshots/` | 基础排除表（gitignore 语法，优先级低于 exclude.txt） |
-| `refillDraft` | true | 撤回后把被撤回的消息文本回填到输入框 |
+| `refillDraft` | true | 撤回后把被撤回的消息（文本与附件）回填到输入框 |
 | `snapshotEnabled` | true | 快照总开关（关闭只冻结新建，已有快照仍可撤回） |
 | `archiveOriginal` | true | 撤回后归档原会话（关闭后原会话保留在会话列表中） |
 
