@@ -2,7 +2,7 @@
 
 > 状态：进行中 ｜ 更新：2026-09-01
 > 本文档是计划族的导航索引与单一事实源：子计划从这里拆出并回链，任务细节一律住在子计划里，这里只维护清单、状态与全局顺序。
-> 调研背景与路线决策依据：[research-competitors.md](./research-competitors.md)（竞品调研，2026-08-26）。
+> 调研背景与路线决策依据：[research-competitors.md](./research-competitors.md)（第一/二轮，2026-08-26/28）、[research-competitors-2026-09.md](./research-competitors-2026-09.md)（第四轮六维度评估，2026-09-09，增量输入 [plan-competitor-ux.md](./pending/plan-competitor-ux.md)：P1 模型随行建议新增 U7、plan 会话绑定随 U5）。
 > 发版版本号在发版时确定，计划文档内不预先指定（规范见 [../README.md](../README.md)）。
 
 ## 计划索引
