@@ -7,6 +7,18 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.5-rc.2 核验（2026-09-11）**：**npm 已发布**（dist-tag `next` 指向 0.1.5-rc.2、`latest` 仍为 rc.1，
+> `dsh-v0.1.5-rc.2` tag commit `fb2c4b9`，2026-09-10 发布），全局实装，桌面端 DSH Desktop 0.1.5-rc.2 同源。
+> 三层门禁：`test:probe` 31/31 + `verify:host` 装配断言通过 + `npm test` 307/307；`check:dsh` 报镜像/契约漂移，
+> 本次同步处理，8 个 peer 在 rc.2 全部在范围内。**消费面零类型 diff**：rc.1→rc.2 tag 对比（4 commits / 300 文件）
+> 按消费面包 + 类型源过滤后唯一命中 `packages/client/ui-chat/src/client/chat/TurnTailNodeView.module.css`（+3 行
+> 纯 CSS 间距）；`sessions.d.ts`、`slots.d.ts`、`slot-contract.d.ts` 等类型源全部未动。reference/ 镜像按 rc.2 tag
+> 重拉：13 源中 12 份内容相同、11 号仅 CRLF 噪声（逐行相同）。**兼容声明同步**：`dshReleases` 矩阵补
+> `0.1.5-rc.2: compatible`；peer 范围沿用按 minor 线开窗（`>=0.1.5-alpha.1 <0.1.6`）天然放行同 tuple 的 rc.2，
+> 无需改 peer 串；reference/README 与 dsh-contract.md 版本字段同步至 0.1.5-rc.2。评估实证见
+> upgrade-assessments/dsh-0.1.5-rc.2.md。结论：接口层面零破坏、行为层面无回归，无需改码；本版发布（2.3.12）
+> 同时修复 DSH Desktop 安装校验对历史包 peer 的解析失败（见 CHANGELOG 2.3.12）。
+>
 > **0.1.5-rc.1 核验（2026-09-10）**：**npm 已发布**（dist-tag `latest` 与 `next` 指向 0.1.5-rc.1，
 > `dsh-v0.1.5-rc.1` tag commit `183f08e`，2026-09-10 发布；0.1.5 系列首个候选版本，汇总自 v0.1.2-rc.1
 > 以来的变更），`npm install -g @deepseek-ai/dsh@0.1.5-rc.1` 全局实装。三层门禁：`test:probe` 31/31 +

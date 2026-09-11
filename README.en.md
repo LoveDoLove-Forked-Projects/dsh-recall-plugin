@@ -67,7 +67,7 @@ Boundaries accepted by design and edge cases not yet covered — worth checking 
 
 ## Installation
 
-Prerequisites: git CLI (without it the recall button won't appear and a notice shows at the top of the page — DSH itself keeps running); PowerShell 5.1 / 7 on Windows, bash + git on Linux/macOS; DSH `0.1.1-rc.2` through `0.1.5-rc.1` (peerDependencies open a window per minor line: `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6`, consistent with the `dsh.compatibility.dshReleases` declaration; each line is anchored at its first verified version with an exclusive upper bound at the next minor, so later prereleases/releases within a verified line are admitted without touching the peer declaration, while unverified new minor lines (e.g. 0.1.6) remain blocked).
+Prerequisites: git CLI (without it the recall button won't appear and a notice shows at the top of the page — DSH itself keeps running); PowerShell 5.1 / 7 on Windows, bash + git on Linux/macOS; DSH `0.1.1-rc.2` through `0.1.5-rc.2` (peerDependencies open a window per minor line: `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6`, consistent with the `dsh.compatibility.dshReleases` declaration; each line is anchored at its first verified version with an exclusive upper bound at the next minor, so later prereleases/releases within a verified line are admitted without touching the peer declaration, while unverified new minor lines (e.g. 0.1.6) remain blocked).
 
 - Official DSH plugin command: install and auto-mount into the web profile
 ```powershell

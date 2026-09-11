@@ -2,6 +2,16 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.12] - 2026-09-11
+
+### 变更
+
+- **dsh 0.1.5-rc.2 兼容性声明与台账同步**：全局实装 `@deepseek-ai/dsh@0.1.5-rc.2`（tag `dsh-v0.1.5-rc.2`，commit `fb2c4b9`，npm dist-tag `next`）后跑三层门禁——`test:probe` 31/31、`verify:host` 装配断言通过、`npm test` 307/307；rc.1→rc.2 的 4 commits / 300 文件按插件消费面包与类型源过滤后唯一命中 ui-chat 的 `TurnTailNodeView.module.css`（+3 行纯 CSS 间距），`sessions.d.ts`/`slots.d.ts`/`slot-contract.d.ts` 等类型源零改动；reference/ 镜像按 rc.2 tag 重拉 13 源（12 份内容相同、11 号仅 CRLF 噪声）。`dsh.compatibility.dshReleases` 补 `0.1.5-rc.2`，README 双语兼容声明、镜像索引与契约文档版本字段同步。peer 范围沿用按 minor 线开窗（`>=0.1.5-alpha.1 <0.1.6`），npm semver 的 prerelease 门槛天然放行同 tuple 的 rc.2，无需改 peer 串。评估实证沉淀于 `docs/upgrade-assessments/dsh-0.1.5-rc.2.md`，本插件源码零功能变更。
+
+### 修复
+
+- **DSH Desktop（0.1.5-rc.2）安装插件被 `validateDesktopPluginGraph` 拒绝**：桌面端 profile 固定 `autoInstallPeers: false`，安装时逐个解析 `package.json` 的 peerDependencies 并要求实体包存在于 profile 的 node_modules。插件声明的 `@deepseek-ai/dsh-client-web-react` 是 dsh 0.1.0 时代的历史包（npm 最高 0.1.0-rc.7），官方 0.1.1+ 已不再发布、0.1.5-rc.2 的宿主共享包中不存在，故报 `requires missing @deepseek-ai/dsh-client-web-react`。该声明早已无运行时意义：`lib/client.js` 唯一的模块请求是 `require("react")`，React 由宿主平台基线模块表提供。修复三处：① 删除该历史 peer；② 保留 `react` peer 但补 `peerDependenciesMeta.react.optional`——桌面端 profile 顶层无 `react`，不标 optional 会在下一轮校验继续报 missing；③ 删除过时的 `dsh.client.inject`（新机制下是包名依赖边，指向已不存在的包会被宿主静默跳过；`dsh.client.platform: "web"` 保留，宿主据此识别 client 半侧的运行平台）。其余 8 个 peer 及其范围不变。`dsh.compatibility.dshReleases` 补 `0.1.5-rc.2`，README 双语安装兼容声明同步。插件功能与运行时零变化，`lib/` 产物结构与 2.3.11 相同。
+
 ## [2.3.11] - 2026-09-11
 
 ### 变更

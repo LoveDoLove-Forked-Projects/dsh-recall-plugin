@@ -64,7 +64,7 @@
 
 ## 安装
 
-前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.1-rc.2` 至 `0.1.5-rc.1`（peerDependencies 为按 minor 版本线开窗 `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未验证的新 minor 线（如 0.1.6）仍被拦截）。
+前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.1-rc.2` 至 `0.1.5-rc.2`（peerDependencies 为按 minor 版本线开窗 `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未验证的新 minor 线（如 0.1.6）仍被拦截）。
 
 
 - DSH 官方插件命令：安装并自动挂载进 web profile
