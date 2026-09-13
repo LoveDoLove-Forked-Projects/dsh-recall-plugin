@@ -10,3 +10,4 @@ plugins.yaml
 recall-settings.yaml
 settings.yaml
 .trae/
+.claude/settings.local.json
