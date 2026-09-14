@@ -21,6 +21,7 @@
 | [性能优化实施计划](./completed/plan-performance.md) | 撤回主路径（tree hash 校验消重复 diff、win32 stdin 写、.NET 枚举）与设置页/管理/维护（lineage 串行、rebuildOrphans、listCache 增量、listSessions 替代日志冷读、exclude 合并、脚本内 git 瘦身），PF-1〜PF-9 | 已完成（2026-08-29 实施 + 探针前置 + 合成基准 + 实弹 9/9 通过；PF-2 采用 OpenStandardInput 形态 B、PF-7 titles 半项废弃见实施记录） |
 | [竞品评估优化计划：交互补强与可靠性钉子](./pending/plan-competitor-ux.md) | 第三轮竞品改进（2026-09-04 三竞品评估驱动）：草稿保护、仅回退对话模式、crash-safety 测试、settings-cards 拆分、preview TTL、还原 journal、版本翻页器调研 | 待实施（S1 settings-cards 拆分已于 2026-09-04 随 settings-ui 一期完成，见该文档实施记录；U3/U2 建议先行，其余按需） |
 | [设置页 UI 优化：视觉层次与可访问性](./pending/plan-settings-ui.md) | 2026-09-04 八维 UI 审计驱动：语义色修复、可访问性补强、交互反馈、布局 Grid 化、表单分组、健康/错误视觉升级、排版/响应式/动效打磨（V1–V9） | 已实施（2026-09-04 全量落地并独立提交；自动化冒烟已执行——V1–V9 通过、双主题与功能回归实弹，剩真实窄视口/真实键盘/读屏 3 项人工复核，见该文档冒烟路径与 records 第八节） |
+| [Host 自建 seed fork：撤回排队残留源头消除](./pending/plan-host-seed-fork.md) | 撤回对话半改走 Host 侧 `ctx.agents.create` 自建截断 seed（残留不进 seed）；含 H0 清理链加固 + 客户端匹配断点（已实施：按 item id 直删）、H1 版本矩阵、H2 seed 构造、H3 Host 端点、H4 Client 双轨、H5 沙箱与门禁 | 实施中（H0 已实施并实弹验收：子会话日志 `removed=1`、重复删 `queue-item-not-found`、零告警；P2 矩阵与 P3 沙箱待做） |
 
 ## 全局实施顺序
 

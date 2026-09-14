@@ -8,6 +8,10 @@
 
 - **探针：`sessions.fork` 切点推进行为 3 例**（I35 的文档化行为落成机器断言）：`tests/probe/api-surface.test.js` 新增「sessions.fork 切点推进行为」组，直钉 `dsh-api-session-controller` 构建产物的三条锚点——boundary 以「seq >= atSeq 的首条 `turn/end`」解析、`cut` 从 boundary+1 推进到下一个 `turn/start` 前、`seed` 取 `slice(0, cut)` 完整前缀。官方若改为「seed 排除未领取 inbox 项」（撤回残留排队消息的根治方向）或重构改名即红，提示复核 G1 清理逻辑是否可退役；0.1.1 旧版安装的实现锚点未核验，整体 skip（fork 签名探针仍覆盖旧包路径）。探针 31 → 34 例全绿，compat-audit I35 的「无直接探针」缺口随之闭环。
 
+### 修复
+
+- **撤回残留排队消息的自动清理从未命中：改为按 item id 直删**（0.1.5-rc.1 + 2.3.19 真机复现定位）：Host 侧解析与下发都正确（`/api/recall/execute` 响应带出窗口内入队项的 rpcId），失效段在客户端匹配——子会话输入框上方的残留卡片可稳定复现（刷新后仍在），30 秒轮询窗口内始终匹配不到队列行，随后弹「撤回前的一条排队消息未被自动清理…」toast 并打出 `console.warn`。改用官方 `updateQueue` 的寻址键直删：Host 侧 `scanStaleQueueItemIds` 取窗口内 user 来源入队项的 `inserted[].id`（即该消息的 message id）经 execute 响应的 `staleQueueItemIds` 下发；Client 侧对 fork 出的子会话逐项调 `updateQueue(itemId, { kind: 'remove' })`，删除队列快照匹配与 30 秒轮询（改为会话面未就绪时的 5 秒短等待，超时仍 warn + toast）。真机验收：子会话日志出现 `agent/inbox/spliced inserted=[] removed=1`（入队项当场移除），重复删除返回 `queue-item-not-found`，控制台零告警。读取链顺带加固：内存跳改用 `snapshotEvents()`（0.1.5-rc.1 的 `Session` 无 `events` 访问器，旧字段仍兼容），并把 `observeSession` 提到 `readSession` 之前。
+
 ## [2.3.19] - 2026-09-12
 
 ### 修复

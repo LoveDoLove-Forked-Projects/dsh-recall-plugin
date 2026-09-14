@@ -141,7 +141,7 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
   describe('sessions.fork 切点推进行为（G1/I35：seed 携带窗口事件，残留排队消息的根源）', () => {
     // I35 文档化的官方行为，此处落成机器断言：fork 把「boundary 那条 turn/end 之后、
     // 下一个 turn/start 之前」的整段事件切进子会话 seed——被撤回消息的 inbox 入队
-    // 事件正在窗口内，撤回清理（scanStaleQueueRpcIds/purgeStaleQueueItems）的存在
+    // 事件正在窗口内，撤回清理（scanStaleQueueItemIds/removeStaleQueueItems）的存在
     // 前提即此。实现住在构建产物，三条锚点分钉 boundary 解析、窗口推进、seed 前缀
     // 切片。官方若改为「seed 排除未领取 inbox 项」即红——那是好消息：提示清理逻辑
     // 可退役；重构改名同样会红，按复查信号处理（与产物类探针的既有约定一致）。

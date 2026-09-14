@@ -7,7 +7,7 @@
  */
 
 import type { ReactApi, UtilApi } from './util.js'
-import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService, ConversationInputShell, QueuedMessageLike } from '../types/client-contract.js'
+import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange } from '../types/api.js'
 
 // 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
@@ -85,26 +85,6 @@ export function fileCardInfo(block: ChatBlock | null | undefined): FileCardInfo 
   const ref = block.attachment as { name?: unknown; bytes?: unknown } | null | undefined
   const name = ref && typeof ref === 'object' && typeof ref.name === 'string' && ref.name !== '' ? ref.name : '未命名文件'
   return { name, ext: fileExtOf(name), size: fileCardSizeText(ref && typeof ref === 'object' ? ref.bytes : undefined) }
-}
-
-// 纯函数（模块级导出供单测）：从会话队列快照里挑出「fork 残留」的排队项 id。
-// 只认 placement==='queued' 且 rpcId 命中 Host 下发集合的项——rpcId 是官方
-// prompt 的提交身份，与被撤回消息的 inbox 入队记录一一对应，用户撤回之后新
-// 发的消息带自己的 rpcId，不会被误删。
-export function pickStaleQueueItemIds(queue: unknown, rpcIds: unknown): string[] {
-  if (!Array.isArray(queue) || !Array.isArray(rpcIds)) return []
-  const wanted = new Set(rpcIds.filter((id): id is string => typeof id === 'string' && id !== ''))
-  if (wanted.size === 0) return []
-  const out: string[] = []
-  for (const row of queue) {
-    const item = row as QueuedMessageLike | null | undefined
-    if (!item || item.placement !== 'queued') continue
-    const id = item.id
-    if (typeof id !== 'string' || id === '') continue
-    if (typeof item.rpcId !== 'string' || !wanted.has(item.rpcId)) continue
-    out.push(id)
-  }
-  return out
 }
 
 // kind 语义单表承载（文案/徽章类名/汇总顺序）：新增 kind 时只改这一处
@@ -347,40 +327,34 @@ export function buildRecallNode(
 
   // 撤回后清理 fork 子会话里被 seed 重放出来的排队消息：官方 fork 的切点会
   // 把「被撤回消息的 inbox 入队事件」一并复制进子会话（Host 侧
-  // scanStaleQueueRpcIds 的窗口说明），子会话重建 inbox 后输入框上方就凭空
-  // 多出一条排队消息。按 rpcId 精准移除——官方队列帧对所有 user 来源行透传
-  // source.rpcId（queueItemsFromInbox/promptRpcId 实证），seed 重放行同样携带，
-  // 就是 QueueDock 的「删除排队消息」。
-  // 队列快照走 control 帧，fork 解析后还要等 open/staging 完成才到达（实测可
-  // 晚于数秒——2 秒重试窗口两次实测全部落空，残留卡片直到用户手删才消失），
-  // 故用长窗口轮询：每 250ms 一次、至多 30 秒，命中即停。窗口耗尽仍无匹配
-  // （服务面缺失/快照未到/rpcId 契约漂移）不再静默吞掉：console.warn 留排查
-  // 痕迹，toast 告知手动路径（卡片右上角「删除排队消息」）；toast 按文本节流，
-  // 同一文案 10 分钟至多打扰一次。
-  function purgeStaleQueueItems(targetSessionId: string, rpcIds: unknown): void {
-    if (!Array.isArray(rpcIds) || rpcIds.length === 0) return
-    const deadline = Date.now() + 30000
-    let stopped = false
+  // scanStaleQueueItemIds 的窗口说明），子会话重建 inbox 后输入框上方就凭空
+  // 多出一条排队消息；子会话被驱动时该入队项还会被当作真实一轮消费。
+  //
+  // 按 item id 直删：Host 下发的 id 就是那条消息的 message id，也正是官方
+  // updateQueue 的寻址键（0.1.5-rc.1 实测：直删 accepted，重复删
+  // queue-item-not-found），与 QueueDock 的「删除排队消息」同一动词。不读队列
+  // 快照、不做 rpcId 匹配——队列快照走 control 帧、到达时机不定，命中式等待会
+  // 整段落空（2.3.19 真机实证：30 秒窗口内卡片始终在，清理从未触发）。只在会话
+  // 面尚未就绪时做短窗口重试（5 秒），拿到 face 即发出删除。
+  function removeStaleQueueItems(targetSessionId: string, itemIds: unknown): void {
+    if (!Array.isArray(itemIds) || itemIds.length === 0) return
+    const deadline = Date.now() + 5000
     const attempt = () => {
-      if (stopped) return
-      let fired = false
       try {
         const binding = sessionsSvc && typeof sessionsSvc.binding === 'function' ? sessionsSvc.binding(targetSessionId) : null
         const face = binding && binding.session
-        if (face && typeof face.getSnapshot === 'function' && typeof face.updateQueue === 'function') {
-          const snapshot = face.getSnapshot()
-          const ids = pickStaleQueueItemIds(snapshot ? snapshot.queue : null, rpcIds)
-          if (ids.length > 0) {
-            fired = true
-            // 逐项失败只影响该项（与官方 QueueDock 的行级操作同语义）
-            for (const itemId of ids) face.updateQueue(itemId, { kind: 'remove' }).catch(() => {})
+        if (face && typeof face.updateQueue === 'function') {
+          // 逐项失败只影响该项（与官方 QueueDock 的行级操作同语义）：入队项
+          // 已被消费时返回 queue-item-not-found，此时已无残留可清。
+          for (const itemId of itemIds) {
+            if (typeof itemId !== 'string' || itemId === '') continue
+            face.updateQueue(itemId, { kind: 'remove' }).catch(() => {})
           }
+          return
         }
       } catch (error) { /* 服务面未就绪：继续等待 */ }
-      if (fired) { stopped = true; return }
       if (Date.now() >= deadline) {
-        stopped = true
-        console.warn('[dsh-recall-plugin] 残留排队消息自动清理未生效（30s 内队列快照未出现匹配项）：', rpcIds)
+        console.warn('[dsh-recall-plugin] 残留排队消息未能自动清理（会话面未就绪）：', itemIds)
         showThrottledToast('撤回前的一条排队消息未被自动清理，可点击该卡片右上角的删除按钮手动移除')
         return
       }
@@ -571,8 +545,8 @@ export function buildRecallNode(
               fillTarget = childId
               // 子会话从 seed 继承了一份「被撤回消息的 inbox 入队记录」，不清理
               // 就会在输入框上方显示成一条排队消息（Host 已解析出它对应的
-              // rpcId 集合）
-              purgeStaleQueueItems(childId, res.staleQueueRpcIds)
+              // item id 集合）
+              removeStaleQueueItems(childId, res.staleQueueItemIds)
               // F1：上报撤回链（childId ↔ parentId），Host 持久化供版本家族展示；
               // 上报失败不阻断撤回主流程（家族是纯增量 UI）。
               api<unknown>('lineage-record', { childId, parentId: sessionId }).catch(() => {})

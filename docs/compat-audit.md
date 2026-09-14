@@ -724,21 +724,26 @@
   显示一条与被撤回消息同内容的「排队消息」（与回填的草稿重复）。日志实证：父会话 seq 93
   `turn/end` → 94 入队（`rpcId 4aa8cdb6`）→ 95 `turn/start` → 96 领取后移除 → 100
   `user/message` 落日志；子会话 seed 恰止于 94，重放出同一入队项。
-- **插件对策**：Host 侧 `scanStaleQueueRpcIds` 扫窗口内 inbox 入队项、取 user 来源的 `rpcId`，
-  经 execute 响应的 `staleQueueRpcIds` 下发；Client 侧按 `placement === 'queued'` + rpcId 匹配，
-  逐项调官方 `updateQueue(itemId, { kind: 'remove' })`（等价 QueueDock 的「删除排队消息」）。
-  用 rpcId 而非内容比对：撤回后新发的消息带自己的 rpcId，不被误删。
-- **出处**：`dsh-api-session-controller/lib/index.js`（fork 的 boundary/cut 推进）；
+- **插件对策**：Host 侧 `scanStaleQueueItemIds` 扫窗口内 inbox 入队项、取 user 来源项的
+  `item.id`（即该消息的 message id，也是 `updateQueue` 的寻址键），经 execute 响应的
+  `staleQueueItemIds` 下发；Client 侧对子会话逐项调官方 `updateQueue(itemId, { kind: 'remove' })`
+  直删（等价 QueueDock 的「删除排队消息」）。不读队列快照、不做匹配——快照走 control 帧、到达
+  时机不定，命中式等待会整段落空（2.3.19 真机复现：30 秒窗口内卡片始终在，清理从未触发）；
+  入队项若已被消费，`updateQueue` 返回 `queue-item-not-found`，逐项吞掉即可。
+- **出处**：`dsh-api-session-controller/lib/index.js`（fork 的 boundary/cut 推进；
+  `updateQueue` 以 `agent.inbox.nextTurn.find(message => message.id === request.itemId)` 寻址）；
   `dsh-api-session-controller/lib/types/client/contract/session.d.ts`（`ISession.updateQueue`、
-  `SessionFace = ISession & ObservableSnapshot<SessionSnapshot>`，`getSnapshot()` 读取面）；
-  `dsh-client-ui-conversation/lib/client.js`（QueueDock 的 `placement === 'queued'` 过滤与
-  `updateQueue` 行级操作）；`agent/inbox/spliced` 事件形状由本机会话日志解压实证。
+  `SessionFace = ISession & ObservableSnapshot<SessionSnapshot>`）；`dsh-client-ui-conversation/lib/client.js`
+  （QueueDock 读 `session.getSnapshot().queue`）；`agent/inbox/spliced` 的 `inserted[].id` ≡ 该消息
+  `user/message` 的 id，由本机会话日志解压实证（0.1.5-rc.1）。
 - **探针/单测**：`tests/probe/api-surface.test.js`「sessions.fork 切点推进行为」3 例直钉构建
-  产物锚点（boundary 解析 / cut 窗口推进 / seed 前缀切片）；纯逻辑 `scanStaleQueueRpcIds` /
-  `resolveStaleQueueRpcIds` 由 `tests/unit/snapshots-queue-residue.test.js` 钉，
-  `pickStaleQueueItemIds` 由 `tests/unit/client-pure.test.js` 钉。
-- **失效症状**：拿不到 live 事件（冷会话）或 `updateQueue` 服务面缺失 → 不清理，残留排队消息
-  仍显示（用户可在 QueueDock 手动删除）；撤回与回填主流程不受影响。
+  产物锚点（boundary 解析 / cut 窗口推进 / seed 前缀切片）；纯逻辑 `scanStaleQueueItemIds` /
+  `resolveStaleQueueItemIds`（含读取链顺序：内存 `snapshotEvents` → `observeSession` →
+  `readSession`）由 `tests/unit/snapshots-queue-residue.test.js` 钉 9 例，执行链响应字段由
+  `tests/unit/routes-stale.test.js` 钉。
+- **失效症状**：三跳读取全失败（冷会话 + restore 不可用）→ 不清理，残留排队消息仍显示（用户可在
+  QueueDock 手动删除）；会话面未就绪（`binding`/`updateQueue` 缺失）→ 5 秒后 `console.warn` +
+  toast 提示手动路径；撤回与回填主流程不受影响。
 - **复查动作**：fork 的 cut 推进规则变化时上述探针即红（若官方改为在 `turn/end` 处精确切分，
   本清理自动退化为无匹配的空操作，可评估退役）；真机冒烟＝对「agent 运行中发送、随后被撤回」
   的消息撤回，输入框上方不应出现排队消息。

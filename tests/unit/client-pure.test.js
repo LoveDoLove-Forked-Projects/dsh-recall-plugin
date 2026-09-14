@@ -10,7 +10,7 @@
 
 import { describe, it, expect } from 'vitest'
 import { buildTree, clockText, sizeText, bytesToMb } from '../../src/client/util.js'
-import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName, pickStaleQueueItemIds, fileCardInfo } from '../../src/client/recall-node.js'
+import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName, fileCardInfo } from '../../src/client/recall-node.js'
 import { groupByLineage } from '../../src/client/snapshot-manager.js'
 import { nextShadowPriority } from '../../src/client/app.js'
 
@@ -197,27 +197,6 @@ describe('撤回回填的附件引用提取（I34）', () => {
     expect(defaultAttachmentName('image/svg+xml', 1)).toBe('attachment-2.svg+xml')
     expect(defaultAttachmentName('', 0)).toBe('attachment-1.bin')
     expect(defaultAttachmentName(null, 0)).toBe('attachment-1.bin')
-  })
-})
-
-describe('撤回后清理 fork 残留排队项', () => {
-  const queue = [
-    { id: 'q-stale', placement: 'queued', rpcId: 'r-stale' },
-    { id: 'q-own', placement: 'queued', rpcId: 'r-own' },
-    { id: 'q-steering', placement: 'steering', rpcId: 'r-stale' },
-  ]
-
-  it('只挑 placement=queued 且 rpcId 命中下发集合的项（插话行与用户新发消息不动）', () => {
-    expect(pickStaleQueueItemIds(queue, ['r-stale'])).toEqual(['q-stale'])
-    expect(pickStaleQueueItemIds(queue, ['r-stale', 'r-own'])).toEqual(['q-stale', 'q-own'])
-  })
-
-  it('无命中/空集合/非法输入一律返回空数组', () => {
-    expect(pickStaleQueueItemIds(queue, [])).toEqual([])
-    expect(pickStaleQueueItemIds(queue, ['r-miss'])).toEqual([])
-    expect(pickStaleQueueItemIds(null, ['r-stale'])).toEqual([])
-    expect(pickStaleQueueItemIds(queue, null)).toEqual([])
-    expect(pickStaleQueueItemIds([null, {}, { id: 7 }, { id: 'q', placement: 'queued' }], ['r-stale'])).toEqual([])
   })
 })
 

@@ -86,11 +86,12 @@ export interface ExecuteOk {
   ok: true
   count: number
   cutSeq: number | null
-  // fork 切点窗口内入队的排队消息 rpcId：官方 fork 把「boundary 那条 turn/end
+  // fork 切点窗口内入队的排队消息 id：官方 fork 把「boundary 那条 turn/end
   // 之后、下一个 turn/start 之前」的整段事件复制进子会话 seed，被撤回消息的
   // inbox 入队记录正在其中——子会话重放后输入框上方会多出一条排队消息。
-  // Client 按这些 rpcId 在子会话上精准移除（旧 Host 不下发 → 读侧可选）
-  staleQueueRpcIds?: string[]
+  // 这些 id 即消息 id，也是官方 updateQueue 的寻址键；Client 在 fork 出的
+  // 子会话上按 id 直删（旧 Host 不下发 → 读侧可选）
+  staleQueueItemIds?: string[]
 }
 export type ExecuteResponse = ExecuteOk | ErrBody
 

@@ -121,18 +121,20 @@ export function scanCutSeq(events: SessionEvent[], messageId: string): number | 
   return scanCutSeqDetail(events, messageId).cut
 }
 
-// 扫描 fork 切点窗口内入队的用户消息，取出其 prompt RPC 身份。
+// 扫描 fork 切点窗口内入队的用户消息，取出其 item id。
 //
 // 官方 fork 的切点是「boundary 那条 turn/end 之后、下一个 turn/start 之前」
 // 的整段事件（routes-core 把 resolveCutSeq 的返回值当 atSeq 传下去）。一条
 // 排队投递的用户消息，其 inbox 入队事件必然落在「上一个 turn/end」与「领取
 // 它的那个 turn/start」之间——正好是这个窗口。于是这段入队记录被复制进子
-// 会话 seed，子会话重建 inbox 后输入框上方就多出一条本该被撤回掉的排队消息。
+// 会话 seed，子会话重建 inbox 后输入框上方就多出一条本该被撤回掉的排队消息；
+// 子会话被驱动时该入队项还会被当作真实一轮消费。
 //
-// 这里把窗口内 user 来源入队项的 rpcId 收集出来，交给 Client 在子会话上按
-// rpcId 精准移除（官方 QueueDock 的「删除排队消息」即同一动词）。rpcId 是
-// prompt 的提交身份，与用户撤回后新发消息的 rpcId 不同，不会误伤。
-export function scanStaleQueueRpcIds(events: SessionEvent[], cutSeq: number | null): string[] {
+// 取 item id 而非 rpcId：id 就是那条消息的 message id，也正是官方
+// updateQueue 的寻址键（0.1.5-rc.1 实测——直删返回 accepted，重复删返回
+// queue-item-not-found）。Client 拿到子会话 id 后按这些 id 直删，不读队列
+// 快照、不做匹配；rpcId 匹配依赖队列帧到达时机，实测 30 秒窗口内可整段落空。
+export function scanStaleQueueItemIds(events: SessionEvent[], cutSeq: number | null): string[] {
   if (!Array.isArray(events)) return []
   if (typeof cutSeq !== 'number' || !Number.isFinite(cutSeq)) return []
   const out: string[] = []
@@ -146,11 +148,22 @@ export function scanStaleQueueRpcIds(events: SessionEvent[], cutSeq: number | nu
     for (const item of inserted) {
       const source = item && item.source
       if (!source || source.kind !== 'user') continue
-      const rpcId = source.rpcId
-      if (typeof rpcId === 'string' && rpcId !== '' && out.indexOf(rpcId) < 0) out.push(rpcId)
+      const id = item.id
+      if (typeof id === 'string' && id !== '' && out.indexOf(id) < 0) out.push(id)
     }
   }
   return out
+}
+
+// 读一个 live 会话的内存事件：0.1.5-rc.1 起会话对象暴露 snapshotEvents()，
+// events 是旧版字段。两者都探测，都拿不到返回 null——调用侧据此落磁盘降级链。
+function liveEventsOf(live: { snapshotEvents?(): SessionEvent[]; events?: SessionEvent[] } | undefined): SessionEvent[] | null {
+  if (!live) return null
+  if (typeof live.snapshotEvents === 'function') {
+    const events = live.snapshotEvents()
+    if (Array.isArray(events)) return events
+  }
+  return Array.isArray(live.events) ? live.events : null
 }
 
 // 释放 sessionQuery 观测租约。官方在租约对象上装 Symbol.dispose（prepared 缓存
@@ -251,7 +264,7 @@ export interface SnapshotsApi {
   diffFor(messageId: string): Promise<DiffResult | null>
   rollbackFor(messageId: string): Promise<RollbackResult>
   resolveCutSeq(sessionId: string | null, messageId: string | null): Promise<number | null>
-  resolveStaleQueueRpcIds(sessionId: string | null, cutSeq: number | null): Promise<string[]>
+  resolveStaleQueueItemIds(sessionId: string | null, cutSeq: number | null): Promise<string[]>
   feedbackFor(sessionId: string | null | undefined, messageId: string): Promise<SnapshotFeedback | {}>
   loadLineage(root: string): Promise<LineageEntry[]>
   recordLineage(root: string, childId: string, parentId: string): Promise<void>
@@ -721,36 +734,37 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     return result
   }
 
-  // fork 残留排队项的身份解析：优先扫 live 会话的内存事件（零 IO、毫秒级）；
-  // live 不可用时退回 sessionQuery 磁盘读取链——撤回虽必然发生在会话正被查看
-  // 时，但「live 可用」与「live.events 字段在位」是两回事：cutSeq 有磁盘降级
-  // 链兜底、切点永远正常，会掩盖 events 字段的版本漂移，而这里一旦返回空数组，
-  // Client 侧的自动清理就永不触发。两跳与 resolveCutSeq 同款：readSession 对
-  // seeded 会话（撤回链的父会话本身可能是上一次撤回的子会话）恒抛，换
-  // observeSession（restore 模式，事件含继承前缀，seq 空间一致）。两跳都失败
-  // 才返回空数组（= 不清理），残留项仍可手动删除。
-  async function resolveStaleQueueRpcIds(sessionId: string | null, cutSeq: number | null): Promise<string[]> {
+  // fork 残留排队项的 id 解析：优先读 live 会话的内存事件（零 IO、毫秒级），
+  // 退到 sessionQuery 的 observeSession（restore 模式，事件含继承前缀，覆盖
+  // seeded 父会话——撤回链的父会话本身可能是上一次撤回 fork 出的子会话），
+  // 最后才用 readSession（快照模式对 seeded 会话恒抛）。这里一旦返回空数组，
+  // Client 侧的自动清理就永不触发，所以顺序按「内存 → restore → 磁盘」排，
+  // 且内存读取同时探 snapshotEvents()（0.1.5-rc.1 的会话对象）与 events
+  // （旧版字段）。三跳都失败才返回空数组（= 不清理），残留项可在 QueueDock
+  // 手动删除，绝不阻断撤回主流程。
+  async function resolveStaleQueueItemIds(sessionId: string | null, cutSeq: number | null): Promise<string[]> {
     if (!sessionId || typeof cutSeq !== 'number' || !Number.isFinite(cutSeq)) return []
-    const live = sessions.get(sessionId)
-    if (live && Array.isArray(live.events)) return scanStaleQueueRpcIds(live.events, cutSeq)
+    const live = liveEventsOf(sessions.get(sessionId))
+    if (live) return scanStaleQueueItemIds(live, cutSeq)
     const query = ctx.get<SessionQueryEngine>('sessionQuery')
     if (!query) return []
+    if (typeof query.observeSession === 'function') {
+      try {
+        const lease = await query.observeSession(sessionId)
+        try {
+          return lease && Array.isArray(lease.events) ? scanStaleQueueItemIds(lease.events, cutSeq) : []
+        } finally {
+          disposeLease(lease)
+        }
+      } catch (error) { /* restore 失败（旧版无此 API / 会话不可观测）：换磁盘跳 */ }
+    }
     try {
       const log = await query.readSession(sessionId)
-      if (log && Array.isArray(log.events)) return scanStaleQueueRpcIds(log.events, cutSeq)
-    } catch (error) { /* 第一跳失败（含 seeded 会话约束）：换下一跳 */ }
-    if (typeof query.observeSession !== 'function') return []
-    try {
-      const lease = await query.observeSession(sessionId)
-      try {
-        return lease && Array.isArray(lease.events) ? scanStaleQueueRpcIds(lease.events, cutSeq) : []
-      } finally {
-        disposeLease(lease)
-      }
+      return log && Array.isArray(log.events) ? scanStaleQueueItemIds(log.events, cutSeq) : []
     } catch (error) {
       return []
     }
   }
 
-  return { saveIndex, loadIndex, readExclude, writeExclude, rebuildOrphans, captureSnapshot, diffFor, rollbackFor, resolveCutSeq, resolveStaleQueueRpcIds, feedbackFor, loadLineage, recordLineage }
+  return { saveIndex, loadIndex, readExclude, writeExclude, rebuildOrphans, captureSnapshot, diffFor, rollbackFor, resolveCutSeq, resolveStaleQueueItemIds, feedbackFor, loadLineage, recordLineage }
 }

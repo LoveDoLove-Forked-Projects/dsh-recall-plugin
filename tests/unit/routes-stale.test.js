@@ -48,7 +48,7 @@ function makeDeps(opts = {}) {
         return { ok: true, count: 3 }
       },
       resolveCutSeq: async () => null,
-      resolveStaleQueueRpcIds: async () => opts.staleQueueRpcIds ?? [],
+      resolveStaleQueueItemIds: async () => opts.staleQueueItemIds ?? [],
     },
     state,
     cfg: { baseExcludes: [] },
@@ -110,12 +110,12 @@ describe('PF-1 execute 指纹校验分支', () => {
     expect(calls.diffFor).toBe(0)
   })
 
-  it('顺带下发 fork 残留排队项身份（Client 据此在子会话上清理）', async () => {
-    const { deps } = makeDeps({ staleQueueRpcIds: ['r-stale'] })
+  it('顺带下发 fork 残留排队项 id（Client 据此在子会话上直删）', async () => {
+    const { deps } = makeDeps({ staleQueueItemIds: ['m-stale'] })
     const routes = createRoutesCore(deps)
     const res = await routes.execute({ messageId: ID })
     expect(res.ok).toBe(true)
-    expect(res.staleQueueRpcIds).toEqual(['r-stale'])
+    expect(res.staleQueueItemIds).toEqual(['m-stale'])
   })
 })
 

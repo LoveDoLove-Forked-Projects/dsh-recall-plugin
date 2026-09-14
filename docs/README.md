@@ -23,6 +23,7 @@ docs/
 │   ├── research-competitors-2026-09.md  # 竞品六维度评估第四轮（2026-09-09，三竞品新版本，增量输入 plan-competitor-ux）
 │   ├── pending/                         # 待实施 / 实施中
 │   │   ├── plan-competitor-ux.md    # 第三轮竞品改进：交互补强与可靠性钉子（S1 已随 settings-ui 完成，其余待实施）
+│   │   ├── plan-host-seed-fork.md   # Host 自建 seed fork：撤回排队残留源头消除（H0 已实施并实弹验收：按 item id 直删；P2 矩阵与 P3 沙箱待做）
 │   │   ├── plan-p2.md               # P2 打磨项（按需挑选；P2-4/P2-5 已完成）
 │   │   └── plan-settings-ui.md      # 设置页 UI 优化 V1–V9（2026-09-04 全量实施，剩真实窄视口/键盘/读屏 3 项人工复核）
 │   └── completed/                       # 已实施（原地保留实施记录与验收依据，完成不删除）

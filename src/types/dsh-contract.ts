@@ -91,8 +91,9 @@ export interface SessionEventData {
   content?: Array<{ type?: string; text?: string }>
   // agent/inbox/spliced：本次插进 inbox 的项。source.kind === 'user' 的项即
   // 一次排队投递——撤回的 fork 切点会把这类事件一并复制进子会话（见
-  // snapshots.ts scanStaleQueueRpcIds），故这是清理残留排队项的唯一线索。
-  inserted?: Array<{ source?: SessionEventSource }>
+  // snapshots.ts scanStaleQueueItemIds），故这是清理残留排队项的唯一线索。
+  // id 就是该消息的 message id，也是官方 updateQueue 的寻址键。
+  inserted?: Array<{ id?: string; source?: SessionEventSource }>
   [key: string]: unknown
 }
 
@@ -107,7 +108,11 @@ export interface SessionHeader {
 export interface Session {
   id: string
   header?: SessionHeader
-  events: SessionEvent[]
+  // 0.1.5-rc.1 实测：会话对象只暴露 snapshotEvents()，无 events 访问器——
+  // 读内存事件一律先探 snapshotEvents，events 是旧版字段（读到即用，
+  // 读不到落磁盘降级链）。
+  snapshotEvents?(): SessionEvent[]
+  events?: SessionEvent[]
 }
 
 export interface SessionStore {
