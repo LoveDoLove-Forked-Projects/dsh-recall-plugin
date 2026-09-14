@@ -10,6 +10,8 @@
 
 ### 修复
 
+- **与同页插件的全局名冲突（issue #14）：client 产物顶层声明整体收进 IIFE 闭包**：client bundle 以 classic `<script>` 原文 serve，esbuild cjs 产物的全部顶层声明都会挂到 `window`——顶层 `var CSS`（样式表数组）直接覆盖浏览器原生 `CSS` 对象（`CSS.supports()` 不再是函数），同页的 dsh-image-gen 等插件一调即崩（`CSS.supports is not a function`），DSH 反过来拒绝加载对方。且顶层名共 23 个（`clockText`/`buildTree`/`sizeText`…），逐个改名堵不完。修复：build-client.mjs 打包格式从 cjs 改为 iife——整个 bundle 包进箭头函数作用域，除 `window.__ModuleLoader__.load` 调用外零全局泄漏，对未来新撞名免疫；loader 契约不受影响（`factory: (require) => {...}` 收参注册与 `require("react")` 运行时加载原样保留，esbuild 的 require→require2 改名照旧）。build-client.mjs 新增产物断言回归钉：format 意外回退 cjs 或出现顶层 var/function/class 声明时构建即红。
+
 - **撤回残留排队消息的自动清理从未命中：改为按 item id 直删**（0.1.5-rc.1 + 2.3.19 真机复现定位）：Host 侧解析与下发都正确（`/api/recall/execute` 响应带出窗口内入队项的 rpcId），失效段在客户端匹配——子会话输入框上方的残留卡片可稳定复现（刷新后仍在），30 秒轮询窗口内始终匹配不到队列行，随后弹「撤回前的一条排队消息未被自动清理…」toast 并打出 `console.warn`。改用官方 `updateQueue` 的寻址键直删：Host 侧 `scanStaleQueueItemIds` 取窗口内 user 来源入队项的 `inserted[].id`（即该消息的 message id）经 execute 响应的 `staleQueueItemIds` 下发；Client 侧对 fork 出的子会话逐项调 `updateQueue(itemId, { kind: 'remove' })`，删除队列快照匹配与 30 秒轮询（改为会话面未就绪时的 5 秒短等待，超时仍 warn + toast）。真机验收：子会话日志出现 `agent/inbox/spliced inserted=[] removed=1`（入队项当场移除），重复删除返回 `queue-item-not-found`，控制台零告警。读取链顺带加固：内存跳改用 `snapshotEvents()`（0.1.5-rc.1 的 `Session` 无 `events` 访问器，旧字段仍兼容），并把 `observeSession` 提到 `readSession` 之前。
 
 ## [2.3.19] - 2026-09-12

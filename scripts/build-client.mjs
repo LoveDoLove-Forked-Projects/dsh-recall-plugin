@@ -32,7 +32,14 @@ const entry = path.join(root, 'src', 'client', 'entry.ts')
 await build({
   entryPoints: [entry],
   bundle: true,
-  format: 'cjs',
+  // iife 而非 cjs（issue #14）：classic <script> 下 cjs 产物的全部顶层
+  // var/function 都会挂到 window——`var CSS` 直接覆盖浏览器原生 CSS 对象
+  // （CSS.supports 不再是函数），拖垮 dsh-image-gen 等同页插件；且顶层名
+  // 有 23 个（clockText/buildTree…），逐个改名堵不完。iife 把整个 bundle
+  // 收进一个箭头函数作用域，除 window.__ModuleLoader__.load 调用外零全局
+  // 泄漏，对新撞名免疫。factory 参数 require 不受影响：react 在 factory
+  // 闭包内经参数解析，iife 不再需要 cjs 的 require2 改名。
+  format: 'iife',
   platform: 'browser',
   external: ['react'],
   outfile,
@@ -42,10 +49,10 @@ await build({
   logLevel: 'info',
 })
 
-// 产物包裹格式断言：spike 结论的回归钉。esbuild cjs 输出会把 factory 的
-// require 参数重命名（如 require2）以避开自身模块 require，故断言不假设
-// 参数名：只要求 factory 接收一个参数、该参数被用于加载 react、无顶层
-// import/export（classic script 会拒载）。
+// 产物包裹格式断言：spike 结论的回归钉。esbuild 打包输出会把 factory 的
+// require 参数重命名（如 require2）以避开自身模块 require（iife 下实测同样
+// 改名），故断言不假设参数名：只要求 factory 接收一个参数、该参数被用于
+// 加载 react、无顶层 import/export（classic script 会拒载）。
 const out = readFileSync(outfile, 'utf8')
 if (!out.includes('window.__ModuleLoader__.load')) {
   throw new Error('build-client: 产物缺少 window.__ModuleLoader__.load 注册')
@@ -60,6 +67,15 @@ if (!out.includes(reqParam + '("react")')) {
 }
 if (/^\s*import\s/m.test(out) || /^\s*export\s/m.test(out)) {
   throw new Error('build-client: 产物含顶层 import/export（classic script 会拒载）')
+}
+// iife 包裹回归钉（issue #14）：classic <script> 下顶层 var/function 全部
+// 挂 window——曾因顶层 var CSS 覆盖浏览器原生 CSS 对象拖垮同页插件。断言
+// 产物整体包在箭头 IIFE 内且无顶层声明，format 意外回退 cjs 时在此红掉。
+if (!out.startsWith('"use strict";\n(() => {') || !out.trimEnd().endsWith('})();')) {
+  throw new Error('build-client: 产物未整体包进 IIFE（format 必须是 iife，否则顶层声明泄漏到 window）')
+}
+if (/^(var|let|const|function|class)\s+\w+/m.test(out.replace(/^"use strict";\n\(\(\) => \{/, ''))) {
+  throw new Error('build-client: 产物出现顶层 var/function/class 声明（会挂到 window，必须收进 IIFE 闭包）')
 }
 // F-G6：注册 id 字面量未漂移——entry.js 的 id 与 loader/市场侧对接，改名字
 // 面就装不上；esbuild 会把源码单引号规整为双引号，故按双引号形态断言。
