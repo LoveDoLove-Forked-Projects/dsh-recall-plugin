@@ -158,11 +158,13 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 7. **发布流程**：bump version → git commit/push → npm publish → GitHub Release；发布后本机验证新版：npm 模式跑 `pnpm update dsh-recall-plugin`（profile 目录），或临时切 link 模式。
 
    * **网络/代理**：本机直连 GitHub 不通（Connection reset）。全局 git 配置已设
-     `http.proxy`/`https.proxy = http://127.0.0.1:48046`（`git config --global`），
-     push/pull/clone 默认即走该代理，无需单次 `-c` 注入。若该代理不可用，
-     可用 `git config --global --unset http.proxy`/`--unset https.proxy` 撤销，
-     回到仓库级定向代理或单次注入：
-     `git -c http.proxy=http://127.0.0.1:48046 -c https.proxy=http://127.0.0.1:48046 push origin <branch|tag>`
+     `http.proxy`/`https.proxy = http://127.0.0.1:48046`（`git config --global`）。
+     **2026-09-14 实测**：该代理走 HTTP CONNECT 时 git 的 TLS 握手会被断
+     （`TLS connect error: unexpected eof`；`http.sslBackend=schannel` 同样失败，
+     而 curl/gh 同代理正常）——git push/pull 请用 socks5 通道单次注入：
+     `git -c http.proxy=socks5h://127.0.0.1:48046 -c https.proxy=socks5h://127.0.0.1:48046 push origin <branch|tag>`
+     （实测可用）。若代理整体不可用，可用
+     `git config --global --unset http.proxy`/`--unset https.proxy` 撤销全局配置。
 
 ## 开发与验证
 
