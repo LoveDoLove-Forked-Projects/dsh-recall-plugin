@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.5-rc.2**（tag `dsh-v0.1.5-rc.2`，commit `fb2c4b9`，2026-09-10 发布；**npm 已发布**（dist-tag `next`，`latest` 仍为 rc.1），`npm install -g` 全局实装，DSH Desktop 0.1.5-rc.2 同源；前序 0.1.5-rc.1 `183f08e`、0.1.5-alpha.2 `b2e3b2a` 等基线均已并入；Session format 为 V3）
+> * 对应版本：**dsh 0.1.6-alpha.1**（tag `dsh-v0.1.6-alpha.1`，npm dist-tag `alpha` 指向本版、`latest` 仍为 0.1.5-rc.1、`next` 仍为 0.1.5-rc.2；0.1.6 线首个预发布，`npm install -g @deepseek-ai/dsh@alpha` 全局实装；前序 0.1.5-rc.2 `fb2c4b9`、0.1.5-rc.1 `183f08e` 等基线均已并入；Session format 为 V3。本版唯一行为级变化：`sessions.fork` 切点由「向后推进到下一个 `turn/start`」改为「精确切到选中 `turn/end`（`cut = boundary.seq + 1`）」——见 compat-audit I35 与 upgrade-assessments/dsh-0.1.6-alpha.1.md）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >

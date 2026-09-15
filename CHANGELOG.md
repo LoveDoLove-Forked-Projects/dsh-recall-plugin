@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.21] - 2026-09-15
+
+### 变更
+
+- **dsh 0.1.6-alpha.1 兼容性声明与台账同步**：全局实装 `@deepseek-ai/dsh@0.1.6-alpha.1`（npm dist-tag `alpha`，0.1.6 线首个预发布）后跑三层门禁——`verify:host` 装配断言通过、`npm test` 330/330、`test:probe` 32 例中 1 红。红点即本版唯一行为级变化：**官方修复 `sessions.fork` 按轮次分叉的切点**——由「`cut` 从 `boundary+1` 向后推进到下一个 `turn/start` 之前」改为「`cut` 固定 `boundary.seq + 1`、精确切到选中 `turn/end`」，结束事件之后的排队输入、标题、模型设置均不再复制进子会话 seed，2.3.17 起插件侧 `scanStaleQueueItemIds` 清理的残留排队消息问题（I35）在 0.1.6 线上从源头消失（探针按 2.3.20 预留的「好消息变红」路径改钉新锚点后 32/32 复绿）。**清理逻辑不退役**：peer 范围保留 0.1.5 线段，该线上 fork 切点未修复、清理仍必要；0.1.6 上退化为 `queue-item-not-found` 吞掉的无害空操作。其余消费面零破坏：`snapshotEvents`/`eventAt`/`ownEvents` 仅标 `@deprecated` 未移除（内存跳行为不变，列为前瞻观察项）；`ShellExecutor.start` 异步化不涉及插件（只用 `resolve`+`run`）；`agent/session-start`→`agent/created` 事件改名与插件无关；回填链与 chat.node/settings slot 全部在位。tag 对比（800 commits / 300 文件）按消费面包过滤后唯一源码命中即 fork 实现；reference/ 镜像按 alpha.1 tag 重拉 13 源——10 份内容相同、05/09/13 三文件有实质差异（09 不变式措辞补「纯消息投影」、新增 `agent/created`、桌面 profile 重写；13 钩子行改名；均不触及插件消费的槽位/契约）。**兼容声明同步**：0.1.6 为新 minor 线，7 个 dsh-* peer 各追加 `>=0.1.6-alpha.1 <0.1.7` 段；`dsh.compatibility.dshReleases` 补 `0.1.6-alpha.1: compatible`；README 双语安装兼容声明与 badge、reference/README 归档字段、dsh-contract.md「对应版本」同步。评估实证见 `docs/upgrade-assessments/dsh-0.1.6-alpha.1.md`，compat-audit 新增 0.1.6-alpha.1 核验段并更新 I35 条目。本插件源码零功能变更。
+
 ## [2.3.20] - 2026-09-14
 
 ### 新增

@@ -138,13 +138,15 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
     })
   })
 
-  describe('sessions.fork 切点推进行为（G1/I35：seed 携带窗口事件，残留排队消息的根源）', () => {
-    // I35 文档化的官方行为，此处落成机器断言：fork 把「boundary 那条 turn/end 之后、
-    // 下一个 turn/start 之前」的整段事件切进子会话 seed——被撤回消息的 inbox 入队
-    // 事件正在窗口内，撤回清理（scanStaleQueueItemIds/removeStaleQueueItems）的存在
-    // 前提即此。实现住在构建产物，三条锚点分钉 boundary 解析、窗口推进、seed 前缀
-    // 切片。官方若改为「seed 排除未领取 inbox 项」即红——那是好消息：提示清理逻辑
-    // 可退役；重构改名同样会红，按复查信号处理（与产物类探针的既有约定一致）。
+  describe('sessions.fork 切点语义（G1/I35：0.1.6-alpha.1 起精确切到选中轮次结束）', () => {
+    // 0.1.5 线的官方行为是「cut 从 boundary+1 向后跳过非 turn/start 事件」——把
+    // boundary 那条 turn/end 之后、下一个 turn/start 之前的 inbox 入队事件一并切进
+    // seed，这是撤回残留排队消息的根源（I35）。0.1.6-alpha.1 起官方改为固定
+    // cut = boundary.seq + 1：结束事件之后的排队输入、标题、模型设置均不入 seed
+    // （见 .agents/notes/implemented/bug-fix/2026-09-11-session-controller-fork-turn-cut）。
+    // 三条锚点分钉 boundary 解析、cut 固定切分、seed 前缀切片。官方若回退到向后推进
+    // 语义，cut 锚点即红——那是坏消息：残留排队消息复活，scanStaleQueueItemIds 清理
+    // 重新生效；重构改名同样会红，按复查信号处理（与产物类探针的既有约定一致）。
     // 0.1.1 旧实现的产物锚点未核验，旧版安装整体 skip（fork 签名探针仍覆盖旧包）。
     const p = 'dsh-api-session-controller'
     const f = '/lib/index.js'
@@ -154,11 +156,11 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       expect(read(p, f)).toMatch(/event\.type === "turn\/end" && event\.seq >= atSeq/)
     })
 
-    probeIf(guard)('cut 从 boundary+1 推进到下一 turn/start 前（窗口整段含 inbox 入队）', () => {
-      expect(read(p, f)).toMatch(/while \(cut < source\.events\.length && source\.events\[cut\]\?\.type !== "turn\/start"\)/)
+    probeIf(guard)('cut 固定为 boundary.seq + 1（0.1.6-alpha.1 起精确切到选中轮次结束，不再向后推进）', () => {
+      expect(read(p, f)).toMatch(/const cut = SessionLogOffset\(boundary\.seq \+ 1\)/)
     })
 
-    probeIf(guard)('seed 为切点前完整前缀 slice(0, cut)（窗口事件进子会话 seed 的直接来源）', () => {
+    probeIf(guard)('seed 为切点前完整前缀 slice(0, cut)（结束事件之后的排队输入不入 seed）', () => {
       expect(read(p, f)).toMatch(/seed: source\.events\.slice\(0, cut\)/)
     })
   })

@@ -7,6 +7,25 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.6-alpha.1 核验（2026-09-15）**：**npm 已发布**（dist-tag `alpha` 指向本版；`latest` 仍为 0.1.5-rc.1、
+> `next` 仍为 0.1.5-rc.2；0.1.6 线首个预发布），`npm install -g @deepseek-ai/dsh@alpha` 全局实装。
+> 三层门禁：`verify:host` 装配断言通过 + `npm test` 330/330 + `test:probe` 32 例中 1 红——红点即本版
+> 唯一行为级变化：`sessions.fork` 切点由「cut 从 boundary+1 向后推进到下一 turn/start 前」改为
+> 「cut 固定 boundary.seq+1、精确切到选中轮次结束」（实装产物 `dsh-api-session-controller/lib/index.js`
+> 确认，`.agents/notes/implemented/bug-fix/2026-09-11-session-controller-fork-turn-cut` 记载），结束事件
+> 之后的排队输入、标题、模型设置均不入 seed——**I35 残留排队消息被官方根治**，探针按 2.3.20 预留的
+> 好消息路径改钉新锚点后 32/32 复绿。其余消费面零破坏：`snapshotEvents`/`eventAt`/`ownEvents` 仅标
+> `@deprecated` 未移除（内存跳行为不变，列为前瞻观察项）；`ShellExecutor.start` 异步化不涉及插件
+> （插件只用 `resolve`+`run`）；`agent/session-start`→`agent/created` 事件改名与插件无关（不订阅、
+> agents 面仅 `list`/`get`/`status`）；回填链 `createDrafts`/`addAttachments`/`releaseDraftAttachments`
+> 与 chat.node/settings slot 全部在位。**G1 清理不退役**：peer 范围保留 0.1.5 线段，该线 fork 切点
+> 未修复、清理仍必要；0.1.6 线上退化为 `queue-item-not-found` 吞掉的无害空操作。tag 对比（800 commits /
+> 300 文件）按消费面包过滤后唯一源码命中即 fork 实现；reference/ 镜像按 alpha.1 tag 重拉 13 源：10 份
+> 内容相同、05/09/13 三文件有实质差异（09 不变式措辞补「纯消息投影」、新增 `agent/created`、桌面 profile
+> 重写；13 钩子行改名；均不触及插件消费的槽位/契约），已覆盖同步。**兼容声明同步**：peer 开 0.1.6 新
+> minor 线段（`>=0.1.6-alpha.1 <0.1.7`）、`dshReleases` 补 `0.1.6-alpha.1: compatible`、reference/README
+> 与 dsh-contract.md 版本字段同步。评估实证见 upgrade-assessments/dsh-0.1.6-alpha.1.md。
+>
 > **0.1.5-rc.2 核验（2026-09-11）**：**npm 已发布**（dist-tag `next` 指向 0.1.5-rc.2、`latest` 仍为 rc.1，
 > `dsh-v0.1.5-rc.2` tag commit `fb2c4b9`，2026-09-10 发布），全局实装，桌面端 DSH Desktop 0.1.5-rc.2 同源。
 > 三层门禁：`test:probe` 31/31 + `verify:host` 装配断言通过 + `npm test` 307/307；`check:dsh` 报镜像/契约漂移，
@@ -713,13 +732,18 @@
 
 
 ### I35 fork 切点携带 inbox 入队事件：撤回后被撤回的消息以「排队消息」复活
-- **依赖的官方行为**：`sessions.fork({ sessionId, atSeq })` 的切点不是「切点事件本身」——host 侧
+- **依赖的官方行为**：0.1.5 线的 `sessions.fork({ sessionId, atSeq })` 切点不是「切点事件本身」——host 侧
   取 `boundary = events.find(e => e.type === 'turn/end' && e.seq >= atSeq)`，再令
   `cut = boundary.seq + 1` 并**向后跳过非 `turn/start` 的事件**，seed = `events.slice(0, cut)`。
   于是「boundary 那条 turn/end 之后、下一个 turn/start 之前」的整段事件都会进入子会话。排队
   投递的用户消息，其 inbox 入队事件（`agent/inbox/spliced`，`target: 'next-turn'`，
   `data.inserted[].source.rpcId`）必然落在「上一个 turn/end」与「领取它的那个 turn/start」
   之间——正好落进该窗口。
+  **0.1.6-alpha.1 起官方修复**：`cut` 固定为 `boundary.seq + 1`（不再向后推进），结束事件之后的
+  排队输入、标题、模型设置均不入 seed——本坑在 0.1.6 线上从源头消失（实装产物
+  `dsh-api-session-controller/lib/index.js` 确认；官方记载见 `.agents/notes/implemented/bug-fix/
+  2026-09-11-session-controller-fork-turn-cut`）。peer 范围保留 0.1.5 线段，故下方插件对策在
+  0.1.5 安装上仍必要，在 0.1.6 上退化为无害空操作。
 - **症状**：撤回后 fork 出的子会话重放 seed 时重建出该 inbox 项，UI 的 QueueDock 在输入框上方
   显示一条与被撤回消息同内容的「排队消息」（与回填的草稿重复）。日志实证：父会话 seq 93
   `turn/end` → 94 入队（`rpcId 4aa8cdb6`）→ 95 `turn/start` → 96 领取后移除 → 100
@@ -736,17 +760,18 @@
   `SessionFace = ISession & ObservableSnapshot<SessionSnapshot>`）；`dsh-client-ui-conversation/lib/client.js`
   （QueueDock 读 `session.getSnapshot().queue`）；`agent/inbox/spliced` 的 `inserted[].id` ≡ 该消息
   `user/message` 的 id，由本机会话日志解压实证（0.1.5-rc.1）。
-- **探针/单测**：`tests/probe/api-surface.test.js`「sessions.fork 切点推进行为」3 例直钉构建
-  产物锚点（boundary 解析 / cut 窗口推进 / seed 前缀切片）；纯逻辑 `scanStaleQueueItemIds` /
+- **探针/单测**：`tests/probe/api-surface.test.js`「sessions.fork 切点语义」3 例直钉构建
+  产物锚点（boundary 解析 / cut 固定切分 `boundary.seq + 1` / seed 前缀切片）——0.1.6-alpha.1
+  起 cut 锚点钉新语义，官方若回退到向后推进即红（残留复活信号）；纯逻辑 `scanStaleQueueItemIds` /
   `resolveStaleQueueItemIds`（含读取链顺序：内存 `snapshotEvents` → `observeSession` →
   `readSession`）由 `tests/unit/snapshots-queue-residue.test.js` 钉 9 例，执行链响应字段由
   `tests/unit/routes-stale.test.js` 钉。
 - **失效症状**：三跳读取全失败（冷会话 + restore 不可用）→ 不清理，残留排队消息仍显示（用户可在
   QueueDock 手动删除）；会话面未就绪（`binding`/`updateQueue` 缺失）→ 5 秒后 `console.warn` +
   toast 提示手动路径；撤回与回填主流程不受影响。
-- **复查动作**：fork 的 cut 推进规则变化时上述探针即红（若官方改为在 `turn/end` 处精确切分，
-  本清理自动退化为无匹配的空操作，可评估退役）；真机冒烟＝对「agent 运行中发送、随后被撤回」
-  的消息撤回，输入框上方不应出现排队消息。
+- **复查动作**：fork 的 cut 规则变化时上述探针即红（0.1.6-alpha.1 的固定切分即按此信号完成改钉；
+  若官方回退向后推进，本清理重新生效、无需改码）；真机冒烟＝对「agent 运行中发送、随后被撤回」
+  的消息撤回，输入框上方不应出现排队消息（0.1.6-alpha.1 起为官方根治的正向确认）。
 
 
 ## 与 E1 verify-host 的对应关系
