@@ -11,12 +11,13 @@
 
 import os from 'node:os'
 import crypto from 'node:crypto'
+import { spawn as childSpawn } from 'node:child_process'
 import * as pwshScripts from './scripts.pwsh.js'
 import * as posixScripts from './scripts.posix.js'
 import { classifyEnvError } from './diagnostics.js'
-import type { Runtime, SharedState, StoreInfo, ShellRunOptions, ErrorRecord } from '../types/state.js'
+import type { Runtime, SharedState, StoreInfo, ShellRunOptions, ErrorRecord, ShellDialect } from '../types/state.js'
 import type { PwshScripts, PosixScripts } from '../types/scripts.js'
-import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
+import type { HostContext, SessionQueryEngine, ShellRunResult } from '../types/dsh-contract.js'
 import type { ResolvedConfig } from '../types/config.js'
 
 // home 不可写时迁移重试的节流间隔：避免每条消息都白试一次注定失败的迁移
@@ -97,9 +98,174 @@ export function isTmpConsumedError(error: unknown, basename: string): boolean {
   return /No such file/i.test(s) || /does not exist/i.test(s) || /cannot find path/i.test(s)
 }
 
-export function createRuntime(ctx: HostContext, config: ResolvedConfig): Runtime {
+// ---- win32 直连执行通道（issue #15）----
+// 官方 shell 是「提供方注册制」：一个 composition 恰好一个 ctx.shell 实现，宿主
+// profile 可以在 win32 上把它配成 bash（如只启用 bash-sandbox）。此时 pwsh 模板
+// 被 bash 执行，第一行编码前导即语法错误，快照从未成功、撤回按钮全死。官方
+// ShellExecutor 公开面（resolve/run/start + sandboxMode）没有任何方言标识——不能
+// 查询，只能行为探测；判成 bash 才改走 Node spawn 直连 powershell.exe，模板与
+// 其余语义原样保留，只换执行通道。
+
+// 探针命令：Write-Output 是 pwsh 语法，bash 下 command-not-found（exit 127）。
+// 哨兵取罕见 ASCII 串防巧合命中。命令内联在本文件而不做成 scripts.pwsh.ts 新
+// 导出——两套模板的「同名导出」契约（types/scripts.ts + scripts-contract 单测）
+// 会因单侧新增导出而红，而探针只服务 win32 分流、不属于跨平台模板面。
+export const SHELL_PROBE_SENTINEL = 'RCL_DIALECT_PROBE_9f4a2e'
+export const SHELL_PROBE_COMMAND = 'Write-Output ' + SHELL_PROBE_SENTINEL
+
+// 探针判定（模块级纯函数，单测直测）：exit 0 且回显哨兵 → pwsh；其余一律 bash
+// （非零退出 / 无输出 / 未回显 / 探测 reject 折成的 null）。误判代价不对称但都低：
+// 判成 pwsh 走官方通道（本就正确），判成 bash 走直连通道（pwsh 模板同样能跑）。
+export function judgeShellDialect(res: ShellRunResult | null | undefined): ShellDialect {
+  if (!res || res.exitCode !== 0) return 'bash'
+  const text = (res.stdout && res.stdout.text) || ''
+  return text.indexOf(SHELL_PROBE_SENTINEL) >= 0 ? 'pwsh' : 'bash'
+}
+
+// 凭证形状 env 名（与官方 dsh-subprocess SENSITIVE_ENV_PATTERN 同式）
+const SENSITIVE_ENV = /KEY|PASSWORD|SECRET|TOKEN/i
+
+// stderr 保留字节（错误消息只取尾部 1500 字符，留一个宽裕窗口避免多字节截断）
+const STDERR_KEEP_BYTES = 65536
+
+// 子进程 env 复刻官方清洗（dsh-subprocess scrubbedParentEnv + pwsh-local
+// ENV_OVERRIDES）：剥掉凭证形状名与全部 DSH_*（不区分大小写——Windows 环境名
+// 大小写不敏感，不等同处理会让父进程的 dsh_* 条目在子进程里读回成 $env:DSH_*），
+// 再叠加 NO_COLOR/PAGER/GIT_PAGER。为什么值得：官方通道本就不把宿主凭证交给
+// 子进程，直连通道原样继承就破了「安全模型不变」；而剥掉 DSH_* 后 homeDirScript
+// 的 $env:DSH_HOME 分支在两通道恒为空、统一走 Node 侧传入的 envHome 字面量，
+// 两条通道收敛到同一 store 根——存量快照库不会撕裂。
+export function scrubChildEnv(env: Record<string, string | undefined>): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const key of Object.keys(env)) {
+    const value = env[key]
+    if (value === undefined) continue
+    if (SENSITIVE_ENV.test(key) || key.toUpperCase().indexOf('DSH_') === 0) continue
+    out[key] = value
+  }
+  out.NO_COLOR = '1'
+  out.PAGER = 'cat'
+  out.GIT_PAGER = 'cat'
+  return out
+}
+
+// stdout 收集（模块级纯函数，单测直测）：超 stdoutMaxBytes 保留尾部并置 truncated
+// ——对齐官方 CollectedOutput 语义（F-G3：loadIndex 靠 truncated 区分「读截断」与
+// 「内容损坏」，误判会把完好大索引当损坏覆盖）；恰等阈值不算截断。按字节切尾，
+// 与官方一致：截断处落在多字节字符中间时由 utf8 解码兜底成替换字符。
+export function collectStdout(chunks: Buffer[], maxBytes: number): { text: string; truncated: boolean } {
+  const total = chunks.reduce((n, c) => n + c.length, 0)
+  if (total <= maxBytes) return { text: Buffer.concat(chunks).toString('utf8'), truncated: false }
+  const all = Buffer.concat(chunks)
+  return { text: all.subarray(all.length - maxBytes).toString('utf8'), truncated: true }
+}
+
+// 直连 spawn 的依赖注入面（默认 child_process.spawn）：单测以假 child 覆盖 stdin
+// 字节透传与超时 kill 分支，无需真起进程，CI（ubuntu）也能覆盖全部分支。
+export interface DirectChildLike {
+  stdin: NodeJS.WritableStream | null
+  stdout: NodeJS.ReadableStream | null
+  stderr: NodeJS.ReadableStream | null
+  on(event: 'error', listener: (error: Error) => void): unknown
+  on(event: 'close', listener: (code: number | null) => void): unknown
+  kill(): unknown
+}
+export type SpawnLike = (
+  exe: string,
+  argv: string[],
+  options: { cwd: string; env: Record<string, string>; windowsHide: boolean }
+) => DirectChildLike
+
+export interface DirectShellRequest {
+  command: string
+  timeoutMs: number
+  stdoutMaxBytes: number
+  stdin?: string
+  cwd: string
+}
+
+export interface DirectShellResult {
+  text: string
+  truncated: boolean
+  exitCode: number | null
+  stderr: string
+  timedOut: boolean
+}
+
+// 直连可执行文件：PS 5.1 全平台自带（不赌 PS7 存在；插件模板本就按 5.1 兼容写，
+// I14/I27 探针已钉），路径与官方 pwsh-local 的候选链末档同一处。
+export function directPwshPath(env: Record<string, string | undefined>): string {
+  return (env.SystemRoot || env.windir || 'C:\\Windows') + '\\System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+}
+
+// 直连执行（模块级，spawn 由调用方注入）：四项官方语义一项不少——stdin 字节
+// 透传（I27：PS 5.1 的 Console.In 按输入代码页解码，必须写原始字节）、stdout
+// 截断标记、超时 kill、非零退出交回调用方走失败清扫。windowsHide：桌面端宿主是
+// GUI 进程，不设会让每条快照闪一次控制台窗口。spawn 失败（如可执行文件缺失）
+// reject，与官方通道「run 只对基础设施故障 reject」的语义一致。
+export async function runViaSpawn(spawn: SpawnLike, req: DirectShellRequest): Promise<DirectShellResult> {
+  const child = spawn(directPwshPath(process.env), ['-NoProfile', '-NonInteractive', '-Command', req.command], {
+    cwd: req.cwd,
+    env: scrubChildEnv(process.env),
+    windowsHide: true,
+  })
+  return await new Promise<DirectShellResult>((resolve, reject) => {
+    // 输出 sink：超预算即时丢头部（命令异常刷屏也不让宿主内存无界增长）。丢弃
+    // 只在「剩余仍大于预算」时发生，故最终 total 要么是真总量（未丢过），要么
+    // 大于预算（丢过）——collectStdout 的截断判定两种情形都正确。
+    const sink = (maxBytes: number) => {
+      const chunks: Buffer[] = []
+      let total = 0
+      return {
+        push(chunk: unknown) {
+          const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
+          chunks.push(buf)
+          total += buf.length
+          while (chunks.length > 1 && total - chunks[0].length > maxBytes) {
+            total -= chunks[0].length
+            chunks.shift()
+          }
+        },
+        take() { return collectStdout(chunks, maxBytes) },
+      }
+    }
+    const outSink = sink(req.stdoutMaxBytes)
+    const errSink = sink(STDERR_KEEP_BYTES)
+    let timedOut = false
+    let settled = false
+    const timer = setTimeout(() => {
+      timedOut = true
+      try { child.kill() } catch (error) { /* 已退出或无权终止：交给 close 事件收口 */ }
+    }, Math.max(1, req.timeoutMs))
+    const finish = (code: number | null) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      const stdout = outSink.take()
+      resolve({ text: stdout.text, truncated: stdout.truncated, exitCode: code, stderr: errSink.take().text, timedOut })
+    }
+    if (child.stdout) child.stdout.on('data', (chunk) => outSink.push(chunk))
+    if (child.stderr) child.stderr.on('data', (chunk) => errSink.push(chunk))
+    child.on('error', (error) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      reject(error)
+    })
+    child.on('close', (code) => finish(code === undefined ? null : code))
+    if (child.stdin) {
+      // 子进程已退出时的 EPIPE 不该冒成未捕获异常：写失败与否由退出码裁决
+      child.stdin.on('error', () => {})
+      child.stdin.end(Buffer.from(req.stdin === undefined ? '' : req.stdin, 'utf8'))
+    }
+  })
+}
+
+export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: { spawn?: SpawnLike }): Runtime {
   const shell = ctx.shell
   const sessions = ctx.sessions
+  // 直连通道的 spawn（默认 Node 原生）：单测注入假 child 覆盖字节透传与超时分支
+  const spawn: SpawnLike = (deps && deps.spawn) || (childSpawn as unknown as SpawnLike)
 
   const isWin = process.platform === 'win32'
   const SEP = isWin ? '\\' : '/'
@@ -128,6 +294,10 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig): Runtime
     gcCount: new Map(),
     gitExe: null,
     posixHomeBase: null,
+    // win32 方言探针缓存（issue #15）：判定结果 + in-flight promise（并发首调
+    // 只跑一次探针）；POSIX 不探测，两字段恒为 null
+    shellDialect: null,
+    shellDialectProbe: null,
     homeContainer: null,
     errors: [],
     // 逐消息的快照反馈（issue #7 失败可见性）：失败 {failed,error} 或
@@ -176,6 +346,72 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig): Runtime
     if (missing.length) recordError('recall script parity: posix 缺少导出 ' + missing.join(', '))
   })()
 
+  // 方言探针（issue #15；惰性 + 缓存 + in-flight 去重）：session/event 突发时
+  // runShellMeta 会并发首调，探针本身只许跑一次。探测走独立路径（直调
+  // ctx.shell.resolve/run，不经 runShellMeta）——既避免递归，也让探测失败
+  // （判据本身，不是 git 失败）不触发 cleanupAfterGitFailure；不带 UTF8_PRELUDE
+  // （探的是执行器方言，不是前导兼容性），30s 短超时（官方 clampTimeout 只 cap
+  // 上限、不抬下限，卡住的探针不该拖住首条消息的快照）。reject 折成 null 判
+  // bash：直连通道对 pwsh 模板同样兼容，误判不致命。
+  function resolveShellDialect(): Promise<ShellDialect> {
+    if (state.shellDialect) return Promise.resolve(state.shellDialect)
+    if (!state.shellDialectProbe) {
+      state.shellDialectProbe = (async () => {
+        let res: ShellRunResult | null = null
+        try {
+          const sp = ctx.get<{ workspaceRoot?: string }>('sandboxPolicy')
+          res = await shell.run(shell.resolve({
+            command: SHELL_PROBE_COMMAND,
+            timeoutMs: 30000,
+            stdoutMaxBytes: 4096,
+            sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: (sp && sp.workspaceRoot) || process.cwd() },
+          }))
+        } catch (error) {
+          res = null
+        }
+        const dialect = judgeShellDialect(res)
+        state.shellDialect = dialect
+        // 一行启动期日志：冒烟验收靠它确认默认路径「从未触达 spawn 通道」，
+        // 也是用户排障时唯一能看见方言判定的地方
+        console.error('recall shell dialect probe: ' + dialect + (dialect === 'bash' ? '（ctx.shell 非 pwsh，改用直连 powershell.exe 通道）' : ''))
+        return dialect
+      })()
+    }
+    return state.shellDialectProbe
+  }
+
+  // 命令视角的方言（分流入口）：清扫脚本（RECALL_CLEANUP 哨兵）不触发探针、只用
+  // 缓存。为什么：清扫只在一条真实命令失败后被调用——那条命令必然已跑过
+  // runShellMeta 首调、方言早判定完，这里不需要再判；善后路径本已脆弱（残留锁/
+  // 孤儿进程），再叠一条探测进程只会让它更重。缓存未判定时按 pwsh 走官方通道，
+  // 判定责任留给后续真实命令（不在这里缓存，避免 stub/残缺执行器把假结论钉死）。
+  async function shellDialectFor(command: string): Promise<ShellDialect> {
+    if (command.indexOf('RECALL_CLEANUP') >= 0) return state.shellDialect || 'pwsh'
+    return await resolveShellDialect()
+  }
+
+  // 失败收口（两个执行通道共用，错误形态与语义保持一致）：先 best-effort 清扫
+  // （超时/失败的 git 命令可能留下孤儿进程与 stale 锁，见下方 runShellMeta 注释）
+  // 再抛原始错误，清扫自身的失败不得掩盖它；stderr 截 1500 字符（设置页
+  // 「最近错误」展示用）。
+  async function throwShellFailure(command: string, stderr: string, exitCode: number | null | undefined): Promise<never> {
+    await cleanupAfterGitFailure(command)
+    const detail = String(stderr || '').trim() || ('exit ' + String(exitCode))
+    throw new Error(detail.slice(0, 1500))
+  }
+
+  // 直连通道收口：保留官方四项语义（stdin 字节透传 / stdout 截断标记 / 超时
+  // kill / 非零退出走失败清扫）。超时与非零退出都走 throwShellFailure——官方
+  // 通道的 timeout 同样以非零结果返回并触发清扫，两条通道失败语义一致。
+  async function runShellDirect(command: string, req: DirectShellRequest): Promise<{ text: string; truncated: boolean }> {
+    const res = await runViaSpawn(spawn, req)
+    if (res.timedOut) {
+      await throwShellFailure(command, res.stderr + '\n直连 powershell.exe 超时（' + String(req.timeoutMs) + 'ms）', null)
+    }
+    if (res.exitCode !== 0) await throwShellFailure(command, res.stderr, res.exitCode)
+    return { text: res.text, truncated: res.truncated }
+  }
+
   // 所有 shell 调用都以宿主身份（danger-full-access）执行，不借用会话沙箱。
   // 为什么安全：DSH 沙箱约束的是「模型驱动」的文件效果，而本插件的命令全部
   // 是宿主侧固定模板（建仓/快照/索引/回退），命令串里唯一变量是插件自己
@@ -192,30 +428,33 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig): Runtime
   // 其余调用方继续用 runShell 拿纯文本，签名不变。
   async function runShellMeta(command: string, opts?: ShellRunOptions): Promise<{ text: string; truncated: boolean }> {
     const sp = ctx.get<{ workspaceRoot?: string }>('sandboxPolicy')
+    const workspaceRoot = (sp && sp.workspaceRoot) || process.cwd()
+    const timeoutMs = (opts && opts.timeoutMs) || 300000
+    const stdoutMaxBytes = (opts && opts.stdoutMaxBytes) || 4194304
+    // 编码前导：pwsh 侧统一 UTF-8 输出（中文机器 GBK 代码页不再乱码）；
+    // bash 侧 LC_ALL=C 确定序。各模板自带，这里统一前置注入。
+    const fullCommand = scripts.UTF8_PRELUDE + '\n' + command
+    // 方言分流（issue #15）：win32 且 ctx.shell 是 bash 时官方通道跑不了 pwsh
+    // 模板（第一行前导即语法错误），改走 spawn 直连；默认路径（ctx.shell 即
+    // pwsh）与 POSIX 都不探测、不触达 spawn——这是「默认零回归」的第一性保证。
+    if (isWin && (await shellDialectFor(command)) === 'bash') {
+      return await runShellDirect(command, { command: fullCommand, timeoutMs, stdoutMaxBytes, cwd: workspaceRoot, stdin: opts && opts.stdin })
+    }
     const spec = shell.resolve({
-      // 编码前导：pwsh 侧统一 UTF-8 输出（中文机器 GBK 代码页不再乱码）；
-      // bash 侧 LC_ALL=C 确定序。各模板自带，这里统一前置注入。
-      command: scripts.UTF8_PRELUDE + '\n' + command,
-      timeoutMs: (opts && opts.timeoutMs) || 300000,
-      stdoutMaxBytes: (opts && opts.stdoutMaxBytes) || 4194304,
+      command: fullCommand,
+      timeoutMs,
+      stdoutMaxBytes,
       // stdin 是官方 ShellExecRequest 契约字段（bash-local/pwsh 均实现），
       // POSIX 侧用它传 index.json 全文，绕开 argv 长度上限
       ...((opts && opts.stdin !== undefined) ? { stdin: opts.stdin } : {}),
-      sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: (sp && sp.workspaceRoot) || process.cwd() }
+      sandboxPolicy: { mode: 'danger-full-access', workspaceRoot }
     })
     const res = await shell.run(spec)
-    const out = (res && res.stdout && res.stdout.text) || ''
     if (res && res.exitCode !== 0) {
-      // 失败兜底（issue #7）：超时/失败的 git 命令可能留下孤儿进程与
-      // stale 锁——subprocess 服务的树级终止有竞态窗口，且 git 被硬杀时
-      // 不回收 index.lock，残留锁会让后续每条快照持续 fatal。best-effort
-      // 清扫后再抛原始错误，清扫自身的失败不得掩盖它。
-      await cleanupAfterGitFailure(command)
-      const err = ((res && res.stderr && res.stderr.text) || '').trim() || ('exit ' + String(res.exitCode))
-      throw new Error(err.slice(0, 1500))
+      await throwShellFailure(command, (res && res.stderr && res.stderr.text) || '', res.exitCode)
     }
     return {
-      text: out,
+      text: (res && res.stdout && res.stdout.text) || '',
       truncated: Boolean(res && res.stdout && res.stdout.truncated),
     }
   }

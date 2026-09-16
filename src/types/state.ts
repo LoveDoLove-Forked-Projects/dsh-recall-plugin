@@ -33,6 +33,11 @@ export interface ErrorRecord {
   kind: EnvErrorKind | null
 }
 
+// win32 下 ctx.shell 的方言判定（issue #15）：官方 shell 是提供方注册制，宿主
+// 可以把 ctx.shell 配成 bash（pwsh 模板被 bash 执行即语法错误）。'pwsh' = 官方
+// 执行器跑得动 pwsh 模板；'bash' = 需改走直连 powershell.exe 通道。
+export type ShellDialect = 'pwsh' | 'bash'
+
 // 共享可变 state：各 Map 缓存供 snapshots/maintenance/routes 复用，
 // 由 createRuntime 生产、apply 生命周期内单例（无模块级可变状态，HMR 假设）
 export interface SharedState {
@@ -50,6 +55,10 @@ export interface SharedState {
   gcCount: Map<string, number>
   gitExe: string | null
   posixHomeBase: string | null
+  // 方言探针缓存：判定结果 + in-flight promise（并发首调只跑一次探针）；
+  // POSIX 不探测，两字段恒为 null
+  shellDialect: ShellDialect | null
+  shellDialectProbe: Promise<ShellDialect> | null
   homeContainer: string | null
   errors: ErrorRecord[]
   snapFeedback: Map<string, SnapshotFeedback>

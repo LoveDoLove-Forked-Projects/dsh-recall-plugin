@@ -137,6 +137,7 @@ The plugin manages disk usage automatically — no manual housekeeping needed:
 When each user message is sent (before the agent touches any files), the workspace is snapshotted into an independent shadow git repository; on recall, a "pre-rollback" safety snapshot is taken first, then files are restored via `git archive` and the conversation is rewound through DSH's official `sessions.fork` mechanism. Binary- and line-ending-safe, and your project's own git state is never touched.
 
 - Snapshot storage: `dsh-recall-snapshots/<SHA256(project absolute path)>/` under home, containing the shadow git repository (`git/`, tags named `snap-<messageID>`), the index file `index.json` (message ID → snapshot time / session), and the recall chain `lineage.json`. Scripts run via PowerShell on Windows and bash on Linux/macOS (selected automatically by platform).
+- **Works on Windows even when the host configures its shell as bash** (2.3.22+): DSH's shell is registered by the profile, and on win32 you can enable only `bash-sandbox` — the PowerShell templates would then be executed by bash and fail across the board. Before running its first command the plugin probes whether the executor can run pwsh (a sentinel command); if it turns out to be bash, the plugin switches to spawning the system PowerShell 5.1 directly, so snapshots and recall keep working. Deployments where `ctx.shell` is pwsh behave exactly as before (one probe, then everything as usual).
 - To browse historical snapshots directly:
 
   ```powershell

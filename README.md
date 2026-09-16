@@ -140,6 +140,7 @@ dsh plugin --profile web remove dsh-recall-plugin
 每条用户消息发送时（agent 动文件之前），工作区被快照进一个独立的影子 git 仓库；撤回时先打「回退前」安全快照、再用 `git archive` 恢复文件、通过 DSH 官方 `sessions.fork` 机制把会话切到该消息之前。二进制与换行符安全，全程不触碰项目自身的 git 状态。
 
 - 快照存储：home 下 `dsh-recall-snapshots/<SHA256(项目绝对路径)>/`，内含影子 git 仓库（`git/`，tag 名为 `snap-<消息ID>`）、索引文件 `index.json`（消息 ID → 快照时间 / 会话）与撤回链 `lineage.json`。Windows 上脚本走 PowerShell，Linux/macOS 走 bash（按平台自动分叉）。
+- **Windows 上宿主把 shell 配成 bash 也照常工作**（2.3.22+）：官方 shell 由 profile 注册，win32 上可以只启用 `bash-sandbox`——此时 pwsh 脚本会被 bash 执行而全盘失败。插件首次执行命令前会先探测执行器能否跑 pwsh（哨兵命令），确认是 bash 后改用系统 PowerShell 5.1 直连执行，快照与撤回不受影响；`ctx.shell` 即 pwsh 的常规部署行为不变（探测一次、判为 pwsh 后一切照旧）。
 - 想直接翻历史快照：
 
   ```powershell

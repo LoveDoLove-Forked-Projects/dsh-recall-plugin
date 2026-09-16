@@ -774,6 +774,48 @@
   的消息撤回，输入框上方不应出现排队消息（0.1.6-alpha.1 起为官方根治的正向确认）。
 
 
+### I36 win32 下 `ctx.shell` 的方言不受插件控制：pwsh 模板 ⇄ pwsh 执行器之间无契约保证（issue #15）
+
+- **依赖的官方行为**：官方 shell 能力是**提供方注册制**——一个 composition 恰好一个 `ctx.shell` 实现
+  （bash-local / bash-sandbox / pwsh-local / pwsh-sandbox 四选一，挂两个会因服务重复注册抛错），
+  win32 层的 profile 可以把它配成 **bash**（如只启用 `bash-sandbox`、禁用 `pwsh-sandbox`）。而
+  `ShellExecutor` 的公开面只有 `resolve(request)` / `run(spec)` / `start(spec)` 与 `sandboxMode`
+  getter，`ShellExecRequest` / `ShellRunResult` 里**没有任何「我是 bash 还是 pwsh」的字段**——方言
+  不可查询。插件按 `process.platform` 单选 pwsh 模板，与宿主实际执行器之间没有任何契约约束。
+- **症状**：这类宿主上 pwsh 模板被 bash 执行，第一行编码前导即语法错误
+  （`bash: -c: line 1: syntax error near unexpected token '('`），`ensureGit` 起每一步都失败——
+  快照从未成功、撤回按钮不可用，win32 上功能面整个死亡（issue #15 实测：dsh 0.1.6-alpha.1 + Windows 11）。
+- **插件对策**：行为探针判方言 + 判成 bash 时改走 Node `spawn` 直连。探针为内联的
+  `Write-Output <罕见 ASCII 哨兵>`（pwsh 侧 exit 0 且回显哨兵即判 pwsh；非零退出——bash 下
+  command-not-found 即 127——或无输出或 reject 一律判 bash），结果按进程缓存并以 in-flight promise
+  去重（突发 `session/event` 只探一次）、走独立路径不触发失败清扫、不带 UTF8_PRELUDE、30s 短超时；
+  POSIX 不探测（bash 模板与 bash 执行器天然一致）。直连通道用
+  `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -Command <单 argv>`
+  （PS 5.1 全平台自带，不赌 PS7；模板本就按 5.1 兼容写，见 I14/I27），保留四项官方语义：stdin 字节
+  透传（I27 的 `Console.In` 代码页坑由字节流绕开）、stdout 截断标记（F-G3，loadIndex 据它区分截断与
+  损坏）、超时 `child.kill()`、非零退出仍走 `cleanupAfterGitFailure`；env 复刻官方清洗（凭证形状名 +
+  全部 `DSH_*`，再叠 `NO_COLOR`/`PAGER`/`GIT_PAGER`），cwd 取 `sandboxPolicy.workspaceRoot || process.cwd()`。
+  带 `RECALL_CLEANUP` 哨兵的失败清扫脚本**不触发探针**、只读缓存（它只在一条真实命令失败后被调用，
+  方言早已判定；未判定时按 pwsh 走官方通道）——善后路径不再叠一条探测进程。
+- **出处**：`dsh-shell/lib/types/index.d.ts`（`ShellExecutor` 公开面：resolve/run/start + sandboxMode，
+  无方言字段）；`dsh-pwsh-local/lib/index.js`（候选链末档 `System32\WindowsPowerShell\v1.0\powershell.exe`、
+  argv `-NoLogo -NoProfile -NonInteractive -Command <单 argv>`、`ENV_OVERRIDES`）；`dsh-subprocess/lib/index.js`
+  （`SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i`、`key.toUpperCase().startsWith("DSH_")`）；
+  issue #15（报告者实测 Git Bash 宿主下方言冲突）。
+- **探针/单测**：`tests/probe/api-surface.test.js`「win32 shell 方言」3 例（ShellExecutor 无方言字段；
+  直连复刻的三项官方事实：PS 5.1 候选路径 + argv 旗标 + env overrides；env 清洗口径）；
+  `tests/unit/store-shell-dialect.test.js` 31 例（判定/收集/清洗/路径四个纯函数 + 假 child 覆盖 stdin
+  字节透传、截断、超时 kill、spawn error + 分流接线：pwsh 方言零触达 spawn、bash 方言走直连且官方
+  通道只跑探针那一次、in-flight 去重、POSIX 不探测、清扫脚本不探测、直连失败仍走清扫）。
+- **失效症状**：探针误判 pwsh 为 bash → 走直连通道（pwsh 模板同样能跑，功能不受影响；代价是绕开
+  官方托管环境——无 `dshEnv`/PATH 注入、无进程树级终止，宿主崩溃可能留下孤儿 git 与陈旧锁，靠 M3
+  心跳/陈旧锁分级清扫自愈）；探针误判 bash 为 pwsh（bash 意外能回显哨兵）→ 维持原状（功能死）；
+  直连可执行文件缺失 → `spawn` reject → 命令失败并进「最近错误」。
+- **复查动作**：dsh 升级后确认 `ShellExecutor` 仍无方言字段（有则改读字段、探针与探测命令一并退役）
+  且官方 pwsh 候选路径/argv/env 清洗未变——上述 3 条探针自动盯防；实弹按
+  `docs/plans/pending/plan-shell-dialect-win32.md` 验收 3「profile 只启用 bash-sandbox」全链复跑。
+
+
 ## 与 E1 verify-host 的对应关系
 
 装配层条目（I10 inject 门禁、端点注册、Config schema、卸载清零）由

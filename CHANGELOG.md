@@ -2,6 +2,16 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.3.22] - 2026-09-16
+
+### 修复
+
+- **win32 上宿主把 `ctx.shell` 配成 bash 时功能面整个死亡（issue #15）**：官方 shell 是提供方注册制——一个 composition 恰好一个 `ctx.shell` 实现，win32 的 profile 可以只启用 `bash-sandbox`（禁用 `pwsh-sandbox`）；而插件按 `process.platform` 单选 pwsh 模板，两者之间没有契约保证，于是模板被 bash 执行、第一行编码前导即语法错误（`bash: -c: line 1: syntax error near unexpected token '('`），`ensureGit` 起每一步都失败：快照从未成功、撤回按钮不可用。官方 `ShellExecutor` 公开面（`resolve`/`run`/`start` + `sandboxMode`）没有任何方言标识，**不能查询只能探测**，故修复＝行为探针判方言 + 判成 bash 时改走直连通道：
+  - **S1 方言探针**：`runShellMeta` 首调内联执行 `Write-Output <罕见 ASCII 哨兵>`（不带 UTF8_PRELUDE、30s 短超时、直调 `ctx.shell` 不触发失败清扫）；exit 0 且回显哨兵判 pwsh，非零退出（bash 下 command-not-found 即 127）/无输出/reject 一律判 bash。结果按进程缓存并以 in-flight promise 去重（突发 `session/event` 只探一次）。POSIX 不探测——bash 模板与 bash 执行器天然一致。
+  - **S2 直连通道**：判 bash 时 `runShellMeta` 分流到 Node `spawn` 直连 `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -NonInteractive -Command <单 argv>`（PS 5.1 全平台自带，不赌 PS7；模板本就按 5.1 兼容写），保留官方四项语义：stdin 字节透传（PS 5.1 代码页坑由字节流绕开）、stdout 超截断保留尾部并置 `truncated`（索引读取靠它区分截断与损坏）、超时 `child.kill()`、非零退出仍走 `cleanupAfterGitFailure`；env 复刻官方清洗（剥凭证形状名与全部 `DSH_*`，叠 `NO_COLOR`/`PAGER`/`GIT_PAGER`），cwd 取 `sandboxPolicy.workspaceRoot || process.cwd()`，`windowsHide` 防桌面端闪窗。带 `RECALL_CLEANUP` 哨兵的失败清扫脚本不触发探针（只用缓存）——它只在真实命令失败后被调用，方言早已判定，善后路径不再叠一条探测进程。
+  - **默认路径零变化**：`ctx.shell` 即 pwsh 的常规部署（探针判 pwsh）与 POSIX 都不触达直连通道；探针误判的代价也低——两条通道对 pwsh 模板都兼容，判成 bash 只是绕开官方托管环境（无 `dshEnv`/PATH 注入、无进程树级终止）。
+  - 新增 `tests/unit/store-shell-dialect.test.js`（31 例：判定/收集/env 清洗/可执行路径四个纯函数 + 假 child 覆盖 stdin 字节透传、截断、超时 kill、spawn error + 分流接线与 in-flight 去重）；`tests/probe/api-surface.test.js` 新增「win32 shell 方言」3 例（ShellExecutor 无方言字段、直连复刻的 PS 5.1 候选路径与 argv 旗标、env 清洗口径）；compat-audit 新增 I36。
+
 ## [2.3.21] - 2026-09-15
 
 ### 变更

@@ -397,4 +397,46 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       expect(src).toMatch(/"-Command"/)
     })
   })
+
+  describe('win32 shell 方言（I36：官方无方言字段，插件只能行为探测 + 直连兜底）', () => {
+    // 官方 shell 是提供方注册制：win32 上宿主可把 ctx.shell 配成 bash，此时 pwsh
+    // 模板被 bash 执行、首行编码前导即语法错误（issue #15）。插件的路线是行为探针
+    // 判方言 + 判成 bash 时 Node spawn 直连 powershell.exe，其合法性依赖以下官方
+    // 事实——任一漂移即红：
+    // 1) ShellExecutor 公开面没有「我是 bash 还是 pwsh」的字段：有字段就该改读字段
+    //    （探针与探测命令可一并退役）；
+    // 2) 直连通道复刻的三件事仍在官方实现里：PS 5.1 候选路径、argv 旗标形态、
+    //    env 清洗与 overrides 口径。
+    const p = 'dsh-shell'
+    const f = '/lib/types/index.d.ts'
+    const guard = () => has(p, f)
+
+    probeIf(guard)('ShellExecutor 公开面无方言字段（resolve/run/start + sandboxMode）', () => {
+      const m = read(p, f).match(/export declare abstract class ShellExecutor[\s\S]*?\n\}/)
+      expect(m).toBeTruthy()
+      expect(m[0]).toMatch(/abstract resolve\(/)
+      expect(m[0]).toMatch(/abstract run\(/)
+      expect(m[0]).toMatch(/abstract start\(/)
+      expect(m[0]).not.toMatch(/dialect|shellKind|flavor/i)
+    })
+
+    const pwsh = 'dsh-pwsh-local'
+    const pwshFile = '/lib/index.js'
+    probeIf(() => has(pwsh, pwshFile))('直连复刻的官方事实：PS 5.1 候选路径 + argv 旗标 + env overrides', () => {
+      const src = read(pwsh, pwshFile)
+      // 直连固定 %SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe（不赌
+      // PS7 存在）；该路径是官方候选链末档，官方移除即红（直连可执行文件须重新选型）
+      expect(src).toMatch(/"System32", "WindowsPowerShell", "v1\.0", "powershell\.exe"/)
+      expect(src).toMatch(/"-NoProfile"/)
+      expect(src).toMatch(/"-NonInteractive"/)
+      expect(src).toMatch(/"-Command"/)
+      expect(src).toMatch(/NO_COLOR: "1"[\s\S]{0,120}PAGER: "cat"[\s\S]{0,120}GIT_PAGER: "cat"/)
+    })
+
+    probeIf(() => has('dsh-subprocess', '/lib/index.js'))('env 清洗口径：凭证形状名 + 全部 DSH_*（直连通道逐条复刻）', () => {
+      const src = read('dsh-subprocess', '/lib/index.js')
+      expect(src).toMatch(/SENSITIVE_ENV_PATTERN = \/KEY\|PASSWORD\|SECRET\|TOKEN\/i/)
+      expect(src).toMatch(/key\.toUpperCase\(\)\.startsWith\("DSH_"\)/)
+    })
+  })
 })
