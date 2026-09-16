@@ -1,6 +1,6 @@
 # win32 shell 方言冲突修复计划（issue #15）
 
-> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：待实施
+> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：已实施（2026-09-16 落地并随 2.3.22 发版，见文末「实施记录」）
 > 触发来源：GitHub issue #15（2026-09-16，报告者 yihefeikong-rgb，dsh harness 0.1.6-alpha.1 + Windows 11）；契约核验基于本机 dsh 安装目录 `@deepseek-ai/dsh-shell`、`@deepseek-ai/dsh-pwsh-local` 的 `.d.ts` 与构建产物源码。
 
 ## 背景：为什么做

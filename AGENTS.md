@@ -52,7 +52,7 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 
 | 命令                      | 作用                                                                                                                      | 何时跑                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `npm test`              | vitest 纯逻辑单测（tests/unit，17 文件 227 例，无 DSH 依赖，CI 同跑）                                                                     | 改任何逻辑后                             |
+| `npm test`              | vitest 纯逻辑单测（tests/unit，28 文件 361 例，无 DSH 依赖，CI 同跑）                                                                     | 改任何逻辑后                             |
 | `npm run typecheck`     | `tsc --noEmit` 全量类型检查（src/**/\* + tests/types/**/\* 编译期契约断言；tests/unit 与 scripts/\*.mjs 退出范围）                           | 改任何 src/ 后；发版前（CI 类型门禁置于单测前）       |
 | `npm run test:probe`    | 官方 API 字段探针（tests/probe，依赖本机 dsh 安装，无 dsh 自动 skip）                                                                      | **dsh 升级后本地必跑**；新增官方 API 调用点先加探针条目 |
 | `npm run verify:host`   | 装配门禁（inject 声明/端点注册/Config schema/settings 接入/卸载清零）                                                                     | 改 inject/端点/装配后；发版前                |
@@ -87,7 +87,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * 发布前重点复核：#3 无新硬编码、#4 patch 默认值语义、#5 HMR 假设、#8 新增官方 API 调用点的字段已核验。
 
-漂移控制：每 release 周期按 `docs/reference/README.md` 重拉镜像（重拉后同步更新该文件「归档日期」与「归档 dsh 版本」字段），变化同步进本清单、[docs/compat-audit.md](docs/compat-audit.md) 台账与「已知坑」；发布前跑 `npm run check:dsh`（P2-5）做版本巡检——本地 dsh 与镜像漂移、peer 范围越界都会输出提醒。**dsh 升级后跑** **`npm run check:upgrade`（串联三层门禁）并按 compat-audit 台账 I1-I34 定点复查**，替代全文重读「已知坑」。
+漂移控制：每 release 周期按 `docs/reference/README.md` 重拉镜像（重拉后同步更新该文件「归档日期」与「归档 dsh 版本」字段），变化同步进本清单、[docs/compat-audit.md](docs/compat-audit.md) 台账与「已知坑」；发布前跑 `npm run check:dsh`（P2-5）做版本巡检——本地 dsh 与镜像漂移、peer 范围越界都会输出提醒。**dsh 升级后跑** **`npm run check:upgrade`（串联三层门禁）并按 compat-audit 台账 I1-I36 定点复查**，替代全文重读「已知坑」。
 
 ## 关键设计决策（为什么这样写）
 
@@ -181,13 +181,13 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * **冒烟路径**：中文路径工作区 → 发消息（出快照）→ 改文件 → 撤回（清单正确、文件恢复、对话回退、标题不变）→ 设置页快照管理（树形展开/折叠、叶子消息内容、三级/批量删除、立即 gc）。完整待办清单（各批次实弹验收项）见 [docs/plans/completed/smoke-checklist.md](docs/plans/completed/smoke-checklist.md)（2026-08-29 七节全部通过；新批次验收项追加新节）；执行记录（环境/结果/发现/发版判定）见同目录 [smoke-checklist-records.md](docs/plans/completed/smoke-checklist-records.md)。
 
-* **测试分层**：单测（纯逻辑，CI 同跑）→ 探针（官方 API 字段断言，把合规清单 #8 机器化）→ verify-host（装配层门禁）→ 活体冒烟（不替代关系，逐层补盲）。dsh 升级后本地跑 `npm run check:upgrade`（串联 check:dsh + test:probe + verify:host），并按 compat-audit 台账 I1-I34 定点复查。
+* **测试分层**：单测（纯逻辑，CI 同跑）→ 探针（官方 API 字段断言，把合规清单 #8 机器化）→ verify-host（装配层门禁）→ 活体冒烟（不替代关系，逐层补盲）。dsh 升级后本地跑 `npm run check:upgrade`（串联 check:dsh + test:probe + verify:host），并按 compat-audit 台账 I1-I36 定点复查。
 
 ## 已知坑（踩过的，别再踩）
 
 > 细节（依赖的官方行为 / 出处 / 探针·单测 / 失效症状 / 复查动作）全部住在
 > [docs/compat-audit.md](docs/compat-audit.md) 的「子系统 × 不变量 × 探针」矩阵
-> （I1-I34），这里只留一行一条索引；**dsh 升级后按台账 I1-I34 定点复查，不全文重读本节**。
+> （I1-I36），这里只留一行一条索引；**dsh 升级后按台账 I1-I36 定点复查，不全文重读本节**。
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 
@@ -256,4 +256,8 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 * I33 seeded 会话（撤回 fork 子会话）的读取：`sessionQuery.readSession` 内部 `Session.create` 快照校验要求 seed === fork 继承前缀，对全量读取的 seeded 会话恒抛；异常被静默折成 null 与「真首条」不可分 → 子会话里点任何消息都误报「第一条用户消息」（重启不恢复）。修法＝降级 `observeSession`（restore 无此约束，取全量事件并释放租约）。详见 compat-audit I33。
 
 * I34 撤回回填的附件重建走官方 composer 等价链路（`sessions.binding().session.readAttachment` → `conversation.createDrafts` → `shell.actions.addAttachments`，未接纳则 `releaseDraftAttachments`）；`readAttachment` 授权绑定「消息所在会话」——须在 execute 开头发起时用**源会话**早读字节，fork 后再把 File 注册进子会话草稿，不能在子会话里直读（被撤回消息不在其日志中）。全链 typeof 探测降级。详见 compat-audit I34。
+
+* I35 0.1.5 线 `sessions.fork` 切点取 `boundary+1` 后跳到下一个 `turn/start`——切点后的 inbox 入队事件（排队消息）一并进子会话 seed，被撤回消息以「排队消息」复活；0.1.6-alpha.1 官方修复（cut 固定 `boundary.seq+1`）后从源头消失，插件清理链在 0.1.6 上退化为无害空操作（peer 仍覆盖 0.1.5 线）。详见 compat-audit I35。
+
+* I36 win32 下 `ctx.shell` 方言不受插件控制（提供方注册制，profile 可把 win32 配成 bash 执行器），pwsh 模板被 bash 执行首行即语法错误、快照/撤回全死；官方 `ShellExecutor` 公开面无方言字段，只能行为探测——探针判 bash 时改走直连 powershell.exe 通道（stdin 字节透传/尾部截断/超时 kill/失败清扫四语义对齐官方）。详见 compat-audit I36。
 

@@ -163,7 +163,7 @@ Note: all source lives in `src/` (host in `src/host/`, browser side in `src/clie
 
 ### Tests
 
-- `npm test`: pure-logic unit tests (vitest, 17 files / 227 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, script-template same-name-export contract, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
+- `npm test`: pure-logic unit tests (vitest, 28 files / 361 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, script-template same-name-export contract, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
 - `npm run test:probe`: official-API field probes (requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, and goes red on violation;
 - `npm run verify:host`: assembly gate (requires a local dsh installation) — boots the plugin with a real cordis context, asserting inject declarations, endpoint registration, Config schema, and teardown cleanliness, catching assembly regressions before release;
 - `npm run build`: full host+client build (mandatory after any `src/` change); `npm run check:dsh`: dsh version inspection (pre-release).

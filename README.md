@@ -166,7 +166,7 @@ pnpm install
 
 ### 测试
 
-- `npm test`：纯逻辑单测（vitest，17 个文件 227 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm test`：纯逻辑单测（vitest，28 个文件 361 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
 - `npm run test:probe`：官方 API 字段探针（依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle`、`listSessions` 记录结构、`AgentRegistry` 等字段，违反即红；
 - `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件，断言 inject 声明、端点注册、Config schema、卸载清理，装配回归发版前即可拦截；
 - `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）。
