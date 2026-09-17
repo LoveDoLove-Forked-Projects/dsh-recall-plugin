@@ -35,7 +35,12 @@ window.__ModuleLoader__.load({
     const React = require('react') as ReactApi
     return {
       name: 'dsh-recall-plugin',
-      inject: ['slots', 'sessions', 'workspaces', 'timer'],
+      // uiWorkspace（ui-workspace 的 UiWorkspace）：0.1.6-alpha.2 起 ISessions
+      // 移除 open，会话导航（fork 后打开子会话）移交其 openSession——0.1.2-alpha.1
+      // 起该服务即存在，声明安全；0.1.1-rc.2 无此服务（同线亦无 sessions/
+      // workspaces），声明会令 fiber pending——该线段已从 peer 范围移除
+      // （见 compat-audit I37「服务可用性」）。
+      inject: ['slots', 'sessions', 'workspaces', 'uiWorkspace', 'timer'],
       apply: createApp(React)
     } as ClientPluginObject
   }

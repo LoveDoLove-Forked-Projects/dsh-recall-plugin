@@ -19,10 +19,14 @@ declare global {
 }
 
 // ---- slot 全量清单（dsh-contract.md §二，52 个；★ = 插件注册）----
+// 0.1.6-alpha.2：settings.plugin.item 随旧设置页插件 tab 移除；新增
+// ui-plugin-manager 的 plugins.item / plugins.bundle.config / plugins.row.config，
+// 插件设置卡片迁挂 plugins.bundle.config（key=bundle 包名）。
 
 export type SlotName =
   | 'conversation.chat.node' // ★ keyed/session（ui-chat）
-  | 'settings.plugin.item' // ★ keyed/root（ui-settings-plugins，key=settings namespace）
+  | 'settings.plugin.item' // ★ keyed/root（ui-settings-plugins；0.1.6-alpha.2 起移除，仅旧版生效）
+  | 'plugins.bundle.config' // ★ keyed/root（0.1.6-alpha.2 新增 ui-plugin-manager，key=bundle 包名）
   | 'conversation' // single/session-maybe（ui-layout）
   | 'conversation.session' // single/session（ui-conversation）
   | 'conversation.session.header'
@@ -125,7 +129,9 @@ export interface SessionBinding {
 
 export interface ClientSessionsService {
   fork(opts: { sessionId: string; atSeq?: number; increaseTitle?: boolean }): Promise<string>
-  open(sessionId: string): unknown
+  // 0.1.6-alpha.2 起 ISessions 移除 open（「navigation belongs to view owners」，
+  // 导航移交 ui-workspace 的 openSession）——可选化，旧版仍走这里
+  open?(sessionId: string): unknown
   // settings-cards 的「切换版本会话」探测：官方会话列表快照（{ byId }）
   list?: { getSnapshot(): { byId?: Record<string, unknown> } }
   // 会话对象层入口（官方 ui-conversation 对附件回读走 binding().session）
@@ -137,6 +143,20 @@ export interface ClientWorkspacesService {
   // 真实服务恒返 thenable；若某版本返非 thenable，旧行为是当场 TypeError，
   // 不做 Promise.resolve 静默兜底（避免掩盖官方契约漂移）
   archiveSession(sessionId: string): Promise<unknown>
+  // 归档会话集合（快照管理「切换」闸门用）：0.1.6-alpha.2 起 sessions.list 含
+  // 归档会话，而归档会话不是合法的主视图选择——官方导航会对归档选择 clearMain
+  // 落空态，故判据必须另从这里排除
+  list?: { getSnapshot(): { archivedSessionIds?: readonly string[] } }
+}
+
+// ui-workspace 的 UiWorkspace（会话导航视图所有者）：0.1.6-alpha.2 起
+// ISessions 移除 open（「navigation belongs to view owners」），fork 后打开
+// 子会话改走其 openSession；0.1.2-alpha.1 起服务存在，0.1.1-rc.2 无（该线段
+// 已从 peer 范围移除，见 entry.ts inject 注释）。
+export interface ClientUiWorkspaceService {
+  openSession(sessionId: string): void
+  archiveSession(sessionId: string): Promise<unknown>
+  unarchiveSession(sessionId: string): Promise<unknown>
 }
 
 // ---- conversation 服务（0.1.2 新增，可选探测降级）----
@@ -199,6 +219,7 @@ export interface ClientContext {
   slots: SlotsService
   sessions: ClientSessionsService
   workspaces: ClientWorkspacesService
+  uiWorkspace: ClientUiWorkspaceService
   timer: { timeout(fn: () => void, ms: number): unknown }
   get<T = unknown>(name: string): T | undefined
 }

@@ -7,7 +7,7 @@
  */
 
 import type { ReactApi, UtilApi } from './util.js'
-import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
+import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange } from '../types/api.js'
 
 // 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
@@ -128,7 +128,8 @@ export function buildRecallNode(
   util: UtilApi,
   ctx: ClientContext,
   sessionsSvc: ClientSessionsService,
-  workspacesSvc: ClientWorkspacesService
+  workspacesSvc: ClientWorkspacesService,
+  uiWorkspaceSvc?: ClientUiWorkspaceService
 ): RecallNodeApi {
   const { api, ensureInit, showThrottledToast, writeClipboard, clockText, pluginConfig, messageFor } = util
 
@@ -540,7 +541,12 @@ export function buildRecallNode(
             // sessionId 在撤回按钮可见时恒有（快照仅对已知会话生成），断言收口
             const childId = await sessionsSvc.fork({ sessionId: sessionId as string, atSeq: cutSeq })
             if (childId) {
-              if (typeof sessionsSvc.open === 'function') sessionsSvc.open(childId)
+              // 打开子会话：0.1.6-alpha.2 起 ISessions 移除 open（导航归视图所有
+              // 者），改走 uiWorkspace 的 openSession；0.1.2〜0.1.6-alpha.1 用
+              // sessions.open——按服务能力各吃各的，均缺失则降级为「仅文件回退、
+              // 视图不切换」（守卫吞掉，无报错）
+              if (uiWorkspaceSvc && typeof uiWorkspaceSvc.openSession === 'function') uiWorkspaceSvc.openSession(childId)
+              else if (typeof sessionsSvc.open === 'function') sessionsSvc.open(childId)
               chatReverted = true
               fillTarget = childId
               // 子会话从 seed 继承了一份「被撤回消息的 inbox 入队记录」，不清理

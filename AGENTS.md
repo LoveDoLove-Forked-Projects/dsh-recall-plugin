@@ -211,7 +211,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I11 Host import `@deepseek-ai/*` 按模块真实路径解析（link: 须自备 junction）。
 
-* I12 settings.plugin.item 按 namespace 交集分发（key=dsh-recall）。
+* I12 设置卡片 slot：0.1.6-alpha.1 及以前 `settings.plugin.item` 按 namespace 交集分发（key=dsh-recall）；0.1.6-alpha.2 起旧插件 tab 移除，迁挂 `plugins.bundle.config`（key=bundle 包名 `dsh-recall-plugin`）——双键并注册，未声明 key 的 inject 静默 no-op。
 
 * I13 ModuleLoader 单文件 CJS factory 包裹（R1 路线 B 依据；esbuild 打包、react external）。
 
@@ -260,4 +260,6 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 * I35 0.1.5 线 `sessions.fork` 切点取 `boundary+1` 后跳到下一个 `turn/start`——切点后的 inbox 入队事件（排队消息）一并进子会话 seed，被撤回消息以「排队消息」复活；0.1.6-alpha.1 官方修复（cut 固定 `boundary.seq+1`）后从源头消失，插件清理链在 0.1.6 上退化为无害空操作（peer 仍覆盖 0.1.5 线）。详见 compat-audit I35。
 
 * I36 win32 下 `ctx.shell` 方言不受插件控制（提供方注册制，profile 可把 win32 配成 bash 执行器），pwsh 模板被 bash 执行首行即语法错误、快照/撤回全死；官方 `ShellExecutor` 公开面无方言字段，只能行为探测——探针判 bash 时改走直连 powershell.exe 通道（stdin 字节透传/尾部截断/超时 kill/失败清扫四语义对齐官方）。详见 compat-audit I36。
+
+* I37 0.1.6-alpha.2 移除 `ISessions.open`（导航归视图所有者）：会话导航改走独立 `uiWorkspace` 服务的 `openSession`（`ctx.workspaces` 只有归档能力、无导航），撤回 fork 后打开子会话依赖它；同版 `sessions.list.byId` 含归档会话而归档不是合法主视图选择（官方清空 → 空态），故「切换」类导航的判据须叠加 `workspaces.list` 快照的 `archivedSessionIds` 排除。详见 compat-audit I37。
 

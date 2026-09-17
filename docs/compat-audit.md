@@ -7,6 +7,47 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.6-alpha.2 核验（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`；`latest`
+> 仍 0.1.5-rc.1、`next` 仍 0.1.5-rc.2），`npm install -g @deepseek-ai/dsh@alpha` 全局实装（dsh-settings 随装
+> 0.1.6-alpha.2、schemastery 仍 3.18.2；junction 存活无需重建）。三层门禁：`test:probe` 37/37 + `verify:host`
+> 装配断言通过；`check:dsh` 报镜像/契约版本漂移，本次同步（reference/ 按 alpha.2 tag 重拉，仅 06/09 两文件
+> 实质差异且均非契约面）。tag 对比 887 commits / 300+ 文件（compare 截断不可用，沿 tree-SHA 逐包下钻法），
+> 消费面包源码级结论：**I12 失效**——旧设置页插件 tab 整体移除，`settings.plugin.item`/`settings.plugins.tab`
+> 产物归零，ui-plugin-manager 新增 `plugins.item`/`plugins.bundle.config`/`plugins.row.config`，插件设置卡片
+> 迁挂 `plugins.bundle.config`（key=`dsh-recall-plugin`；renderer 对未声明 key 的 inject 是 `specDynamic===void 0`
+> 直接 return 的静默 no-op，故旧键保留双版本兼容、无需探测，I12 已更新）；**session-controller client 面大改**
+> （release notes「Client Sessions 支持多实例共存」）：新增 `retain`/`using`/`retainInfo`/`SessionReference`
+> 引用模型、`queue-mirror.ts` 删除，`binding()` 收窄为「只借已 retain 的会话」——fork 签名逐字不变
+> （I6），本机产物实证 `cut = SessionLogOffset(boundary.seq + 1)`（I35 根治保持）；附件链（I34）全链
+> typeof 降级兜底，源会话未 retain 时仅附件不重建；ui-chat `slots.ts` 唯一变化是 `conversation.chat.turnTail`
+> chain→list + 新增 `openExternalLink`（插件零消费），`chat.node` 契约（I2/I4/I5）与
+> `ChatNodeOwnerProps.renderMessageImages/loadImage` 并存不变；connection `fetch.register` 契约不变（仅新增
+> `streamBaseUrl?` 可选字段，I32 路线不受影响）；`SettingsProvider.installSection` 在位（I30）；probe 37/37
+> 钉 API 字段面。**兼容声明**：peer 范围 `>=0.1.6-alpha.1 <0.1.7` 天然覆盖 alpha.2 无需扩展。其余 release
+> notes 变化（插件管理页/文件改动卡片/Office 预览/Inbox 重启恢复/终端权限/运行时解析+运行时卸载）与插件
+> 消费面零交集或由既有清理机制兜底（HMR 卸载语义未变）。
+>
+> **0.1.6-alpha.2 实弹补充（2026-09-18）**：`ISessions` 同时移除 `open`（契约注释「navigation belongs to
+> view owners」），会话导航迁至独立 `uiWorkspace` 服务的 `openSession(target: SessionTarget)`
+> （`SessionTarget = SessionId | SubagentAddress`，官方 UI 亦以裸 sessionId 调用）；`ctx.workspaces`
+> （IWorkspaces）只有归档能力、无导航 → fork 后打开子会话需改走 uiWorkspace（**第二处改码**，I37）。该服务
+> 揭示的第二件事：`sessions.list.byId` 在 alpha.2 **包含归档会话**，插件「切换」按钮赖以排除归档会话的闸门
+> 失效——归档集合改从 `workspaces` 快照读（**第三处改码**，I37）。实弹冒烟通过
+> （[记录](plans/completed/smoke-checklist-records.md)）：插件管理页
+> bundle 配置卡渲染与配置读写、撤回主链路 + fork 子会话打开 + 标题继承 + 回填、快照管理树/两级实删（Host
+> tag 与索引对账）/立即 gc/切换两向（归档行不渲染、活跃行正常打开）。结论：三处改码，实弹全覆盖。
+>
+> **0.1.6-alpha.1 旧版回退实弹（2026-09-18）**：本批次三处改码都在跨版本面上（静态 `uiWorkspace`
+> inject、`plugins.bundle.config` 注册、读 `workspaces` 归档集合），故把全局 dsh 降到 0.1.6-alpha.1 实弹一轮，
+> 确认未升级 dsh 的用户更新插件后不变砖。三项全过（[记录](plans/completed/smoke-checklist-records.md)）：
+> 旧 slot（`settings.plugin.item`，key `dsh-recall`）卡片照常渲染且样式注入正常，`plugins.bundle.config` 在旧
+> 渲染器上是静默 no-op、零报错；撤回 fork 后子会话由 `uiWorkspace.openSession` 正常打开（归属实证：切过去后
+> 再发消息，新快照记到子会话 id）；快照管理树按 lineage 聚族（`v1/2` 与 `v2/2`）正常。静态面同时核实：
+> alpha.1 的 `ISessions.open` 与 `UiWorkspace.openSession` 并存（I37 双分支两条路都通）、
+> `WorkspaceSnapshot.archivedSessionIds` 已存在（闸门判据同样生效）、alpha.1 的 `dsh-web-app` 依赖并挂载
+> `dsh-client-ui-workspace`（静态 inject 不会令 fiber 长期 pending）。降级固有现象（非缺陷）：alpha.2 写入的
+> `workspace/changes` 事件对 alpha.1 harness 未知且未标 ignorable，旧会话日志不可读。
+>
 > **0.1.6-alpha.1 核验（2026-09-15）**：**npm 已发布**（dist-tag `alpha` 指向本版；`latest` 仍为 0.1.5-rc.1、
 > `next` 仍为 0.1.5-rc.2；0.1.6 线首个预发布），`npm install -g @deepseek-ai/dsh@alpha` 全局实装。
 > 三层门禁：`verify:host` 装配断言通过 + `npm test` 330/330 + `test:probe` 32 例中 1 红——红点即本版
@@ -335,16 +376,21 @@
 - **失效症状**：`ERR_MODULE_NOT_FOUND`（1.6.0 实证）。
 - **复查动作**：link 模式开发前确认 junction 存在；丢失按 AGENTS.md 命令重建。
 
-### I12 settings.plugin.item 按 namespace 交集分发
+### I12 settings.plugin.item 按 namespace 交集分发（**0.1.6-alpha.2 起 slot 移除，已迁挂 plugins.bundle.config**）
 - **依赖的官方行为**：`settings.plugin.item` 是 root 级 keyed slot，按 settings namespace
   作为 entryKey 分发；卡片 key 必须与 Host namespace（`dsh-recall`）一致。
-- **出处**：`dsh-client-ui-settings-plugins` configurable 标签页声明。
-- **探针/单测**：`tests/probe/api-surface.test.js`（settings.plugin.item 仍为 keyed + root）+ 冒烟「设置页撤回卡片出现」覆盖。
-- **失效症状**：设置卡片永不渲染（key 不匹配，静默）。
-- **复查动作**：读 `dsh-client-ui-settings-plugins/lib/types/client/slot-contract.d.ts`——
-  `settings.plugin.item` 仍是 `kind:'keyed'; scope:'root'`、按 settings namespace 作为
-  key 分发（「Keying on the namespace is what lets a plugin … the tab pairs the two」）；
-  卡片 key 与 Host namespace（`dsh-recall`）一致的分发约定未变。
+- **出处**：`dsh-client-ui-settings-plugins` configurable 标签页声明；**0.1.6-alpha.2 旧设置页
+  插件 tab 整体移除，该 slot 与 `settings.plugins.tab` 一并删除**（产物 grep 双双归零），替代者是
+  ui-plugin-manager 插件管理页的 `plugins.item`/`plugins.bundle.config`/`plugins.row.config`
+  （bundle 配置 key=bundle 包名，page 视图自含保存控件）。
+- **探针/单测**：`tests/probe/api-surface.test.js`（settings.plugin.item 断言）+ 冒烟「设置页撤回卡片出现」覆盖。
+- **失效症状**：0.1.6-alpha.2 上设置卡片永不渲染（slot 无声明者，注册静默 no-op——renderer
+  `specDynamic` 返回 undefined 即 return，不抛错）。
+- **复查动作**：读 `dsh-client-ui-settings-plugins`/`dsh-client-ui-plugin-manager` 的
+  `lib/client.js` grep `settings.plugin.item`（应无）与 `plugins.bundle.config`（应有）；插件
+  `src/client/app.ts` 双键并注册——`settings.plugin.item`（key=`dsh-recall`，旧版 dsh）+
+  `plugins.bundle.config`（key=`dsh-recall-plugin`，alpha.2+），未声明 key 的 inject 是静默
+  no-op 故无需版本探测；实弹确认插件管理页 dsh-recall-plugin 的 bundle 页出现配置表单。
 
 ### I13 ModuleLoader：单文件 CJS factory 包裹（R1 路线 B 依据）
 - **依赖的官方行为**：插件 bundle 由 `serveBundle` 原文 serve 为 `text/javascript`，浏览器
@@ -814,6 +860,50 @@
 - **复查动作**：dsh 升级后确认 `ShellExecutor` 仍无方言字段（有则改读字段、探针与探测命令一并退役）
   且官方 pwsh 候选路径/argv/env 清洗未变——上述 3 条探针自动盯防；实弹按
   `docs/plans/pending/plan-shell-dialect-win32.md` 验收 3「profile 只启用 bash-sandbox」全链复跑。
+
+
+### I37 0.1.6-alpha.2 移除 `ISessions.open`：会话导航归 uiWorkspace，且 `sessions.list` 含归档会话
+
+- **依赖的官方行为**：`ISessions` 在 0.1.6-alpha.2 不再暴露 `open(sessionId)`（契约注释「navigation
+  belongs to view owners」），只留 `list` 快照与引用模型 `retain`/`using`/`retainInfo`。会话导航归
+  `UiWorkspace`（服务 key `uiWorkspace`，包 `dsh-client-ui-workspace`）：`openSession(target:
+  SessionTarget)`——`SessionTarget = SessionId | SubagentAddress`（两者都是裸 id，官方 UI 亦以裸
+  sessionId 调用）→ 内部 `replaceMain` = `sessions.retain(target, { source: 'mainView' })` +
+  `selection.set({ sessionId })` + `layout.selectPanel(null)`。**已归档会话不是合法的主视图选择**：
+  `clearArchivedCurrent()` 在 `archivedSessionIds` 命中当前选择时 `clearMain()`，视图落「选择一个
+  工作区开始」空态。`ctx.workspaces`（IWorkspaces）只有 `archiveSession`/`unarchiveSession`，无导航
+  方法——导航必须走 `uiWorkspace`。
+- **症状（修复前）**：撤回 execute 成功、fork 与 lineage 落盘正常，但子会话不打开——页面停在「选择
+  一个工作区开始」空态。根因是原调用的 `sessions.open` 在 alpha.2 已不存在，`typeof` 守卫静默跳过
+  （合规清单 #8 的又一实证：字段本不存在时守卫只是 no-op，功能死掉且零报错）。
+- **插件对策（导航）**：`inject` 声明 `uiWorkspace`（0.1.2-alpha.1 起该服务存在；0.1.1-rc.2 无此服务，
+  该线段已从 peer 范围移除，见下方「服务可用性」）、`ctx.uiWorkspace` 类型化；导航处双版本分支——
+  `uiWorkspace.openSession(id)` 优先，旧版回退 `sessions.open(id)`。**旧版回退已实弹**：alpha.1 上两个入口
+  并存，走 uiWorkspace 分支正常打开子会话（2026-09-18 记录）。
+- **插件对策（闸门）**：「切换」按钮的判据是「在 `sessions.list.byId` 里**且**不在归档集合里」——归档集合
+  从 `ctx.workspaces.list.getSnapshot().archivedSessionIds` 读（`ClientWorkspacesService` 补 `list` 面，
+  服务经 `buildSettingsCards` 传入快照管理卡）。只靠 `sessions.list` 会在 alpha.2 上放行归档会话：点击后
+  官方把归档选择清空，视图落空态。
+- **出处**：`dsh-api-session-controller/lib/types/client/contract/sessions.d.ts`（`ISessions` 无
+  `open`、`SessionTarget` 定义）；`dsh-client-ui-workspace/lib/types/client/navigation.d.ts`
+  （`UiWorkspace.openSession`/`openWorkspace`/`archiveSession`）与同包 `lib/client.js`
+  （`replaceMain`/`clearArchivedCurrent`、官方 `open = (sessionId) => uiWorkspace.openSession(sessionId)`）；
+  `dsh-api-workspace-controller/lib/types/client/model.d.ts`（`WorkspaceSnapshot.archivedSessionIds`）。
+- **服务可用性（各版本线 registry 实证，2026-09-18）**：`dsh-client-ui-workspace` 的 registry tarball 逐版核验
+  ——`0.1.1-rc.2` 的产物里**没有** `uiWorkspace` 服务（`super(ctx, "…")` 零命中、`uiWorkspace` 字样零命中），
+  故该版本线的静态 inject 无法满足（该线同时缺 `sessions`/`workspaces`：`dsh-api-session-controller`/
+  `dsh-api-workspace-controller` 与 `dsh` 都没有 0.1.1-rc.2 发布版）——**这是声明前既有状态**，非本批次引入；
+  `0.1.2-alpha.2` 起有 `uiWorkspace` 服务但**无 `openSession`**（该线导航走 `sessions.open` 回退分支，
+  `ISessions.open` 到 0.1.6-alpha.1 都还在）；`0.1.5-rc.2` 起 `openSession` 在位。dsh 实际发布版本里
+  0.1.2-alpha.1 与 0.1.3-alpha.1 不存在（首个为 0.1.2-alpha.2 / 0.1.3-alpha.2），peer 区间下界沿旧标注。
+- **探针/单测**：`tests/probe/api-surface.test.js`「会话导航归属」2 例（`ISessions` 无独立 `open(` 方法
+  且 `retain(target: SessionTarget)` 在位；`uiWorkspace.openSession(target: SessionTarget): void` 在位）。
+- **失效症状**：未声明 `uiWorkspace` 时 cordis 解析不到该服务（I29 门禁）→ 回退分支调不存在的
+  `sessions.open` → 撤回后子会话不打开；对归档目标调 `openSession` → 视图被清空为空态（「切换」路径，
+  闸门判据漏掉归档集合时即现）。
+- **复查动作**：升级后跑上述探针；官方若恢复 `ISessions.open`、或 `openSession` 改名改签名，探针即红。
+  实弹＝撤回一条非首条消息后确认子会话自动打开且标题继承，以及「切换」只对未归档会话渲染、点击后正常
+  打开该会话。
 
 
 ## 与 E1 verify-host 的对应关系

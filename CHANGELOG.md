@@ -2,6 +2,21 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [未发布]
+
+### 修复
+
+- **撤回后子会话不打开（dsh 0.1.6-alpha.2 移除 `ISessions.open`，实弹冒烟发现）**：alpha.2 起 `ISessions` 只保留列表快照与 `retain`/`using` 引用模型，契约注释写明「navigation belongs to view owners」——原调用的 `sessions.open(sessionId)` 已不存在，守卫判断静默跳过，于是撤回的 execute/fork/lineage 全部正常，唯独 fork 出的子会话不会被打开：页面停在工作区空态。导航入口迁至独立 `uiWorkspace` 服务（`dsh-client-ui-workspace`）的 `openSession(target: SessionTarget)`（`SessionTarget = SessionId | SubagentAddress`，官方 UI 同样传裸 sessionId；`ctx.workspaces` 只有归档能力、无导航）。修复＝client `inject` 声明 `uiWorkspace` + `ctx.uiWorkspace` 类型化（`ClientUiWorkspaceService`），导航点改双版本分支：`uiWorkspace.openSession(id)` 优先、旧版回退 `sessions.open(id)`（撤回节点与快照管理「切换」两处）。`tests/probe/api-surface.test.js` 新增「会话导航归属」2 例钉住两侧事实，compat-audit 新增 I37。实弹复验：撤回第二条消息后子会话自动打开、对话回退、标题继承、被撤回消息文本回填输入框。
+
+- **快照管理「切换」把归档会话放进点击路径，一点就落到工作区空态**：按钮判据只查会话是否在官方列表里（`sessions.list`），依据「已归档会话不在列表」的假设；alpha.2 起该快照包含归档会话，而归档会话不是合法的主视图选择——官方导航会先设置选择、随即按「归档选择不保留」把它清空，视图落空态（撤回后归档的原会话最常命中）。修复＝判据叠加归档集合排除：`ClientWorkspacesService` 补 `list` 面，从 `ctx.workspaces.list.getSnapshot().archivedSessionIds` 取归档集合（服务经 `buildSettingsCards` 传入快照管理卡），只有「在官方列表且未归档」的会话才渲染「切换」。实弹复验：归档会话行不再出现「切换」，保留「切换」的活跃会话点击后正常打开。
+
+### 变更
+
+- **旧版回退核验 + 兼容声明下界收窄**：本批次三处改码都在跨版本面上（静态 `uiWorkspace` inject、`plugins.bundle.config` 注册、读 `workspaces` 归档集合），故把全局 dsh 降到纯 `0.1.6-alpha.1`（`npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 --before=2026-09-16`；不带 `--before` 会因 dsh 自身 `^0.1.6-alpha.1` 放行同 tuple 预发布而混入 alpha.2 的包）实弹一轮，确认未升级 dsh 的用户更新插件后不会变砖——三项全过、控制台零报错：旧 slot（`settings.plugin.item`）卡片照常渲染且样式注入正常、`plugins.bundle.config` 在旧渲染器上是静默 no-op；撤回 fork 后子会话由 `uiWorkspace.openSession` 正常打开（切过去后再发消息、新快照记到子会话 id 为证）；快照管理树按 lineage 聚族（`v1/2`/`v2/2`）。同时按 registry 产物逐版核验 `uiWorkspace` 服务可用性：`0.1.2-alpha.2` 起有该服务但无 `openSession`（该线走 `sessions.open` 回退，`ISessions.open` 到 alpha.1 都在）、`0.1.5-rc.2` 起 `openSession` 在位，而 **`0.1.1-rc.2` 线没有该服务**（同线亦缺 `sessions`/`workspaces`：`dsh-api-session-controller`/`dsh-api-workspace-controller` 无该版本发布）——静态声明无法满足，插件 UI 会静默不渲染。据此**7 个 dsh-* peer 范围去掉 `>=0.1.1-rc.2 <0.1.2` 段**，让该组合在安装期被明确拦住而不是装上了白屏；README 双语兼容声明与 badge 上界由 `0.1.6-alpha.1` 更新为 `0.1.6-alpha.2` 并写明不再声明支持 0.1.1-rc.2 及更早的原因；compat-audit I37 补「服务可用性」条目，实弹记录见 `docs/plans/completed/smoke-checklist-records.md`。核验完装回 `0.1.6-alpha.2`（树内 8 个 `@deepseek-ai/dsh-*` 包一致），`npm run check:upgrade` 三层门禁全绿（check:dsh 全一致 / test:probe 39 通过 / verify:host 通过）。
+
+- **README 双语补充快照捕获窗口的边界说明**：快照为异步捕获，从收到消息到 `git add` 之间有约 0.5–1.5 秒窗口（Windows 上一次 PowerShell 启动即约 0.4 秒；index.json 记的 `time` 是脚本发起时刻而非捕获时刻）。秒级完成的琐碎任务若落在窗口内改完文件，该条快照会连带捕获本轮改动——撤回时文件回退成为空操作（预览显示「共 0 个文件将变更」），对话回退不受影响，且撤回前仍先落 `snap-pre-rollback-*` 安全快照，无数据丢失。此为异步快照的固有边界，无法消除（除非让每条消息同步阻塞等快照完成）。
+- **dsh 0.1.6-alpha.2 兼容适配：设置卡片迁挂插件管理页 slot（I12）**：全局实装 `@deepseek-ai/dsh@0.1.6-alpha.2`（npm dist-tag `alpha`，tag commit `ddefc45`）后核查发现旧设置页插件 tab 整体移除——`settings.plugin.item` 与 `settings.plugins.tab` 产物字符串归零，新增 ui-plugin-manager 插件管理页，声明 `plugins.item` / `plugins.bundle.config` / `plugins.row.config` 三 slot（bundle 自带配置走 `plugins.bundle.config`，keyed by bundle 包名，page 视图要求表单自含保存控件）。Client 侧改为双键并注册：新增 `plugins.bundle.config`（key=`dsh-recall-plugin`，插件管理页 bundle 页渲染 RecallSettingsCard）+ 保留旧键 `settings.plugin.item`（key=`dsh-recall`，0.1.6-alpha.1 及以前生效）——官方 renderer 对未声明 key 的 `slots.inject` 是静默 no-op（`specDynamic` 为 undefined 直接 return），双版本各吃各键无需运行时探测。其余消费面零破坏：fork 签名与切点 `cut = boundary.seq + 1`（I35 根治）逐字保持；connection `fetch.register` 契约不变（仅新增 `streamBaseUrl?` 可选字段）；client sessions 改 retain/release 引用模型（多实例共存），`binding()` 收窄为「只借已 retain 的会话」——附件重建链（I34）全链 typeof 降级兜底，最坏仅附件不重建（导航面另有两处问题，见上方修复）。peer 范围 `>=0.1.6-alpha.1 <0.1.7` 天然覆盖 alpha.2 无需扩展。机器化断言：`npm test` 361/361 + `check:upgrade` 三层门禁全绿（probe 37/37）。reference/ 镜像按 alpha.2 tag 重拉（仅 06/09 文档文字修订）；compat-audit 头部追加 alpha.2 核验段并更新 I12。实弹冒烟记录见 `docs/plans/completed/smoke-checklist-records.md`。
+
 ## [2.3.22] - 2026-09-16
 
 ### 修复

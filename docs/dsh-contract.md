@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.6-alpha.1**（tag `dsh-v0.1.6-alpha.1`，npm dist-tag `alpha` 指向本版、`latest` 仍为 0.1.5-rc.1、`next` 仍为 0.1.5-rc.2；0.1.6 线首个预发布，`npm install -g @deepseek-ai/dsh@alpha` 全局实装；前序 0.1.5-rc.2 `fb2c4b9`、0.1.5-rc.1 `183f08e` 等基线均已并入；Session format 为 V3。本版唯一行为级变化：`sessions.fork` 切点由「向后推进到下一个 `turn/start`」改为「精确切到选中 `turn/end`（`cut = boundary.seq + 1`）」——见 compat-audit I35 与 upgrade-assessments/dsh-0.1.6-alpha.1.md）
+> * 对应版本：**dsh 0.1.6-alpha.2**（tag `dsh-v0.1.6-alpha.2` commit `ddefc45`，npm dist-tag `alpha` 指向本版、`latest` 仍为 0.1.5-rc.1、`next` 仍为 0.1.5-rc.2；`npm install -g @deepseek-ai/dsh@alpha` 全局实装；前序 0.1.6-alpha.1 `0a15e36`、0.1.5-rc.2 `fb2c4b9` 等基线均已并入；Session format 为 V3。alpha.2 的行为级变化：① 旧设置页插件 tab 整体移除，`settings.plugin.item` slot 死亡，新增 ui-plugin-manager 的 `plugins.item`/`plugins.bundle.config`/`plugins.row.config` 体系（插件设置卡片已迁挂 `plugins.bundle.config`，key=bundle 包名）；② client sessions 服务改 retain/release 引用模型（多实例共存），`binding()` 语义收窄为「只借已 retain 的会话」——插件附件链 typeof 探测降级兜住；③ 插件依赖运行时解析 + 插件管理页运行时卸载。fork 切点 `cut = boundary.seq + 1`（I35 根治）在 alpha.2 保持——见 compat-audit 头部 alpha.2 核验段）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -163,12 +163,29 @@ interface ChatNodeOwnerProps {
 
 * 0.1.2-alpha.1 新增 turn-process 折叠：user/steering 不参与折叠（独立 kind），撤回按钮显示不受影响（已冒烟确认）
 
-#### `settings.plugin.item` —— 设置页卡片（`client/ui-settings-plugins/src/client/slot-contract.ts`）
+#### `settings.plugin.item` —— 设置页卡片（**0.1.6-alpha.2 起移除**）
 
 ```ts
+// 0.1.2-alpha.2 〜 0.1.6-alpha.1：keyed/root（ui-settings-plugins slot-contract.ts）
 'settings.plugin.item': { kind: 'keyed'; scope: 'root'; owner: SettingsPluginItemOwnerProps }
 // key = settings namespace（'dsh-recall'），按 namespace 交集分发（I12）
 // owner props 为空（卡片自绘内部）
+// 0.1.6-alpha.2：旧设置页插件 tab（settings.plugins.tab）与该 slot 一并删除，
+// 产物 grep 无 'settings.plugin.item' 字符串；slots.inject 对未声明 key 静默
+// no-op（renderer spec 为 undefined 直接 return），旧键注册保留为兼容路径
+```
+
+#### `plugins.bundle.config` —— 插件管理页 bundle 配置（**0.1.6-alpha.2 新增**，`client/ui-plugin-manager/src/client/slot-contract.ts`）
+
+```ts
+// 新插件管理页（Plugin Manager，取代旧设置页插件 tab）声明三个配置 slot：
+'plugins.item':         { kind: 'list';  scope: 'root'; owner: PluginConfigViewProps } // 官方插件列表项（label/order；被 ui-settings-plugins 自带配置页占用）
+'plugins.bundle.config': { kind: 'keyed'; scope: 'root'; owner: PluginConfigViewProps } // bundle 自带配置，key=bundle 包名（插件用 'dsh-recall-plugin'）
+'plugins.row.config':   { kind: 'keyed'; scope: 'root'; owner: PluginConfigViewProps } // bundle 行配置，key=`<package>#<rowId>`
+interface PluginConfigViewProps { readonly view: 'summary' | 'page' }
+// bundle.config 只以 page 视图渲染（renderSlot(slot, { view: 'page' }, { entryKey: pkg.name })），
+// 要求表单自含保存控件——RecallSettingsCard 自绘完整表单天然兼容（忽略 view prop）。
+// 页面经 configLedger 投影 entries(name).options.key 聚合 bundle 集合，bundle 列表来自 pluginInventory。
 ```
 
 #### Client 装载契约（I13）
@@ -414,4 +431,27 @@ turn/end                turn/start             user/message        web/deepseek-
 > （修正 2.3.7 遗漏）+ `0.1.5-alpha.1`，7 个 peerDependencies 范围各补 `>=0.1.5-alpha.1 <=0.1.5-alpha.1` tuple。
 > 机器化断言：`check:dsh` peer 越界已消除（仅余镜像/契约版本字段，本次同步）。评估实证见
 > [upgrade-assessments/dsh-0.1.5-alpha.1.md](upgrade-assessments/dsh-0.1.5-alpha.1.md)。结论：接口层面零破坏，无需改码。
+>
+> **0.1.6-alpha.2 升级核查（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`），
+> `npm install -g @deepseek-ai/dsh@alpha` 全局实装（dsh-settings 随装 0.1.6-alpha.2、schemastery 仍 3.18.2），
+> reference/ 镜像按 alpha.2 tag 重拉（13 文件映射表未变；仅 06/09 两文件实质差异——06 HMR 插件改名
+> `cordis-plugin-hmr`→`dsh-hmr`、09 桌面应用架构重写 + `dsh <profile>` CLI 别名 + inbox 持久投影补充，
+> 均非插件契约面）。三层门禁：`test:probe` 37/37 + `verify:host` 装配断言通过；`check:dsh` 报镜像/契约
+> 版本漂移，本次同步。**本次唯一需改码项：旧设置页插件 tab 整体移除**——`settings.plugin.item` 与
+> `settings.plugins.tab` 产物字符串归零，新增 ui-plugin-manager（插件管理页，release notes「新增插件管理页」）
+> 声明 `plugins.item`/`plugins.bundle.config`/`plugins.row.config` 三 slot；插件设置卡片已迁挂
+> `plugins.bundle.config`（key=`dsh-recall-plugin`，page 视图自含保存控件，RecallSettingsCard 直接兼容），
+> 旧键注册保留（未声明 key 的 inject 是 renderer specDynamic===undefined 的静默 no-op，双版本各吃各键，
+> 无需探测）。**session-controller client 面大改（多实例共存）**：新增 `retain`/`using`/`retainInfo`/`SessionReference`
+> 引用模型，`binding()` 收窄为「只借已 retain 的会话」——fork 签名逐字不变（§1.1）、本机产物实证
+> `cut = SessionLogOffset(boundary.seq + 1)` 切点保持（I35 根治不回退）；附件链（I34）有全链 typeof 降级，
+> 源会话未 retain 时仅附件不重建、功能不死。**ISessions 移除 `open`（实弹发现）**：契约注释「navigation
+> belongs to view owners」，导航入口迁到独立 `uiWorkspace` 服务（`dsh-client-ui-workspace`）的
+> `openSession(target: SessionTarget)`，`SessionTarget = SessionId | SubagentAddress`——`ctx.workspaces`
+> 只有归档能力、无导航。`sessions.list.byId` 在 alpha.2 含归档会话，且归档选择会被官方清空（空态），
+> 故「切换」类导航须自行排除归档目标。详见 I37。**connection 零漂移**：`fetch.register` 契约不变（仅新增
+> `streamBaseUrl?` 可选字段）。其余证据链：`SettingsProvider.installSection` 在位（I30）、
+> `ChatNodeOwnerProps.renderMessageImages/loadImage` 并存（I2）、fork JSDoc at-or-after 语义不变。机器化断言：
+> `npm run build` + `npm test` 全绿后 `check:upgrade` 复跑全绿，探针补「会话导航归属」2 例。结论：三处改码
+> （设置卡片 slot 迁移 + fork 后导航改走 uiWorkspace + 「切换」闸门叠加归档集合排除），实弹冒烟全过（I37）。
 

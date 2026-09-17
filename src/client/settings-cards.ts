@@ -8,12 +8,12 @@
  */
 
 import type { ReactApi, UtilApi } from './util.js'
-import type { ClientSessionsService } from '../types/client-contract.js'
+import type { ClientSessionsService, ClientUiWorkspaceService, ClientWorkspacesService } from '../types/client-contract.js'
 import { buildConfigForm } from './config-card.js'
 import { buildExcludeCards } from './exclude-card.js'
 import { buildSnapshotManager } from './snapshot-manager.js'
 
-export function buildSettingsCards(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService): { RecallSettingsCard: () => import('react').ReactNode } {
+export function buildSettingsCards(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService, workspacesSvc?: ClientWorkspacesService, uiWorkspaceSvc?: ClientUiWorkspaceService): { RecallSettingsCard: () => import('react').ReactNode } {
   // 分区折叠头：官方卡片列表纵向排布，排除配置/快照管理是重内容，默认折叠、
   // 按需展开（展开后由设置外壳保持挂载，草稿不丢）。作为共享原子注入
   // config-card（见其 SectionToggleProps 契约）。
@@ -34,7 +34,7 @@ export function buildSettingsCards(React: ReactApi, util: UtilApi, sessionsSvc: 
 
   const { ConfigForm } = buildConfigForm(React, util, SectionToggle)
   const { ExcludeFilesSection } = buildExcludeCards(React, util)
-  const { ManageCard } = buildSnapshotManager(React, util, sessionsSvc)
+  const { ManageCard } = buildSnapshotManager(React, util, sessionsSvc, workspacesSvc, uiWorkspaceSvc)
 
   // 「插件配置」分区里的撤回卡片（settings.plugin.item keyed slot，key =
   // Host 端注册的 settings namespace 'dsh-recall'）。整卡默认收起、点卡片头

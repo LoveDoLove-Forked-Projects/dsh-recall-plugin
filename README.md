@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-recall-plugin?style=flat-square&label=npm&color=3178C6)](https://www.npmjs.com/package/dsh-recall-plugin)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-recall-plugin?style=flat-square&label=downloads&color=1F883D)](https://www.npmjs.com/package/dsh-recall-plugin)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-[![DSH](https://img.shields.io/badge/DSH-0.1.6--alpha.1-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.6-alpha.1)
+[![DSH](https://img.shields.io/badge/DSH-0.1.6--alpha.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.6-alpha.2)
 ---
 在任意一条你发过的消息下方点「↶ 撤回」——**工作区文件和对话历史一起回到那条消息发出之前的状态**。
 ---
@@ -56,6 +56,7 @@
 设计上接受的边界与尚未覆盖的极端情形，使用前值得先确认。
 
 - 快照在**消息发送时**创建，插件启用前的历史消息没有快照，不显示撤回按钮。
+- 快照是**尽力捕获**：从收到消息到 `git add` 之间有约 0.5–1.5 秒窗口（Windows 上仅一次 PowerShell 启动就占约 0.4 秒）。秒级完成的琐碎任务若在这个窗口内改完文件，该快照会连带捕获本轮改动——撤回时文件回退成为空操作（预览面板显示「共 0 个文件将变更」），对话回退不受影响。
 - 会话第一条用户消息无法回退对话（仅文件回退），因为 fork 需要更早的 turn 边界。
 - 目标工作区的 agent 正在运行时无法发起撤回（防护设计，先停止 agent 再撤回）。
 - 支持 Windows（PowerShell 5.1/7 + git CLI）与 Linux/macOS（bash + git CLI）。Windows 真机验证充分；Linux 已在 WSL2（Ubuntu 26.04，bash 5.3 + git 2.53）实测全流程（含中文路径、home 降级、会话清理、gc）；macOS 侧脚本按 bash 3.2 兼容编写，尚未真机实测。
@@ -65,7 +66,7 @@
 
 ## 安装
 
-前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.1-rc.2` 至 `0.1.6-alpha.1`（peerDependencies 为按 minor 版本线开窗 `>=0.1.1-rc.2 <0.1.2 || >=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未验证的新 minor 线（如 0.1.7）仍被拦截）。
+前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.2-alpha.1` 至 `0.1.6-alpha.2`（peerDependencies 为按 minor 版本线开窗 `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未验证的新 minor 线（如 0.1.7）仍被拦截）。`0.1.1-rc.2` 及更早不再声明支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
 
 
 - DSH 官方插件命令：安装并自动挂载进 web profile

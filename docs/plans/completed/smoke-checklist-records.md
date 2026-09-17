@@ -110,3 +110,50 @@
 - **目的**：补 V6 验收「断 git（PATH 移除）实弹验证一次」（计划冒烟路径第 4 项遗留）。
 - **过程与根因**（详见上节发现 1）：两次尝试（纯 PATH 移除；PATH 移除 + `ProgramFiles` 环境变量改指向不存在目录）均 `gitAvailable:true`。复刻 `resolveGitScript` 逻辑在等价 env 下解析为空，而真实服务器进程却解析出 `C:\Program Files\Git\cmd\git.exe`——定位到 Windows 对该类 well-known 变量（ProgramFiles 系）在子进程创建时强制重算，环境变量层面无法欺骗；结合模板对标准安装路径的硬编码探测，「PATH 移除」模拟对插件失效（这本身是插件的健壮性红利：DSH 进程 PATH 不含 git 也能用）。
 - **结论**：本机安全边界内无法构造「git 不可用」；失败态验证改代码级镜像（渲染路径同一、条件取反）+ 建议隔离环境（如 CI 容器不装 git）终验。此项由「待冒烟」变为「待隔离环境」，不构成本批次代码缺陷。
+
+## 2026-09-18 dsh 0.1.6-alpha.2 升级实弹（slot 迁移 + 会话导航）
+
+- **环境**：Windows 10 22H2 ｜ dsh 0.1.6-alpha.2（`npm install -g @deepseek-ai/dsh@alpha`，探针 37/37 + verify:host 通过）｜ dsh-recall-plugin **link 模式**（工作区 2.3.22 + 本批次两处改动，`npm run build` 后重启生效）｜ dsh web 127.0.0.1:3080（重启 2 次：升级后首启 / 导航修复后复验）｜ 测试工作区 `D:\tmp\recall-h0`（影子库基线 29 条快照 / 24 tag / 14 索引条目，含旧批次遗留会话）
+- **执行方式**：浏览器实弹（Exec 内 snapshot+click 同批，避免跨批 ref 失效）+ Host 侧 git tag / index.json / lineage.json 磁盘对账 + API 层 config-set/config-reset 复验
+- **结果**：迁移面三项全过；实弹中发现并修复一处升级引入的功能死点（fork 后子会话不打开）；另得一处待修退化（「切换」闸门失效）与两项观察。
+
+**逐项结论**：
+
+1. **① 插件管理页 bundle 配置卡（slot 迁移）— 通过**：`settings.plugin.item` 在 alpha.2 已随旧设置页插件 tab 移除，卡片经 `plugins.bundle.config`（key=`dsh-recall-plugin`）渲染——插件页是「插件列表 → recall-plugin → 展开: 撤回插件 → 卡片」，实测渲染快照行为 3 开关 + 自动治理 5 数值项 + 「高级：基础排除表 / 排除配置 / 快照管理」三个折叠区，无缺项；配置链路 `config-set`（快照保留天数 = 7）落库后再 `config-reset` 恢复默认（`overridden={}`）回读一致。
+2. **② 撤回主链路（发消息 → 快照 → 撤回 → fork）— 通过（修复后）**：同会话发两条消息（各自出快照 `snap-f6c509ea` / `snap-eff197f6`）→ 撤回第二条 → 确认面板文案与预览清单正确 → execute 落安全快照 `snap-pre-rollback-1789671222994` 并写 lineage `childId=session-2c69a697… parentId=session-3f4f5afb…` → **子会话自动打开**（对话回退到消息 1、仅存 1 轮）、标题继承无递增、被撤回消息文本回填输入框、输入框上方无残留排队消息。
+3. **③ 快照管理 — 通过**：两层树展开/折叠（工作区 `recall-h0` 8 会话 → 会话叶子）；叶子行渲染 `时:分 消息文本` 与单条删除钮；四级删除确认文案各自正确（快照级「确认删除该快照？此操作不可恢复。」/ 会话级「…该会话全部快照」/ 工作区级「…该工作区全部快照」/ 全部删除「…所有工作区的全部快照」）；**实删两级并 Host 对账**——单条：29→28 条、tag 24→23、index 14→13；会话级：28→26 条（状态「已删除 2 条快照」）、tag 23→21、index 13→11；「立即 gc」状态自「执行中…」转「gc 完成」（占用 94 KB 不变，数据量小）；「最近错误」区无错误不渲染（V6 既定规则）。
+4. **文件恢复强验证（撤回消息 1）— 通过**：其快照早于 `marker-fork.txt` 创建，预览显示「共 1 个文件将变更（删除 1）」+「该消息是本会话中第一条用户消息，无法回退对话；确认后仅回退项目文件」；确认后文件确实从磁盘消失、落安全快照 `snap-pre-rollback-1789671312205`、不产生 lineage（首条消息仅回退文件）。
+
+**修复（实弹中发现并落地）**：
+
+- **fork 后子会话不打开（功能死点）**：alpha.2 移除 `ISessions.open`（契约注释「navigation belongs to view owners」），原调用的 `typeof` 守卫静默跳过 → 撤回完成后页面停在「选择一个工作区开始」空态；导航入口迁至独立 `uiWorkspace` 服务的 `openSession(target: SessionTarget)`（`SessionTarget = SessionId | SubagentAddress`，官方 UI 同样以裸 sessionId 调用）。修法＝`inject` 声明 `uiWorkspace` + `ctx.uiWorkspace` 类型化 + 导航双版本分支（`openSession` 优先、旧版回退 `sessions.open`）。复验：见本批次 ②。
+
+**发现（按严重度）**：
+
+1. **[缺陷·中，已修] 「切换」闸门在 alpha.2 失效**：`switchable` 判据是 `sessions.list.byId` 命中（代码注释写明「已归档会话不在 list（无法 open）」），而 alpha.2 的该快照**包含归档会话**——对被撤回后归档的原会话仍渲染「切换」，点击后官方导航先设置选择、随即按「归档选择不保留」清空，页面落「选择一个工作区开始」空态（本次两次实锤：一次为旧批次归档会话 `替换 hello.txt 文件内容`、一次为刚被撤回归档的原会话 `session-3f4f5afb`）。**修法**：判据叠加 `ctx.workspaces.list.getSnapshot().archivedSessionIds` 排除（`WorkspaceSnapshot.archivedSessionIds` 契约在位，`ClientWorkspacesService` 补 `list` 面、服务经 `buildSettingsCards` 传入快照管理卡）。**复验**：重启后同一棵树下，`创建 marker-fork.txt 测试文件` / `替换 hello.txt 文件内容` 等归档会话行已无「切换」；保留「切换」的活跃行（`确认回复好的`）点击后正常打开该会话（标题切换、对话渲染、非空态）。`npm run typecheck` + `npm run build` + `npm test` 361/361 全绿。
+2. **[观察·中] 快照捕获窗口内的模型改动**：用户消息触发的快照从事件到落盘约 3 秒；本次第二条消息的模型 3 秒内完成追加，快照落到的是改后状态（`snap-eff197f6` 树内已含 `second-message-line`）→ 预览「共 0 个文件将变更」、文件回退成为 no-op（对话回退照常）。异步快照固有的 TOCTOU，非本升级引入；影响面是「极快任务撤回后文件不动」，对话侧语义不受损。
+3. **[观察·低] G1 队列清理降级告警**：console 出现 `[dsh-recall-plugin] 残留排队消息未能自动清理（会话面未就绪）：[…]`，但 UI 无残留排队项（0.1.6 线 fork 切点已由官方修好，本就无入队事件带入 seed），告警属 best-effort 路径噪音。
+4. **[过程备忘] 浏览器自动化点击的 ref 时效**：`snapshot` 与 `click` 必须同一批次（跨批次取到的 `[ref=eN]` 必失效，表现为点击后无任何事发生）；面板插入使行高变化时，首次点击也可能落空，需重取 ref 重试。诊断手段：页内安装 `click` 捕获监听，比对「点击是否到达 DOM」与「处理器是否存在」。
+
+**发版判定**：升级迁移面（slot 迁挂 + 会话导航）实弹通过，无阻塞项；实弹发现的两处退化（fork 导航死点、切换闸门）均已在同批次修复并复验，建议连同兼容台账 I37 一起发版。
+
+## 2026-09-18 dsh 0.1.6-alpha.1 旧版回退实弹（同批次改码的向后兼容）
+
+- **目的**：本批次三处改码都落在跨版本面上（`uiWorkspace` 静态 inject、`plugins.bundle.config` 注册、`workspaces.list` 读归档集合），需确认停在 0.1.6-alpha.1 未升级 dsh 的用户更新插件后不变砖。
+- **环境**：Windows 10 22H2 ｜ 全局 dsh **0.1.6-alpha.1**（`npm uninstall -g @deepseek-ai/dsh` + `npm install -g @deepseek-ai/dsh@0.1.6-alpha.1 --before=2026-09-16`——直接装该版本会因 dsh 自身 `^0.1.6-alpha.1` 范围放行同 tuple 预发布而得到混合树，实测 `dsh-session`/`dsh-settings`/`dsh-client-ui-workspace` 仍为 alpha.2 且多装 `dsh-client-ui-plugin-manager`；`--before` 才得到纯 alpha.1 树）｜ 插件 link 模式（工作区 2.3.22 + 本批次改动产物）｜ dsh web 127.0.0.1:3080 ｜ 测试工作区 `D:\tmp\recall-h0`
+- **执行方式**：浏览器实弹（页面 viewport 实测 0×0、原生 click 全落空 → 统一改用页内取 `__reactProps.onClick` 直接调用，输入走 `browser_type` + `Enter`）+ Host 侧 git tag / index.json / lineage.json 磁盘对账
+- **结果**：三项全过，console 零消息（无客户端报错）。
+
+**逐项结论**：
+
+1. **旧 slot 卡片渲染 — 通过**：设置 → 插件 → 插件配置下渲染「撤回插件」卡（快照行为 3 开关 + 自动治理 5 数值项 + 三个折叠区 + 保存/恢复默认），`dsh-recall-*` 样式类全部生效（CSS 注入正常）；`plugins.bundle.config` 在 alpha.1 渲染器上是静默 no-op（`specDynamic` 未命中即返回），无任何错误——双键并注册按设计只在各自版本命中一个。
+2. **撤回 fork 打开子会话 — 通过**：同会话两条消息（快照 `snap-9615fcc0` / `snap-1379f058`）→ 撤回第二条 → 确认 → 落安全快照 `snap-pre-rollback-1789672854430`、写 lineage `childId=session-584d077e… parentId=session-49e6f617…`、视图切到子会话（仅剩 1 轮）、标题保持「回复确认」无递增、被撤回消息文本回填输入框。**归属实证**：切过去后再发一条消息，新快照在 index.json 里记到 `session-584d077e…`——当前视图确为 fork 出的子会话，`uiWorkspace.openSession` 在 alpha.1 生效。
+3. **快照管理 — 通过**：面板报「共 30 条快照，全部工作区快照存储占用 108 KB · git 可用 · home 3 个工作区」；工作区节点 `recall-h0 8 会话 / 15 快照`；展开后按版本家族聚族显示 `回复确认 v1/2 · 2 条` 与 `（已删除会话）v2/2 · 1 条`（lineage 关系在 alpha.1 正确读出）；刷新 / 立即 gc / 全部删除齐备。
+
+**发现（按严重度）**：
+
+1. **[观察·中] TOCTOU 二次复现并给出窗口宽度**：本轮撤回首条以外的消息时预览同样报「共 0 个文件将变更」。磁盘对账：index 记录时间 03:19:52.841、tag commit 时间 03:19:54（**差 ≈1.16 秒**，即 index 的 `time` 不是捕获时刻——与 PF 批次发现 2 同根）、模型写 `a1-probe.txt` 03:19:53.768 落在窗口内，故 `snap-1379f058` 树内已含该文件。与 alpha.2 轮观察 2 同源，README「已知限制」的窗口量级与实际相符（固定开销 = PowerShell 启动 + `git add`；README 依此与本次实测把区间记为 0.5–1.5 秒）。
+2. **[过程备忘] viewport 0×0 使原生点击全部落空**：页面 `window.innerWidth/innerHeight = 0`（顶栏存在「退出全屏」，疑窗口未恢复尺寸），ref 上的 click 静默无效（页内 `click` 捕获监听计数 0）。本批次改用页内 `__reactProps.onClick({})` 调用 + `browser_type`/`Enter`（合成事件仍能到达 React 处理器）。
+3. **[环境备忘] 降级固有现象（非插件缺陷）**：alpha.2 写入的 `workspace/changes` 事件（seq 63）对 alpha.1 harness 未知且未标 ignorable，打开该旧会话报「历史加载失败：failed to observe session …」。实弹改在新会话中进行；**未验证项**：alpha.1 下这些旧会话的快照管理叶子（标题/消息文本两段式补全）未逐条核对。
+
+**发版判定**：0.1.6-alpha.1 旧版回退路径无阻塞项。核验期间按 registry 产物把 `uiWorkspace` 服务可用性逐版查了一遍（结论见 compat-audit I37「服务可用性」）：**`0.1.1-rc.2` 线段没有该服务**（同线亦缺 `sessions`/`workspaces`），静态 inject 无法满足、装上也只白屏——据此把 `>=0.1.1-rc.2 <0.1.2` 段从 7 个 dsh-* peer 范围移除（该线从「静默坏」变「明确拦住」），README 双语兼容声明与 badge 上界同步为 `0.1.6-alpha.2`。验完装回 alpha.2（`npm install -g @deepseek-ai/dsh@0.1.6-alpha.2`，树内 8 个 `@deepseek-ai/dsh-*` 包一致为 0.1.6-alpha.2），`npm run check:upgrade` 三层门禁全绿（check:dsh 全一致 / test:probe 39 通过 / verify:host 通过）。

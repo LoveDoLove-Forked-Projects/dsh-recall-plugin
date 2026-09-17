@@ -11,7 +11,7 @@
 
 import type { ReactApi, UtilApi, TreeWorkspace, TreeSession } from './util.js'
 import { useAutoDismissMessage } from './util.js'
-import type { ClientSessionsService } from '../types/client-contract.js'
+import type { ClientSessionsService, ClientUiWorkspaceService, ClientWorkspacesService } from '../types/client-contract.js'
 import type { ManageListItem, ManageResponse, ManageListOk, ManageTitlesOk, ManageMessagesOk, ManageUsageOk, ManageLineageOk, StatusErrorItem, StatusResponse } from '../types/api.js'
 import type { LineageEntry } from '../types/payloads.js'
 
@@ -66,7 +66,7 @@ export function groupByLineage(ids: Array<string | null | undefined>, lineage: L
   return result
 }
 
-export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService): { ManageCard: () => import('react').ReactNode } {
+export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService, workspacesSvc?: ClientWorkspacesService, uiWorkspaceSvc?: ClientUiWorkspaceService): { ManageCard: () => import('react').ReactNode } {
   const { api, clockText, sizeText, buildTree } = util
 
   // 快照管理卡片：列表（时间倒序）/ 磁盘占用 / 单条删除 / 手动 gc / 最近错误。
@@ -239,9 +239,11 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         )
       : items
     const tree = buildTree(filteredItems)
-    // F1：版本家族映射 + 可切换会话（仍在 sessions.list 里的）。versionMap
-    // 用全部快照会话 id 与 lineage 推导；sessions.list 快照同步读取。已归档
-    // 会话不在 list（无法 open），故不渲染切换按钮，只显示版本号。
+    // F1：版本家族映射 + 可切换会话（在官方列表且未归档的）。versionMap
+    // 用全部快照会话 id 与 lineage 推导；sessions.list 快照同步读取——「切换」
+    // 只在会话可导航时渲染，判据两半：会话在官方列表里，且不在归档集合里。
+    // 归档会话不是合法的主视图选择（官方 clearMain 把它清成空态），而
+    // 0.1.6-alpha.2 起 sessions.list 含归档会话，故归档集合另从 workspaces 快照读。
     const allSessionIds = Array.from(new Set((items || []).map((it) => it.sessionId).filter(Boolean)))
     const versionMap = groupByLineage(allSessionIds, lineage)
     let listById: Record<string, unknown> | null = null
@@ -251,6 +253,13 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         listById = (snapshot && snapshot.byId) || null
       }
     } catch (e) { listById = null }
+    let archivedIds: Set<string> | null = null
+    try {
+      const snapshot = workspacesSvc && workspacesSvc.list && typeof workspacesSvc.list.getSnapshot === 'function'
+        ? workspacesSvc.list.getSnapshot()
+        : null
+      archivedIds = new Set((snapshot && snapshot.archivedSessionIds) || [])
+    } catch (e) { archivedIds = null }
 
     function confirmDelete(kind: string, key: string, extra: Record<string, unknown>, text: string): void {
       setConfirming({ kind, key, extra, text })
@@ -297,7 +306,7 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
       const open = expanded.has(key)
       const label = s.title || (titlesPending && s.sessionId ? '…' : '（已删除会话）')
       const version = s.sessionId ? versionMap.get(String(s.sessionId)) : null
-      const switchable = Boolean(s.sessionId && listById && listById[s.sessionId])
+      const switchable = Boolean(s.sessionId && listById && listById[s.sessionId] && !(archivedIds && archivedIds.has(String(s.sessionId))))
       return React.createElement('div', { className: 'dsh-recall-tree-node', key: key },
         React.createElement('div', { className: 'dsh-recall-tree-row' },
           // V2：折叠钮 span→button——Tab/Enter/Space 可达，读屏经 aria-expanded
@@ -318,7 +327,12 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             type: 'button',
             className: 'dsh-recall-ex-chip',
             title: '切换到该版本会话',
-            onClick: () => { try { sessionsSvc.open(s.sessionId as string) } catch (e) { /* 会话已不可切换则静默 */ } }
+            onClick: () => { try {
+              // 打开会话：0.1.6-alpha.2 起 ISessions 移除 open（导航归视图所有
+              // 者），优先 ui-workspace 的 openSession；旧版回退 sessions.open
+              if (uiWorkspaceSvc && typeof uiWorkspaceSvc.openSession === 'function') uiWorkspaceSvc.openSession(s.sessionId as string)
+              else if (typeof sessionsSvc.open === 'function') sessionsSvc.open(s.sessionId as string)
+            } catch (e) { /* 会话已不可切换则静默 */ } }
           }, '切换') : null,
           s.sessionId ? React.createElement('button', {
             type: 'button',

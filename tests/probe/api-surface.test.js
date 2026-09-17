@@ -439,4 +439,26 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       expect(src).toMatch(/key\.toUpperCase\(\)\.startsWith\("DSH_"\)/)
     })
   })
+
+  describe('会话导航归属（I37：0.1.6-alpha.2 起 ISessions 无 open，导航在 uiWorkspace）', () => {
+    // 撤回 fork 出子会话后必须把它打开：0.1.5 线及以前走 ISessions.open，alpha.2 移除
+    // （契约注释「navigation belongs to view owners」）迁到独立 uiWorkspace 服务。探针钉
+    // 两侧事实——官方若把 open 加回来，插件可退回单路径；openSession 改名/改签名则优先
+    // 分支失效、只剩旧接口（在 alpha.2 上不存在），功能会再次静默死掉（typeof 守卫不报错）。
+    const sess = 'dsh-api-session-controller'
+    const sessFile = '/lib/types/client/contract/sessions.d.ts'
+    probeIf(() => has(sess, sessFile))('ISessions 无独立 open 方法，引用模型 retain 在位', () => {
+      const src = read(sess, sessFile)
+      expect(src).toMatch(/retain\(target: SessionTarget, options: SessionRetainOptions\): SessionReference/)
+      // 只排除「方法名就是 open」这一形态：`setSubagentCatalogOpen(…, open: boolean)`
+      // 的参数名也叫 open，宽松匹配会误红。
+      expect(src).not.toMatch(/^\s*open\s*\(/m)
+    })
+
+    const ws = 'dsh-client-ui-workspace'
+    const navFile = '/lib/types/client/navigation.d.ts'
+    probeIf(() => has(ws, navFile))('uiWorkspace.openSession 是插件依赖的导航入口', () => {
+      expect(read(ws, navFile)).toMatch(/openSession\(target: SessionTarget\): void/)
+    })
+  })
 })

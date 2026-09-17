@@ -52,8 +52,11 @@ export function createApp(React: ReactApi) {
     }
 
     const util = buildUtil()
-    const { UserRecallNode } = buildRecallNode(React, util, ctx, sessionsSvc, workspacesSvc)
-    const { RecallSettingsCard } = buildSettingsCards(React, util, sessionsSvc)
+    // uiWorkspace：0.1.6-alpha.2 起会话导航（openSession）所在服务（0.1.2-alpha.1
+    // 起存在，entry.ts inject 已声明）；archiveSession 归档仍走 workspaces（I7）。
+    const uiWorkspaceSvc = ctx.uiWorkspace
+    const { UserRecallNode } = buildRecallNode(React, util, ctx, sessionsSvc, workspacesSvc, uiWorkspaceSvc)
+    const { RecallSettingsCard } = buildSettingsCards(React, util, sessionsSvc, workspacesSvc, uiWorkspaceSvc)
 
     // conversation.chat.node 是 keyed slot，同一 key 的最低 priority 渲染。
     // 默认平台渲染器通常为 0，dsh-turn-fold 等插件可能已占 -1；旧实现固定
@@ -83,6 +86,9 @@ export function createApp(React: ReactApi) {
     // 'dsh-recall' 一致——卡片只渲染「Host 服务的 namespace」与「slot 注册的
     // 卡片」的交集。各 namespace 独占自己的 key，无同 key 抢占，不需要
     // priority（与 conversation.chat.node 覆盖默认渲染器是两套语义）。
+    // 0.1.6-alpha.2 起该 slot 随旧设置页插件 tab 一起移除，仅旧版 dsh 有效；
+    // slots.inject 对未声明 key 是静默 no-op（spec 为 undefined 直接 return），
+    // 两个 slot 键并注册各吃各的版本，无需运行时探测。
     try {
       slots.inject('settings.plugin.item', () => slots.register(
         { name: 'settings.plugin.item', key: 'dsh-recall' },
@@ -90,6 +96,20 @@ export function createApp(React: ReactApi) {
       ))
     } catch (error) {
       console.error('[dsh-recall-plugin] settings card register failed:', error)
+    }
+
+    // 0.1.6-alpha.2 新插件管理页（ui-plugin-manager）：bundle 自带配置挂
+    // plugins.bundle.config（keyed/root，key=bundle 包名），渲染在 bundle 页
+    // （page 视图，自含保存控件——RecallSettingsCard 本就自绘完整表单，兼容）。
+    // key 必须与 npm 包名一致，插件管理页据此把表单关联回 dsh-recall-plugin 的
+    // bundle 页。owner 会下发 { view } prop，组件忽略该字段无副作用。
+    try {
+      slots.inject('plugins.bundle.config', () => slots.register(
+        { name: 'plugins.bundle.config', key: 'dsh-recall-plugin' },
+        RecallSettingsCard
+      ))
+    } catch (error) {
+      console.error('[dsh-recall-plugin] plugin manager config register failed:', error)
     }
   }
 }
