@@ -23,7 +23,7 @@
 | 项 | 主题 | 来源 | 优先级 | 前置依赖 |
 |---|---|---|---|---|
 | U1 | 撤回场景草稿保护 | EasyRewrite | 高 | 探针先行（InputHub 读取 API） |
-| U2 | execute scope：仅回退对话模式 | dsh-turn-rewind | 高 | 无 |
+| U2 | execute scope：仅回退对话模式（**已拆出** → [plan-session-only.md](../completed/plan-session-only.md)，已实施） | dsh-turn-rewind | 高 | 无 |
 | U3 | crash-safety 测试补强 | dsh-rewind | 高 | 先核对现有覆盖 |
 | S1 | settings-cards.ts 预防性拆分 | 引以为戒 | 中 | 无（U1/U5 的前置） |
 | U5 | preview TTL 过期保护 | dsh-turn-rewind | 中 | S1 |
@@ -69,6 +69,8 @@
 ---
 
 ## U2 execute scope：仅回退对话模式
+
+> **已拆出为独立实施计划：[plan-session-only.md](../completed/plan-session-only.md)（已于 2026-09-18 实施），实施以该文档为准。** 本节保留立项依据与原始草拟，不再更新。
 
 ### 目标
 
@@ -241,7 +243,7 @@ execute 文件回退过程留痕：H1 救援覆盖主路径，但**救援也失�
 | 项 | 依赖 | 建议时机 | 量级 |
 |---|---|---|---|
 | U3 crash-safety 测试 | 无（先核对现有覆盖） | **随时可做，纯收益** | 小 |
-| U2 仅回退对话模式 | 无 | 高优，独立发版价值明确 | 中 |
+| U2 仅回退对话模式 | 无 | 已拆出为 [plan-session-only.md](../completed/plan-session-only.md)（2026-09-18 已实施），高优，独立发版价值明确 | 中 |
 | U1 草稿保护 | 探针先行（读 API 存在性） | 探针结论 favorable 即做 | 中 |
 | S1 settings-cards 拆分 | 无 | U1/U5 之前 | 小 |
 | U5 preview TTL | S1 | S1 后 | 小 |

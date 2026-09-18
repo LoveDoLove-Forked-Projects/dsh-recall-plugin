@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [未发布]
+
+### 新增
+
+- **「仅撤回对话」模式（撤回范围二选一）**：对生成结果不满意、但文件改动恰是想要（或已人工修整）时，整段回退会把文件一并覆盖。确认面板新增撤回范围 radio 组（原生 input、键盘可达；默认「回退文件与对话」与现状逐项一致；首条用户消息因对话无从回退不渲染）——选「仅撤回对话」后文件清单降级为参考语义、安全快照预告隐藏（不打安全快照：零文件改动即无不可逆操作缺口），按钮与 executing/done 文案随模式分叉。实现＝`ExecuteArgs` 增 `scope?: 'both' | 'session-only'`（缺省/非法值回落 both：老 Client 与直调 API 行为不漂移），Host execute 开头分叉——session-only 不进串行队列、零 git 写操作（保留 NO_SNAPSHOT/AGENT_BUSY 两道护栏，跳过 STALE 校验/安全快照/rollback/rescue 全链），直接 `resolveCutSeq` + `resolveStaleQueueItemIds` 返回 `count: 0`；fork/归档/子会话导航/排队消息清理/lineage/草稿回填链与模式无关，原样复用。新增 `tests/unit/routes-scope.test.js` 5 例（session-only 零 git 调用与透传、agentBusy 拦截、NO_SNAPSHOT、非法 scope 回落 both、不传 scope 现状回归钉）。
+
 ## [2.3.23] - 2026-09-18
 
 ### 修复

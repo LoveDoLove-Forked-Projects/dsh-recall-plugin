@@ -76,11 +76,17 @@ export type PreviewResponse = PreviewOk | ErrBody
 
 // ---- execute ----
 
+// 撤回范围：both = 文件与对话一并回退（现状默认）；session-only = 仅 fork 回退
+// 对话，工作区零改动。缺省/非法值一律按 both 处理——老 Client 不发、直调 API
+// 乱发都落回现状链路，Host/Client 同包发布也无需能力协商。
+export type RecallScope = 'both' | 'session-only'
+
 export interface ExecuteArgs {
   sessionId?: string
   messageId?: string
   previewTreeId?: string
   previewTotal?: number
+  scope?: RecallScope
 }
 export interface ExecuteOk {
   ok: true

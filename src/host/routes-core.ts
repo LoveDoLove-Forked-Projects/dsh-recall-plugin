@@ -13,7 +13,7 @@ import type { Runtime, SharedState, ErrorRecord, StoreInfo } from '../types/stat
 import type { ResolvedConfig } from '../types/config.js'
 import type { SnapshotsApi } from './snapshots.js'
 import type { EnvErrorKind } from './diagnostics.js'
-import type { InitArgs, InitResponse, SnapshotInfoArgs, SnapshotInfoResponse, PreviewArgs, PreviewResponse, ExecuteArgs, ExecuteResponse, StatusArgs, StatusResponse, LineageRecordArgs, LineageRecordResponse, ErrBody } from '../types/api.js'
+import type { InitArgs, InitResponse, SnapshotInfoArgs, SnapshotInfoResponse, PreviewArgs, PreviewResponse, ExecuteArgs, ExecuteResponse, RecallScope, StatusArgs, StatusResponse, LineageRecordArgs, LineageRecordResponse, ErrBody } from '../types/api.js'
 
 // 端点依赖注入面（index.ts 装配时逐项提供；ctx 不解构的 A4 纪律见工厂注释）
 export interface RoutesCoreDeps {
@@ -97,6 +97,27 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
     'execute': async (args: ExecuteArgs): Promise<ExecuteResponse> => {
       const id = args && args.messageId ? String(args.messageId) : ''
       const sessionId = args && args.sessionId ? String(args.sessionId) : null
+      // scope 解析：缺省/非法值一律回落 both——老 Client 不发、直调 API 乱发都
+      // 落回现状链路，Host/Client 同包发布无需能力协商。session-only 走独立
+      // 短路径：不进串行队列（队列是为 git 锁互斥而设，本路径零 git 写操作，
+      // 入队只添延迟）、跳过 STALE 校验/安全快照/rollbackFor/rescue 全链——
+      // 无文件覆盖即无不可逆操作，无需救援锚点。保留 NO_SNAPSHOT（快照存在性
+      // 仍是消息归属的判定依据，且防御直调 API）与 agentBusy 拦截（fork +
+      // 归档会把运行中的 agent 留在被归档的原会话里继续写日志）；检查在队列外
+      // 进行：无文件变更，P0-1「检查后紧接执行、窗口为零」的动机不成立，检查
+      // 退化为护栏而非不变量。
+      const scope: RecallScope = args && args.scope === 'session-only' ? 'session-only' : 'both'
+      if (scope === 'session-only') {
+        const snap = state.snapshots.get(id)
+        if (!snap) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该消息没有可用的项目快照' }
+        if (agentBusy(sessionId, snap.root)) return { ok: false, code: E.RECALL_AGENT_BUSY, message: 'Agent 正在运行中，请先停止后再撤回' }
+        const cutSeq = await snaps.resolveCutSeq(sessionId, id)
+        // fork 仍会把切点窗口内的入队事件 seed 进子会话（与模式无关），清理链
+        // 照常走（both 分支下方的注释有完整说明）
+        const staleQueueItemIds = await snaps.resolveStaleQueueItemIds(sessionId, cutSeq)
+        // count 语义 = 回退文件数：session-only 恒为 0（done 面板本就不展示 count）
+        return { ok: true, count: 0, cutSeq, staleQueueItemIds }
+      }
       const result = await enqueue(async (): Promise<{ ok: true; count: number } | ErrBody> => {
         const snap = state.snapshots.get(id)
         if (!snap) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该消息没有可用的项目快照' }

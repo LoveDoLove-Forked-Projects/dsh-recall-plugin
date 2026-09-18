@@ -40,6 +40,16 @@ export const CSS = [
   // grid-column 对非 grid 祖先（exclude/快照卡片的 flex 布局）自动无效，无害；
   // 在 cfg-grid 内则保证操作区/占满行不被 auto-placement 塞进第一列撑爆列宽。
   '.dsh-recall-panel-actions{display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end;margin-top:2px;grid-column:1/-1}',
+  // scope radio 组（撤回范围二选一）：原生 input 保留 UA 交互（键盘方向键切换、
+  // 空格选中），accent-color 走品牌令牌让选中态随主题翻转；label 整体可点扩大
+  // 命中区，字色与 panel-note 同层级（secondary），hover 提亮示意可交互
+  '.dsh-recall-scope{display:flex;flex-wrap:wrap;gap:4px 16px;padding:2px 0}',
+  '.dsh-recall-scope-item{display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-size:13px;line-height:1.5;color:var(--dsw-alias-label-secondary)}',
+  '.dsh-recall-scope-item:hover{color:var(--dsw-alias-label-primary)}',
+  '.dsh-recall-scope-item input{accent-color:var(--dsw-alias-brand-primary);cursor:pointer;margin:0}',
+  // 焦点可见性对齐按钮类约定（brand-primary 2px outline）：UA 默认环跨引擎不一，
+  // 统一收敛到与面板内其他控件同一套焦点语言
+  '.dsh-recall-scope-item input:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   // 按钮体系对齐官方设置卡（dsh-client-ui-settings-plugins PluginCard 底部按钮
   // 组实测产物）：次级 = 描边幽灵（discard 逐字配方——l2 描边 + 透明底，hover
   // 升 label-dimmed 描边 + primary 字色）；官方 discard/save 同高靠 save 也带

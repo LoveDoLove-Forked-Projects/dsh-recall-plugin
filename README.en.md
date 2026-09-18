@@ -46,6 +46,7 @@ Files and conversation roll back together: the workspace is first snapshotted in
 Abilities with a version in parentheses require that version or later; the rest have no special version requirement.
 
 - **Files + conversation, rolled back together**: recalling isn't just about chat history — files the agent modified go back to their original state too; immune to your project's `.gitattributes` conversion, with byte-level fidelity for line endings and binary content (2.1.1+).
+- **Just want a fresh conversation? Leave the files alone** (2.3.24+): the confirmation panel offers a recall-scope choice — the default "Roll back files & conversation" behaves as before; picking "Conversation only" keeps your project files byte-for-byte untouched (no safety snapshot either) and rewinds only the conversation, ideal when you dislike the reply but want to keep the file changes.
 - **Never touches your project's own git, and keeps it clean**: snapshots live in an independent shadow git repository — branches, staging area, and uncommitted changes are untouched; storage stays under `$DSH_HOME` regardless of the session's sandbox permission (workspace-write / read-only sessions work as usual), falling back to an in-project `.dsh-recall-snapshots` only when home itself is unwritable.
 - **See the list before you act — and change your mind as often as you like**: recall first shows the list of files that will change (modified / restored / deleted); nothing runs until you confirm. After a recall you can recall again to an even earlier point, and files overwritten during a recall always remain recoverable (up to 500 snapshots per workspace by default).
 - **Resend right after a recall** (2.3.15+): a recall places the message's text and attachments back into the input box — images and files return as well, so you can edit and send again without picking the attachments over.
@@ -93,8 +94,8 @@ pm2 restart <your-dsh-name>  # if managed by pm2
 A full recall of one user message sent after the plugin was enabled goes like this.
 
 1. Hover over any user message sent **after the plugin was enabled** (including steering messages inserted while the agent is running) — "↶ Recall" appears to the left of the copy button.
-2. Click it → the confirmation panel shows the list of files that will change (modified / restored / deleted).
-3. Click "Confirm rollback" → files are restored to their state before that message was sent; the view switches to a new session (that message and everything after it is removed), while the original session is archived and can be recovered anytime.
+2. Click it → the confirmation panel shows the list of files that will change (modified / restored / deleted), plus a scope choice: "Roll back files & conversation" (default) or "Conversation only" (files stay as they are).
+3. Click "Confirm rollback" (or "Confirm conversation recall") → files are restored to their state before that message was sent (files are untouched in conversation-only mode); the view switches to a new session (that message and everything after it is removed), while the original session is archived and can be recovered anytime.
 
 ## Configuration
 

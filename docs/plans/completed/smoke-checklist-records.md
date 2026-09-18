@@ -157,3 +157,24 @@
 3. **[环境备忘] 降级固有现象（非插件缺陷）**：alpha.2 写入的 `workspace/changes` 事件（seq 63）对 alpha.1 harness 未知且未标 ignorable，打开该旧会话报「历史加载失败：failed to observe session …」。实弹改在新会话中进行；**未验证项**：alpha.1 下这些旧会话的快照管理叶子（标题/消息文本两段式补全）未逐条核对。
 
 **发版判定**：0.1.6-alpha.1 旧版回退路径无阻塞项。核验期间按 registry 产物把 `uiWorkspace` 服务可用性逐版查了一遍（结论见 compat-audit I37「服务可用性」）：**`0.1.1-rc.2` 线段没有该服务**（同线亦缺 `sessions`/`workspaces`），静态 inject 无法满足、装上也只白屏——据此把 `>=0.1.1-rc.2 <0.1.2` 段从 7 个 dsh-* peer 范围移除（该线从「静默坏」变「明确拦住」），README 双语兼容声明与 badge 上界同步为 `0.1.6-alpha.2`。验完装回 alpha.2（`npm install -g @deepseek-ai/dsh@0.1.6-alpha.2`，树内 8 个 `@deepseek-ai/dsh-*` 包一致为 0.1.6-alpha.2），`npm run check:upgrade` 三层门禁全绿（check:dsh 全一致 / test:probe 39 通过 / verify:host 通过）。
+
+## 2026-09-18 仅撤回对话模式批次（第八节，scope）
+
+- **环境**：Windows 10 22H2 ｜ dsh 0.1.6-alpha.2 ｜ 插件 link 模式（scope 批次产物，12:50 build）｜ dsh web 127.0.0.1:3080（重启加载新产物）｜ 测试工作区 `D:\tmp\recall-h0`
+- **执行方式**：agent-browser 浏览器实弹（eval 取面板 HTML/触发点击/读输入框）+ Host 侧 git tag / index.json / lineage.json 磁盘对账 + 文件 MD5 字节对照
+- **结果**：第八节 5/5 全过（S-1〜S-5），console 零插件报错。
+
+**逐项结论**：
+
+1. **S-1 session-only 全链 — 通过**：会话 A 发 m1（建 scope-test.txt=v1）/ m2（改 v2），手动追加「手动调整」行 → 撤回 m2 选「仅撤回对话」→ 确认：文件 MD5 前后一致（E6B14FB8…，字节级未动）、零新 `snap-pre-rollback-*` tag、lineage 6→7（`session-5ce2b866… ← session-45bb7361…`）、子会话打开仅含 m1、标题继承、m2 文本回填输入框、原会话从侧栏消失。
+2. **S-2 默认 both 回归 — 通过**：子会话发 m5（追加 both-line）→ 手动追加「手动改动二」→ 撤回 m5 走默认 both → 文件回退到 m5 快照状态（手动改动被覆盖）、安全快照照打（`snap-pre-rollback-17897*` 恰 +1，与 session-only 的 0 形成对照）、lineage 7→8（`session-c5c41… ← session-5ce2b…`）、m5 文本回填。重开面板默认复位 both（上次 session-only 选择不残留，openPreview 复位逻辑实证）。
+3. **S-3 AGENT_BUSY 拦截 — 通过**：agent 长任务（big.txt 300 行）运行中点撤回 → 错误面板「无法回退：Agent 正在运行中，请先停止后再撤回」。注：拦截发生在 preview 层（面板都进不去）；session-only execute 层的 AGENT_BUSY 由 routes-scope 单测钉住（实弹无法在「preview 通过→execute 前窗口」内插入 agent 启动）。
+4. **S-4 首条消息无 radio — 通过**：撤回 m1 面板 HTML 无 `.dsh-recall-scope`/radio 元素，文案「该消息是本会话中第一条用户消息，无法回退对话；确认后仅回退项目文件」、按钮「确认回退」——与现状逐项一致。
+5. **S-5 面板分叉渲染 — 通过**：radio 组默认 both（「回退文件与对话」checked）；切「仅撤回对话」后 notes 变「项目文件保持当前状态，不会被回退或删除；对话回退到该消息之前。」+「以下差异仅作参考，所选模式不会改动文件。」（安全快照预告隐藏）、按钮「确认撤回对话」、清单保留（scope-test.txt 修改 1）。
+
+**发现（按严重度）**：
+
+1. **[过程备忘] 自动化输入与回填叠加**：撤回后回填文本留在 contenteditable 输入框内，后续用 `execCommand("insertText")` 发消息会追加在回填文本之后（光标默认在末尾），导致个别测试消息成为「复合文本」。与真人操作（先清空再输入）不同，非插件缺陷；但提醒后续自动化冒烟发消息前先清空输入框。
+2. **[观察·低] done 面板随视图切换卸载**：execute→fork→openSession 成功后视图切到子会话，done 面板挂在旧消息节点内随之卸载，用户几乎看不到「对话已回退到该消息之前…」文案——both 模式同理（既有行为，非本批次引入），done 文案矩阵实际只有 fork 失败（不切视图）时可见。
+
+**发版判定**：scope 功能实弹通过、无阻塞项；测试产物（scope-test.txt/count.txt/big.txt）验收后已从 recall-h0 清理，2 个归档会话与快照 tag 留在 store（复验可用，亦可通过设置页快照管理清理）。

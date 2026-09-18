@@ -10,7 +10,7 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 
 1. **影子仓库**：每个工作区在 `~/.dsh/dsh-recall-snapshots/<工作区路径SHA256>/git/` 有独立 git 仓库，`--work-tree` 指向项目目录——项目零污染（无 .git、无快照落地）。home 不可写时降级到项目内 `.dsh-recall-snapshots/`。
 2. **tag 即快照**：每条用户消息触发一次 `write-tree + commit-tree + tag snap-<消息ID>`。不建分支、不动工作区；消息 ID 即快照主键，索引丢失可从 tag 名反推重建（`rebuildOrphans`，时间从 tag creatordate 恢复）。index.json/lineage.json 走 tmp+rename 原子写；index 损坏时 fail-loud——改名 `.corrupt-<ts>` 隔离并告警，不静默当空。
-3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。原会话归档（可恢复，`archiveOriginal` 可关），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息（子会话被驱动时它还会被当作真实一轮消费），故 execute 顺带下发 `staleQueueItemIds`（窗口内入队项的 message id），Client 在子会话上按 id 直调官方 `updateQueue(itemId, { kind: 'remove' })` 清掉（G1）；不做队列快照匹配——快照走 control 帧、到达时机不定，命中式等待会整段落空。
+3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。execute 支持 `scope` 二选一（缺省/非法回落 both）：both 为下述全链；`session-only` 走零 git 短路径——不进串行队列、不打安全快照、不 reset，仅保留 NO_SNAPSHOT/AGENT_BUSY 护栏后取切点返回 `count: 0`（确认面板 radio 二选一，cutSeq 为 null 不出选项）。原会话归档（可恢复，`archiveOriginal` 可关），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。both 的 execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息（子会话被驱动时它还会被当作真实一轮消费），故 execute 顺带下发 `staleQueueItemIds`（窗口内入队项的 message id），Client 在子会话上按 id 直调官方 `updateQueue(itemId, { kind: 'remove' })` 清掉（G1）；不做队列快照匹配——快照走 control 帧、到达时机不定，命中式等待会整段落空。
 
 ## 项目架构与文件地图（改动先看这里）
 
@@ -114,8 +114,10 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
   → git add -A --ignore-errors（exclude 排除 + 超大跳过 + fail-open/SNAP_SKIP 回传）
   → write-tree → commit-tree → tag → maybeMaintain（定期 gc / 会话删除清理 / 条数上限 / 保留天数）
 撤回 → preview（agentBusy 拦截 + diff 清单 + TREE 树指纹，PF-1；老 client 的 previewTotal 条目数校验为兼容路径）
-  → 确认 → execute（agentBusy 复查 + 树指纹比对安全快照（不一致 STALE；无指纹退回 previewTotal 校验）→ 安全快照 snap-pre-rollback-<ts>
-  → reset 到 tag；失败自动 rescue 回安全快照，救援失败给可复制的手动命令）
+  → 确认（面板内可选撤回范围 scope：both 默认 / session-only 仅对话，cutSeq 为 null 不出选项）
+  → execute（scope 缺省/非法回落 both；session-only 走零 git 短路径：不进队列、无安全快照/STALE 校验/rollback/rescue，护栏检查后直接取切点返回 count:0；
+    both：agentBusy 复查 + 树指纹比对安全快照（不一致 STALE；无指纹退回 previewTotal 校验）→ 安全快照 snap-pre-rollback-<ts>
+    → reset 到 tag；失败自动 rescue 回安全快照，救援失败给可复制的手动命令）
   → resolveCutSeq（最近 turn/end）→ client sessions.fork → 原会话归档（archiveOriginal 可关）
   → lineage-record 持久化 fork 关系 → 回填输入框（refillDraft 可关）
 快照失败 → runShell 兜底（分级清扫：另一实例心跳/5min 内新锁让路，否则杀孤儿 + 清陈旧锁）

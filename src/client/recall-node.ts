@@ -8,7 +8,7 @@
 
 import type { ReactApi, UtilApi } from './util.js'
 import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
-import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange } from '../types/api.js'
+import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange, RecallScope } from '../types/api.js'
 
 // 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
 export interface ChatBlock {
@@ -153,7 +153,10 @@ export function buildRecallNode(
     )
   }
 
-  function recallPanel(recall: RecallStage, closePanel: () => void, executeRecall: () => void) {
+  // scope/onScopeChange：模式选择是确认面板内的组件态（both/session-only），
+  // 面板文案矩阵（清单语义/安全快照预告/按钮/executing/done）随其分叉；放
+  // recallPanel 参数而非模块级——HMR 与多消息节点并挂时各面板状态互不串扰。
+  function recallPanel(recall: RecallStage, closePanel: () => void, executeRecall: () => void, scope: RecallScope, onScopeChange: (s: RecallScope) => void) {
     if (recall.stage === 'loading') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
         React.createElement('div', { className: 'dsh-recall-panel-title' }, '正在计算变更…')
@@ -182,40 +185,79 @@ export function buildRecallNode(
           React.createElement('span', { className: 'dsh-recall-rel' }, c.rel || '')
         )
       })
-      if (recall.truncated) {
-        rows.push(React.createElement('div', { className: 'dsh-recall-panel-note', key: 'truncated' }, '…仅显示前 ' + changes.length + ' 条，共 ' + total + ' 个文件将变更'))
-      }
       // cutSeq 为 null 表示该消息是会话第一条用户消息：文件可回退但对话无从回退
       const canRevertChat = typeof recall.cutSeq === 'number'
+      // session-only 仅在对话可回退时可达（radio 组只在 canRevertChat 时渲染，
+      // 首条消息的面板与现状完全一致）
+      const sessionOnly = canRevertChat && scope === 'session-only'
+      if (recall.truncated) {
+        rows.push(React.createElement('div', { className: 'dsh-recall-panel-note', key: 'truncated' },
+          sessionOnly
+            ? '…仅显示前 ' + changes.length + ' 条，共 ' + total + ' 处差异'
+            : '…仅显示前 ' + changes.length + ' 条，共 ' + total + ' 个文件将变更'
+        ))
+      }
       return React.createElement('div', { className: 'dsh-recall-panel' },
         React.createElement('div', { className: 'dsh-recall-panel-title' }, '整段回退'),
-        React.createElement('div', { className: 'dsh-recall-panel-note' },
-          '将项目恢复到' + (recall.time ? ' ' + clockText(recall.time) + ' ' : ' ') + '发送该消息时的状态。共 ' + total + ' 个文件将变更' + (summaryText(counts) ? '（' + summaryText(counts) + '）' : '') + '。此操作会覆盖当前文件内容；回退前会自动保存一份当前状态的安全快照（不含在下方清单内）。'
-        ),
-        React.createElement('div', { className: 'dsh-recall-panel-note' },
+        sessionOnly
+          ? // session-only：零文件改动即无不可逆操作缺口——安全快照预告随之隐藏
+            //（不打安全快照），主说明换成模式语义
+            React.createElement('div', { className: 'dsh-recall-panel-note' },
+              '项目文件保持当前状态，不会被回退或删除；对话回退到该消息之前。'
+            )
+          : React.createElement('div', { className: 'dsh-recall-panel-note' },
+              '将项目恢复到' + (recall.time ? ' ' + clockText(recall.time) + ' ' : ' ') + '发送该消息时的状态。共 ' + total + ' 个文件将变更' + (summaryText(counts) ? '（' + summaryText(counts) + '）' : '') + '。此操作会覆盖当前文件内容；回退前会自动保存一份当前状态的安全快照（不含在下方清单内）。'
+            ),
+        sessionOnly ? null : React.createElement('div', { className: 'dsh-recall-panel-note' },
           canRevertChat
             ? '对话将一并回退到该消息之前：该消息及之后的全部对话会从当前视图移除，原会话归档保存（可从归档找回）。'
             : '该消息是本会话中第一条用户消息，无法回退对话；确认后仅回退项目文件。'
         ),
+        sessionOnly && changes.length > 0
+          ? // 文件清单保留展示但降级为参考语义：清单照常算（Host preview 链路
+            // 不分叉），只是告知用户所选模式不会真的改这些文件
+            React.createElement('div', { className: 'dsh-recall-panel-note', key: 'ref-note' },
+              '以下差异仅作参考，所选模式不会改动文件。'
+            )
+          : null,
         changes.length > 0 ? React.createElement('div', { className: 'dsh-recall-list' }, ...rows) : null,
+        canRevertChat
+          ? // 模式二选一（原生 radio，键盘方向键可达）：临场选择不设全局配置项；
+            // 默认 both 与现状一致，面板每次打开都复位到默认起点
+            React.createElement('div', { className: 'dsh-recall-scope', role: 'radiogroup', 'aria-label': '撤回范围' },
+              React.createElement('label', { className: 'dsh-recall-scope-item' },
+                React.createElement('input', { type: 'radio', name: 'dsh-recall-scope', checked: scope === 'both', onChange: () => onScopeChange('both') }),
+                React.createElement('span', { className: 'dsh-recall-scope-label' }, '回退文件与对话')
+              ),
+              React.createElement('label', { className: 'dsh-recall-scope-item' },
+                React.createElement('input', { type: 'radio', name: 'dsh-recall-scope', checked: scope === 'session-only', onChange: () => onScopeChange('session-only') }),
+                React.createElement('span', { className: 'dsh-recall-scope-label' }, '仅撤回对话')
+              )
+            )
+          : null,
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
           React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, '取消'),
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-danger', onClick: executeRecall }, '确认回退')
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-danger', onClick: executeRecall }, sessionOnly ? '确认撤回对话' : '确认回退')
         )
       )
     }
     if (recall.stage === 'executing') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, '正在回退…')
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, scope === 'session-only' ? '正在撤回对话…' : '正在回退…')
       )
     }
     if (recall.stage === 'done') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
         React.createElement('div', { className: 'dsh-recall-panel-title' }, '回退完成'),
         React.createElement('div', { className: 'dsh-recall-panel-note' },
-          recall.chatReverted
-            ? '项目文件与对话已回退到该消息之前。新会话已打开，原会话已归档（可从归档找回）。'
-            : '项目已恢复到发送该消息时的状态。' + (recall.chatError ? ' 对话回退失败：' + recall.chatError : '')
+          scope === 'session-only'
+            ? // session-only 文案矩阵：文件侧零改动是确定事实，失败时也只描述对话侧
+              (recall.chatReverted
+                ? '对话已回退到该消息之前，项目文件保持当前状态。新会话已打开，原会话已归档（可从归档找回）。'
+                : '对话回退失败：' + (recall.chatError || '未知原因') + '。项目文件未做任何改动。')
+            : (recall.chatReverted
+                ? '项目文件与对话已回退到该消息之前。新会话已打开，原会话已归档（可从归档找回）。'
+                : '项目已恢复到发送该消息时的状态。' + (recall.chatError ? ' 对话回退失败：' + recall.chatError : ''))
         ),
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
           React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, '关闭')
@@ -392,6 +434,9 @@ export function buildRecallNode(
     const [copied, setCopied] = React.useState(false)
     const [hasSnapshot, setHasSnapshot] = React.useState(false)
     const [recall, setRecall] = React.useState<RecallStage>({ stage: 'idle' })
+    // 撤回范围（确认面板内临场选择）：默认 both 与现状一致；openPreview/
+    // closePanel 时复位——每次面板打开都是确定起点，不残留上一次选择
+    const [scope, setScope] = React.useState<RecallScope>('both')
 
     React.useEffect(() => {
       let alive = true
@@ -461,6 +506,7 @@ export function buildRecallNode(
 
     const openPreview = () => {
       if (recall.stage === 'loading' || recall.stage === 'executing') return
+      setScope('both')
       setRecall({ stage: 'loading' })
       api<PreviewResponse>('preview', { messageId, sessionId }).then((res) => {
         if (!res || !res.ok) {
@@ -499,7 +545,10 @@ export function buildRecallNode(
         ? preloadAttachmentFiles(sessionId as string, attachmentRefs)
         : null
       setRecall({ stage: 'executing', changes })
-      api<ExecuteResponse>('execute', { messageId, sessionId, previewTotal, previewTreeId: recall.treeId || undefined, previewAt: Date.now() }).then(async (res) => {
+      // scope 透传：Host 端 session-only 走零 git 短路径；previewTreeId/
+      // previewTotal 照常携带（Host 按 scope 忽略 STALE 校验）。cutSeq 为 null
+      // 时 scope 恒为 both（radio 未渲染，无 session-only 可选）
+      api<ExecuteResponse>('execute', { messageId, sessionId, previewTotal, previewTreeId: recall.treeId || undefined, scope, previewAt: Date.now() }).then(async (res) => {
         if (!res || !res.ok) {
           // STALE：预览后文件变了——自动重新拉一次最新清单回到确认阶段
           if (res && res.code === 'STALE') {
@@ -589,7 +638,10 @@ export function buildRecallNode(
       })
     }
 
-    const closePanel = () => setRecall({ stage: 'idle' })
+    const closePanel = () => {
+      setScope('both')
+      setRecall({ stage: 'idle' })
+    }
 
     const bubbleChildren: Array<ReturnType<typeof React.createElement>> = []
     // 图片在上、气泡在下：布局顺序对齐官方 UserStyleBubble
@@ -640,7 +692,7 @@ export function buildRecallNode(
     return React.createElement('div', { className: 'dsh-recall-row', 'data-time-hover-root': true },
       bubbleChildren.length > 0 ? React.createElement('div', { className: 'dsh-recall-stack', key: 'stack' }, ...bubbleChildren) : null,
       React.createElement('div', { className: 'dsh-recall-actions', key: 'actions' }, ...actions),
-      recallPanel(recall, closePanel, executeRecall)
+      recallPanel(recall, closePanel, executeRecall, scope, setScope)
     )
   }
 

@@ -36,8 +36,9 @@ docs/
 │       ├── plan-performance.md              # 性能优化（PF-1〜PF-9，2026-08-29 实施 + 实弹通过）
 │       ├── plan-ts-refactor.md              # TS 迁移总计划（JS → TypeScript，计划修订至 v3.2；M1–M8 已实施，2026-09-01 归档）
 │       ├── plan-ts-refactor-m1..m8.md       # 同上的 8 份阶段实施文档（随总计划归档）
-│       ├── smoke-checklist.md               # 冒烟测试待办清单（七节全部通过，2026-08-29）
+│       ├── smoke-checklist.md               # 冒烟测试待办清单（八节全部通过：2026-08-29 七节 + 2026-09-18 追加第八节）
 │       ├── plan-shell-dialect-win32.md      # win32 shell 方言冲突修复（issue #15，2026-09-16 实施并随 2.3.22 发版）：方言探针 + 直连 powershell.exe 通道
+│       ├── plan-session-only.md             # 仅撤回对话模式（execute scope：both/session-only；plan-competitor-ux U2 拆出，2026-09-18 实施 + 实弹 5/5）
 │       └── smoke-checklist-records.md       # 冒烟测试执行记录（随清单归档）
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
