@@ -108,7 +108,7 @@ All options can be edited visually in the "**Settings → Plugin Config → Reca
 | `maxFileBytes` | 104857600 (100MB) | Files larger than this are neither snapshotted nor touched by recalls |
 | `maxSnapshotsPerWorkspace` | 500 | Maximum snapshots kept per workspace; oldest pruned beyond the cap. 0 = unlimited |
 | `retentionDays` | 0 | Keep snapshots for this many days; older ones are deleted. 0 = disabled (works independently of the cap) |
-| `baseExcludes` | `.git`, `node_modules/`, `.dsh-recall-snapshots/`, `dsh-recall-snapshots/` | Base exclusion list (gitignore syntax, lower priority than exclude.txt) |
+| `baseExcludes` | `.git`, `node_modules/`, `.dsh-recall-snapshots/`, `dsh-recall-snapshots/`, `target/`, `dist/`, `build/`, `out/`, `coverage/`, `.next/`, `.nuxt/`, `.output/`, `.cache/`, `.gradle/`, `*.exe`, `*.dll`, `*.pdb`, `*.so`, `*.dylib`, `*.msi`, `*.zip`, `*.7z`, `*.rar`, `*.tar`, `*.tar.gz`, `*.iso` | Base exclusion list (gitignore syntax, lower priority than exclude.txt); excluded large directories are skipped as whole subtrees during snapshot scans |
 | `refillDraft` | true | Refill the recalled message (text and attachments) into the input box after a recall |
 | `snapshotEnabled` | true | Master snapshot switch (off = no new snapshots; existing snapshots remain recallable) |
 | `archiveOriginal` | true | Archive the original session after a recall (off = the original session stays in the session list) |

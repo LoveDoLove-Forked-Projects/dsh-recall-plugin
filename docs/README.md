@@ -25,7 +25,8 @@ docs/
 │   │   ├── plan-competitor-ux.md    # 第三轮竞品改进：交互补强与可靠性钉子（S1 已随 settings-ui 完成，其余待实施）
 │   │   ├── plan-host-seed-fork.md   # Host 自建 seed fork：撤回排队残留源头消除（H0 已实施并实弹验收：按 item id 直删；P2 矩阵与 P3 沙箱待做）
 │   │   ├── plan-p2.md               # P2 打磨项（按需挑选；P2-4/P2-5 已完成）
-│   │   └── plan-settings-ui.md      # 设置页 UI 优化 V1–V9（2026-09-04 全量实施，剩真实窄视口/键盘/读屏 3 项人工复核）
+│   │   ├── plan-settings-ui.md      # 设置页 UI 优化 V1–V9（2026-09-04 全量实施，剩真实窄视口/键盘/读屏 3 项人工复核）
+│   │   └── pr17-review.md           # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22；P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验，待 PR 合入上游后归档）
 │   └── completed/                       # 已实施（原地保留实施记录与验收依据，完成不删除）
 │       ├── plan-p0.md                   # P0 安全洞堵补（已实施，待发版）
 │       ├── plan-p1.md                   # P1 工程补课

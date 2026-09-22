@@ -6,8 +6,10 @@
 
 ### 修复
 
+- **posix oversize 的 find 括号写错，超大文件剔除在 Linux/macOS 上静默全废**：`find` 的 `(`/`)` 被写成 `"\("`/`"\)"` 放进数组元素——引号内是数据，bash 不剥反斜杠，find 收到两字符 token 直接报 `paths must precede expression` 退出 1；报错被 `2>/dev/null` 吞、管道零输出、xargs 空跑、`|| true` 兜底，整条剔除 100% 静默空转（比优化前更糟：连原有的慢扫都没有，且零报错）。修复＝括号改单字符数据 `'('`/`')'`，并加外层 `-type d` 限定让 prune 只剪目录（否则与排除目录同名的大文件 `dist`/`target` 会被 `-name` 一并剪掉；pwsh 侧只对 `EnumerateDirectories` 判名，两侧同语义）。契约单测同步改钉修复后的形态。
+- **pwsh `gcScript` 漏查 `$LASTEXITCODE`，gc 快速失败被误报成功**：pwsh 对原生命令非零退出不抛（EAP 不作用于 native），`git gc` 失败（磁盘满/锁冲突/杀软锁 pack）后脚本继续写 `gc.stamp`、输出 `GC_OK`、以 0 退出；`runShell` 只看进程退出码，于是 maintenance 把失败记成成功、推进完整 gcHours 周期——上条退避修复在 Windows（PS 5.1 与 pwsh 7 实测同结论）对快速失败完全失效，`gc.stamp` 这份跨重启的节流凭据也是假的。修复＝gc 之后显式 `if ($LASTEXITCODE -ne 0) { throw ... }`（同 `rescueScript`/`diffScript` 既有写法）；posix 版有 `set -e`，天然正确。契约单测新增「gc 失败必须可见」断言。
 - **gc 失败后走退避重试，不再推进完整 gcHours 周期（快照仓库 GB 级膨胀的根因）**：实测一台重度机器上单工作区影子仓库积到 **3.35 GB loose 对象、in-pack 恒 0**——定期 gc 从未成功完成过。机制：`runGc` 失败（超时/磁盘/杀软）也把 `gcLastAt` 推进到此刻，等于失败一次就放弃整个 gcHours（默认 24h）周期；期间对象继续堆积，下一次 gc 只会更重、更容易超时，「失败→整天不重试→更重→更易失败」滚雪球，对象库永远压不进 pack。修复：失败只把 `gcLastAt` 回拨到「此刻 − gcHours + GC_RETRY_BACKOFF_MS（30 分钟）」，退避窗口后自动重试；成功维持原有「推进到此刻」语义；退避期间 gcCount 条数门槛照常生效，不会退化成「每条消息都重试」。`runGc` / `runGcAll` 两路径同修。新增 `tests/unit/maintenance-gc-backoff.test.js` 4 例钉住成功/失败/节流三条语义。
-- **超大文件扫描（oversize）跳过被排除的大目录子树（两平台）**：原先 .NET 手动栈 / `find` 全工作树递归，`node_modules/`、`target/` 等已排除目录照样被逐文件 stat——一个 11943 个文件、10.96 GB 的 Rust `target/` 让每条消息的快照都多付一次全树扫描（I/O 风暴实测可拖垮宿主全部 HTTP 接口）。修复：把 exclude 表里 basename 形式（无通配、无内部斜杠、非 `!` 反选）的 pattern 按 gitignore 语义转为「任意层级同名目录整棵跳过」（pwsh 压栈过滤 HashSet；posix 转 `\( -name A -o -name B \) -prune -o` 前缀）；复杂 pattern 不参与跳过、回退全扫该子树——多扫不漏检，fail-open 语义不变。
+- **超大文件扫描（oversize）跳过被排除的大目录子树（两平台）**：原先 .NET 手动栈 / `find` 全工作树递归，`node_modules/`、`target/` 等已排除目录照样被逐文件 stat——一个 11943 个文件、10.96 GB 的 Rust `target/` 让每条消息的快照都多付一次全树扫描（I/O 风暴实测可拖垮宿主全部 HTTP 接口）。修复：把 exclude 表里 basename 形式（无通配、无内部斜杠、非 `!` 反选）的 pattern 按 gitignore 语义转为「任意层级同名目录整棵跳过」（pwsh 压栈过滤 HashSet；posix 转 `( -type d ( -name A -o -name B ) ) -prune -o` 前缀）；复杂 pattern 不参与跳过、回退全扫该子树——多扫不漏检，fail-open 语义不变。
 - **`package-layout` 单测兼容 npm 11+ 的 `pack --json` 输出形状**：新版输出 `{<包名>: {...}}`（旧版为数组 `[{...}]`），原解析取错层导致 `files` 恒空、两断言恒红。两种形状都取首个条目。
 
 ### 变更

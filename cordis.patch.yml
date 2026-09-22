@@ -17,4 +17,7 @@
         gcHours: 24            # 距上次 gc 超过多少小时触发（与条数先到先触发）
         maxFileBytes: 104857600  # 超过该大小的文件不进快照、不被回退触碰
         refillDraft: true      # 撤回后把被撤回的消息文本回填到输入框
-        # baseExcludes: ['.git', 'node_modules/', '.dsh-recall-snapshots/']  # 基础排除表（gitignore 语法）
+        # baseExcludes 默认不在此列出：默认表随插件 schema 下发，在设置页
+        # 「基础排除表」增删即可。若要在这里覆盖，必须重述完整表——patch 按行
+        # 替换 config，写半张表会取消其余默认排除（如漏掉 dsh-recall-snapshots/
+        # 会在 root=HOME 时把快照库自身吞进快照）。
