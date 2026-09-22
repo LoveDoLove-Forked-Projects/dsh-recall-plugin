@@ -24,6 +24,7 @@
 | [Host 自建 seed fork：撤回排队残留源头消除](./pending/plan-host-seed-fork.md) | 撤回对话半改走 Host 侧 `ctx.agents.create` 自建截断 seed（残留不进 seed）；含 H0 清理链加固 + 客户端匹配断点（已实施：按 item id 直删）、H1 版本矩阵、H2 seed 构造、H3 Host 端点、H4 Client 双轨、H5 沙箱与门禁 | 实施中（H0 已实施并实弹验收：子会话日志 `removed=1`、重复删 `queue-item-not-found`、零告警；P2 矩阵与 P3 沙箱待做） |
 | [仅撤回对话模式（execute scope）](./completed/plan-session-only.md) | 撤回确认面板模式二选一：回退文件与对话（默认，现状）／仅撤回对话（零 git 写操作，只 fork 回退对话）；由 plan-competitor-ux U2 拆出立项 | 已实施（2026-09-18：门禁全绿 + 实弹 5/5 通过，见该文档实施记录与 smoke-checklist-records 同日批次） |
 | [win32 shell 方言冲突修复（issue #15）](./completed/plan-shell-dialect-win32.md) | 宿主把 `ctx.shell` 配成 bash 时 pwsh 模板被 bash 执行致快照/撤回全死；方言行为探针 + win32 直连 powershell.exe 执行通道（保留 stdin/截断/超时/失败清扫四语义） | 已实施（2026-09-16 落地并随 2.3.22 发版：361 例单测 + 双路径活体冒烟，见该文档实施记录） |
+| [构建产物工作区根的快照护栏与残骸回收（issue #18）](./completed/plan-build-root-guard.md) | workspace root 自身是构建产物目录（`target/debug`、`dist`）时排除表失效致 GB 级残留，且 refs 空 + index 残留让 gc 回收不了；M1 脚本层清陈旧 index 后 gc、M2 构建产物 root 不再建快照 + 可见性、M3 磁盘枚举覆盖 + 空仓整目录回收 | 已实施（2026-09-22：M1+M2+M3 全部落地，M1 双平台实弹 6/6、M3 实弹 4/4、391 例单测与门禁全绿；DSH 会话级实弹留待人工冒烟） |
 
 ## 全局实施顺序
 
@@ -31,3 +32,4 @@ P0 → P1 → 设置页体验优化 → P2 按需。P0 / P1 / 设置页体验优
 
 - 每项实施前过一遍 AGENTS.md 官方文档合规清单（尤其 #3 Config、#8 字段核验）。
 - 子计划状态变化时同步本表；新子计划从本索引拆出并在表内挂链接（docs 规范见 [../README.md](../README.md)）。
+- [构建产物工作区根的快照护栏与残骸回收（issue #18）](./completed/plan-build-root-guard.md) 已实施（2026-09-22）：复现验证（win32 pwsh + Git for Windows bash）后，M1（gc 前置清陈旧 index，回收 0-ref 残骸）、M2（构建产物 root 不再建快照 + init/snapshot-info 提示）、M3（「立即 gc」按磁盘枚举覆盖全部仓库 + 空仓目录整棵回收）全部落地——M1 双平台实弹 6/6、M3 实弹 4/4、391 例单测与全部门禁绿；DSH 会话级实弹（构建目录开会话、设置页立即 gc）留待人工冒烟批次。

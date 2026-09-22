@@ -40,7 +40,8 @@ docs/
 │       ├── plan-shell-dialect-win32.md      # win32 shell 方言冲突修复（issue #15，2026-09-16 实施并随 2.3.22 发版）：方言探针 + 直连 powershell.exe 通道
 │       ├── plan-session-only.md             # 仅撤回对话模式（execute scope：both/session-only；plan-competitor-ux U2 拆出，2026-09-18 实施 + 实弹 5/5）
 │       ├── smoke-checklist-records.md       # 冒烟测试执行记录（随清单归档）
-│       └── pr17-review.md                   # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22 合入上游 cd9a9bd，P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验与定案）
+│       ├── pr17-review.md                   # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22 合入上游 cd9a9bd，P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验与定案）
+│       └── plan-build-root-guard.md         # 构建产物工作区根的快照护栏与残骸回收（issue #18）：复现验证 + M1/M2/M3 全部实施 + 双平台实弹 6/6、M3 实弹 4/4
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿 / 性能回退已修复）
