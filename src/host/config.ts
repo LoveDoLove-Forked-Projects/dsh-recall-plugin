@@ -63,35 +63,46 @@ export function isLegacySettingsFace(settings: unknown): boolean {
   return typeof svc.installSection === 'function' || typeof svc.register === 'function'
 }
 
-// settings ns 解析（0.1.7 的 ns = profile entry id，不是注册出来的 namespace 名）。
-// 官方只有一条匹配式：configEditor.entries() 里找 row.options.id === ns。本机
-// 0.1.7 实测：插件的 profile 行 id 是 bundle patch 的 insert 行 id（'recall'），
-// 而 entry.id 是带父 tree 前缀的 'include:recall'（EntryTree.sep = ':'）——两者
-// 不同，故候选按 options.id → 全 id 排序，并先与 describe() 返回的 ns 集合求
-// 交集（那是唯一权威的「官方认得的值」，端点期走这条）。
-// 交集为空**不等于**新面不可用：describe() 跳过 fiber.state !== 2 的条目，而
+// 旧面注册出来的 namespace 名（插件自己在 installSettingsSection / installSection /
+// register 里给的字面量）。单点定义：解析回退与注册调用共用，避免两处漂移。
+export const LEGACY_SETTINGS_NS = 'dsh-recall'
+
+// settings ns 解析。两代的 ns 来源完全不同，故按面分叉：
+// - 旧面（≤0.1.6）：ns 是插件注册时给的字面量（与 Loader、profile 行无关）；
+// - 新面（0.1.7+）：ns = profile entry id。官方只有一条匹配式——
+//   configEditor.entries() 里找 row.options.id === ns。本机实测：profile 行 id
+//   是 bundle patch 的 insert 行 id（'recall'），而 entry.id 是带父 tree 前缀的
+//   'include:recall'（EntryTree.sep = ':'），两者不同，故候选按 options.id →
+//   全 id 排序，并先与 describe() 返回的 ns 集合求交集（唯一权威的「官方认得的
+//   值」，端点期走这条）。
+// 新面交集为空**不等于**不可用：describe() 跳过 fiber.state !== 2 的条目，而
 // apply 期本插件自身 fiber 还在 LOADING，自己的 ns 必然不在列表里（本机实测
 // apply 期 11 条 / settled 后 17 条且含自身）。此时取 options.id——官方
 // write/describe 都用它寻址，对 Loader 挂载的条目是构造性正确的；真不可写会由
 // 官方在端点调用时抛错，卡片可见失败而不是静默退化。
-// 历史字面量 'dsh-recall' 只在旧面参与候选（旧面 ns 就是它），新面下它永远不在
-// describe 里、也不该被猜——无 entry 又无旧面注册入口时返回 null（「ns 缺失」的
-// 诚实信号：此时没有任何可寻址的条目，端点按 RECALL_SETTINGS_UNAVAILABLE 报
-// 逃生口提示，而不是拿一个猜出来的 ns 去撞官方错误）。
+// 无 entry 又非旧面时返回 null（「ns 缺失」的诚实信号：没有任何可寻址的条目，
+// 端点按 RECALL_SETTINGS_UNAVAILABLE 报逃生口提示，而不是拿猜出来的 ns 去撞
+// 官方错误）。
 export function resolveSettingsNs(ctx: SettingsNsContext | null | undefined, settings: unknown): string | null {
   const entry = ctx && ctx.fiber ? ctx.fiber.entry : null
   const entryIds: string[] = []
   for (const candidate of [entry && entry.options ? entry.options.id : null, entry ? entry.id : null]) {
     if (typeof candidate === 'string' && candidate && entryIds.indexOf(candidate) < 0) entryIds.push(candidate)
   }
-  const legacy = isLegacySettingsFace(settings)
-  const candidates = legacy ? entryIds.concat(['dsh-recall']) : entryIds
   const known = describeNamespaces(settings)
-  for (const candidate of candidates) {
-    if (known.indexOf(candidate) >= 0) return candidate
+  if (isLegacySettingsFace(settings)) {
+    if (known.indexOf(LEGACY_SETTINGS_NS) >= 0) return LEGACY_SETTINGS_NS
+    for (const id of entryIds) {
+      if (known.indexOf(id) >= 0) return id
+    }
+    // 回退必须回旧面的字面量：旧面上 entry（profile 行）与 ns 无关，此刻取
+    // options.id 会拿新面的键去写旧面的注册表（0.1.6 上必失败）。
+    return LEGACY_SETTINGS_NS
   }
-  if (entryIds.length) return entryIds[0]
-  return legacy ? 'dsh-recall' : null
+  for (const id of entryIds) {
+    if (known.indexOf(id) >= 0) return id
+  }
+  return entryIds.length ? entryIds[0] : null
 }
 
 // describe() 的 ns 集合（best-effort：服务缺席/方法报错都按「无交集」处理，

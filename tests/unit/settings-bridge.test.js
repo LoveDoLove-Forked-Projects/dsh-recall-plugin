@@ -103,6 +103,14 @@ describe('resolveSettingsNs（ns = profile entry id 优先）', () => {
     expect(resolveSettingsNs({ fiber: FIBER }, makeLegacySettings().settings)).toBe('dsh-recall')
   })
 
+  it('旧面 + entry 在位但 describe 未列出（注册未就绪）→ 仍回 dsh-recall，不误用 options.id', () => {
+    // 生产形态：0.1.6 上 entry（profile 行）与 ns 无关，ns 是插件注册时给的字面量。
+    // 这条钉住「回退按面分叉」——若回退取 options.id，0.1.6 上会拿新面的键去写旧面注册表。
+    const legacy = makeLegacySettings()
+    legacy.settings.describe = () => []
+    expect(resolveSettingsNs({ fiber: FIBER }, legacy.settings)).toBe('dsh-recall')
+  })
+
   it('无 entry 且非旧面 → null（无任何可寻址条目，宁可报不可用也不猜）', () => {
     expect(resolveSettingsNs({}, makeModernSettings())).toBe(null)
     expect(resolveSettingsNs(null, makeModernSettings())).toBe(null)

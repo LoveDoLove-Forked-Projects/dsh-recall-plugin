@@ -11,7 +11,7 @@
  * 接线与 store 发现/执行工具，不承载端点业务。
  */
 
-import { createConfig, Config, DEFAULTS, isLegacySettingsFace, resolveSettingsNs, unwrapConfig } from './config.js'
+import { createConfig, Config, DEFAULTS, LEGACY_SETTINGS_NS, isLegacySettingsFace, resolveSettingsNs, unwrapConfig } from './config.js'
 import { parseStoresDump, parseExcludeDump } from './dump-parse.js'
 
 // dump 解析纯函数住 dump-parse.js（避免 routes-manage 反向 import index 的
@@ -105,7 +105,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   try {
     if (typeof dshSettings.installSettingsSection === 'function') {
       // 包解析到旧版 dsh-settings：独立函数辅助
-      dshSettings.installSettingsSection(ctx, 'dsh-recall', Config, config, settingsHooks)
+      dshSettings.installSettingsSection(ctx, LEGACY_SETTINGS_NS, Config, config, settingsHooks)
     } else if (typeof ctx.inject === 'function') {
       ctx.inject(['settings'], (settingsCtx) => {
         const settingsService = settingsCtx.settings
@@ -120,10 +120,10 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
           // 0.1.2-alpha.2 起：settings 服务方法（inject 声明后取实例，方法
           // 与独立函数同签名——register 语义/组合 base/卸载回退/onChange
           // 触发全一致）
-          settingsService.installSection(ctx, 'dsh-recall', Config, config, settingsHooks)
+          settingsService.installSection(ctx, LEGACY_SETTINGS_NS, Config, config, settingsHooks)
         } else if (typeof settingsService.register === 'function') {
           // 0.1.1-rc.2 及以前：仅 register 核心 API，复刻独立函数接线语义
-          const scope = settingsService.register('dsh-recall', Config, { base: config })
+          const scope = settingsService.register(LEGACY_SETTINGS_NS, Config, { base: config })
           settingsHooks.setSource(() => scope.get())
           settingsHooks.onChange()
           scope.watch(() => settingsHooks.onChange())
