@@ -27,6 +27,9 @@ export interface InitNotice {
   unsupported?: boolean
   gitMissing?: boolean
   homeFallback?: boolean
+  // issue #18：工作区根自身是构建产物目录（路径段命中基础排除表），快照已停用；
+  // 值为已拼好的提示文案，client 直接展示（文案唯一来源见 exclude-patterns.ts）
+  buildRootNotice?: string
 }
 export interface InitResponse {
   ok: boolean
@@ -50,6 +53,9 @@ export interface SnapshotInfoResponse {
   error?: string
   kind?: FeedbackKind
   skipped?: string[]
+  // issue #18：has=false 的「非失败」解释（当前只有构建产物 root 停用快照），
+  // 与 init 的 notice.buildRootNotice 同源同文案；client 在近消息上 toast 一次
+  notice?: string
 }
 
 // ---- preview ----

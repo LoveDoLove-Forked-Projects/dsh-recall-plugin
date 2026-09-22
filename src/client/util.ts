@@ -232,6 +232,11 @@ export function buildUtil(): UtilApi {
       if (notice && notice.homeFallback) {
         showNotice('home', 'home 目录不可写，快照已降级存储到项目内 .dsh-recall-snapshots 目录。')
       }
+      // issue #18：工作区根自身是构建产物目录时不建快照（Host 侧 captureSnapshot
+      // 早退），文案由 Host 单点拼好（exclude-patterns.buildRootNotice），client 只展示
+      if (notice && notice.buildRootNotice) {
+        showNotice('buildRoot', String(notice.buildRootNotice).slice(0, 140))
+      }
     }).catch(() => {
       // init 失败（如页面先于 Host API 就绪加载）时清掉标记：否则本会话内被
       // 判定“已初始化”，撤回按钮永不出现；清掉后下一条消息挂载会重试

@@ -472,6 +472,12 @@ export function buildRecallNode(
             if (recent) showThrottledToast('快照失败：' + String(res.error || '未知原因').slice(0, 140))
             return
           }
+          // issue #18：has=false 的「非失败」解释（当前只有构建产物工作区根停用
+          // 快照）——同样是终止态：快照不会迟到，提示一次后停止空轮询
+          if (res && res.notice) {
+            if (recent) showThrottledToast(String(res.notice).slice(0, 140))
+            return
+          }
           if (recent && attempts < MAX_ATTEMPTS) timer = setTimeout(schedule, RETRY_MS)
         }).catch(() => {
           if (alive && recent && attempts < MAX_ATTEMPTS) timer = setTimeout(schedule, RETRY_MS)

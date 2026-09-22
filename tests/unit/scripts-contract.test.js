@@ -314,6 +314,23 @@ describe('关键模板结构断言', () => {
     expect(pwshGc.indexOf('$LASTEXITCODE')).toBeLessThan(pwshGc.indexOf('gc.stamp'))
     expect(posix.gcScript(FAKE_STORE, 'git-exe').startsWith('set -e')).toBe(true)
   })
+
+  it('gc 前置清陈旧 index：refs 空 + index 非空才清，且清在 gc 之前（两平台）', () => {
+    // issue #18：快照在 add 与 tag 之间失败留下的残骸仓库（refs 0 / index 数千条）
+    // 里，index 让 blob 对 prune 伪可达，gc --prune=now 回收不掉（实测 78.4MB 不变）；
+    // 必须先 read-tree --empty 再 gc。条件与顺序都是正确性的一部分：有 tag 时 index
+    // 是 diff/rollback 依赖的「当前清单」，误清会破坏回退链。
+    const pwshGc = pwsh.gcScript(FAKE_STORE, 'git-exe')
+    expect(pwshGc).toContain('for-each-ref --count=1 refs')
+    expect(pwshGc).toContain('if (-not $gcRefs -and $gcFiles) { & $git --git-dir=$g read-tree --empty }')
+    expect(pwshGc.indexOf('read-tree --empty')).toBeLessThan(pwshGc.indexOf('gc --quiet'))
+
+    const posixGc = posix.gcScript(FAKE_STORE, 'git-exe')
+    expect(posixGc).toContain('read-tree --empty')
+    expect(posixGc).toContain('-z "$("$git" --git-dir="$g" for-each-ref --count=1 refs)"')
+    expect(posixGc).toContain('-n "$("$git" --git-dir="$g" ls-files)"')
+    expect(posixGc.indexOf('read-tree --empty')).toBeLessThan(posixGc.indexOf('gc --quiet'))
+  })
 })
 
 describe('F-S1 rescue tag 前缀契约（跨函数）', () => {

@@ -454,12 +454,18 @@ export function listTagsWithTimeScript(store: ScriptStore, gitExe: string): stri
   ].join('\n')
 }
 
-// 定期 gc（语义同 pwsh 版）；date +%s 写秒级时间戳，JS 侧 ×1000
+// 定期 gc（语义同 pwsh 版）；date +%s 写秒级时间戳，JS 侧 ×1000。
+// refs 空 + index 非空 = 残骸仓库（无快照可回退），index 的伪可达性让 gc 回收
+// 不掉对象库——必须先清 index；动机、实测量级与安全性论证见 pwsh 版注释。
+// 两条查询命令空结果都退出 0，不触发 set -e。
 export function gcScript(store: ScriptStore, gitExe: string): string {
   return [
     'set -e',
     'git=' + psq(gitExe),
     'g=' + psq(store.git),
+    'if [ -z "$("$git" --git-dir="$g" for-each-ref --count=1 refs)" ] && [ -n "$("$git" --git-dir="$g" ls-files)" ]; then',
+    '  "$git" --git-dir="$g" read-tree --empty',
+    'fi',
     '"$git" --git-dir="$g" gc --quiet --prune=now',
     'date +%s > "$g/gc.stamp"',
     'echo GC_OK'

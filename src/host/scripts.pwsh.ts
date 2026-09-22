@@ -507,11 +507,22 @@ export function listTagsWithTimeScript(store: ScriptStore, gitExe: string): stri
 // 杀软锁 pack，实测 40~150ms 内以 128 返回）被记成成功，maintenance 据此推进
 // 完整 gcHours 周期，失败退避在 Windows 上对快速失败完全失效（PS 5.1/pwsh 7
 // 均如此，实测）。posix 版有 set -e 天然正确，无需改。
+// issue #18：refs 为空但 index 仍有条目 = 没有可回退快照的残骸仓库（快照在
+// add 与 tag 之间失败留下的形态，实测单工作区可积到 GB 级）。index 条目让这批
+// blob 对 prune/gc 伪可达——git prune 以 refs + 暂存 index 为根，fsck
+// --unreachable 也报 0（实测 5000 条 index + 0 ref 时输出 0 行），于是
+// gc --prune=now 一个对象都回收不了。所以先清 index 再 gc：index 是可重建缓存
+// （snapshot/diff/rollback 三处开头都先 add -A），有 tag 的库条件不成立、零影响。
+// 用 read-tree --empty 而非 rm -r --cached .：只重写 index 元数据，不遍历工作区、
+// 不需 worktree。两条查询命令空结果都退出 0，不触发 EAP=Stop 的中断。
 export function gcScript(store: ScriptStore, gitExe: string): string {
   return [
     "$ErrorActionPreference = 'Stop'",
     '$git = ' + psq(gitExe),
     '$g = ' + psq(store.git),
+    '$gcRefs = & $git --git-dir=$g for-each-ref --count=1 refs',
+    '$gcFiles = & $git --git-dir=$g ls-files',
+    'if (-not $gcRefs -and $gcFiles) { & $git --git-dir=$g read-tree --empty }',
     '& $git --git-dir=$g gc --quiet --prune=now',
     'if ($LASTEXITCODE -ne 0) { throw ("git gc failed (exit " + $LASTEXITCODE + ")") }',
     "Set-Content -LiteralPath (Join-Path $g 'gc.stamp') -Value ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()) -Encoding ascii",

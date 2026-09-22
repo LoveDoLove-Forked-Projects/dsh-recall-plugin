@@ -9,6 +9,7 @@
 
 import * as E from './errors.js'
 import { buildFeedbackError } from './diagnostics.js'
+import { buildArtifactRootSegment } from './exclude-patterns.js'
 import type { Runtime, StoreInfo } from '../types/state.js'
 import type { SnapshotFeedback, LineageEntry, IndexEntry } from '../types/payloads.js'
 import type { HostContext, SessionEvent, SessionQueryEngine } from '../types/dsh-contract.js'
@@ -550,6 +551,12 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     // 不必跑，把失败重试的开销也一并止住
     const fused = snapFailures.get(root)
     if (fused && Date.now() < fused.skipUntil) return
+    // issue #18：root 自身就是构建产物目录（…/target/debug、dist）时不建快照——
+    // baseExcludes 是相对 root 的模式，匹配不到 root 自己，整个目录会被全量快照
+    // （实测 7000 个产物全进 index、对象库 GB 级），而这类目录没有回退价值。
+    // 位置在 resolveStore 之前：连空仓库都不建。不写 feedback、不进熔断——这是
+    // 设计行为而非失败，原因由 init / snapshot-info 的 notice 告知用户。
+    if (buildArtifactRootSegment(root, BASE(), rt.isWin)) return
     let store: StoreInfo | null = await rt.resolveStore(root)
     // tryUpgradeToHome 对刚 resolveStore 的 root 恒返回非空（缓存已写入）；
     // 断言仅为类型收口，运行语义与迁移前一致（原代码直接透传返回值）

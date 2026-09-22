@@ -9,11 +9,12 @@
 
 import { ENV_HINTS } from './diagnostics.js'
 import { parseTreeId } from './snapshots.js'
+import { buildArtifactRootSegment, buildRootNotice } from './exclude-patterns.js'
 import type { Runtime, SharedState, ErrorRecord, StoreInfo } from '../types/state.js'
 import type { ResolvedConfig } from '../types/config.js'
 import type { SnapshotsApi } from './snapshots.js'
 import type { EnvErrorKind } from './diagnostics.js'
-import type { InitArgs, InitResponse, SnapshotInfoArgs, SnapshotInfoResponse, PreviewArgs, PreviewResponse, ExecuteArgs, ExecuteResponse, RecallScope, StatusArgs, StatusResponse, LineageRecordArgs, LineageRecordResponse, ErrBody } from '../types/api.js'
+import type { InitArgs, InitResponse, InitNotice, SnapshotInfoArgs, SnapshotInfoResponse, PreviewArgs, PreviewResponse, ExecuteArgs, ExecuteResponse, RecallScope, StatusArgs, StatusResponse, LineageRecordArgs, LineageRecordResponse, ErrBody } from '../types/api.js'
 
 // 端点依赖注入面（index.ts 装配时逐项提供；ctx 不解构的 A4 纪律见工厂注释）
 export interface RoutesCoreDeps {
@@ -40,7 +41,7 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       }
       const sessionId = args && args.sessionId ? String(args.sessionId) : null
       const root = await rt.resolveRoot(sessionId)
-      let notice = null
+      let notice: InitNotice | null = null
       if (root) {
         let store: StoreInfo | null = await rt.resolveStore(root)
         store = await rt.tryUpgradeToHome(root)
@@ -59,6 +60,10 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
           gitMissing: state.gitExe === '',
           homeFallback: store ? !store.home : false
         }
+        // issue #18：root 自身是构建产物目录时快照被停用（captureSnapshot 早退），
+        // 会话级说明一次——否则用户只会看到「撤回按钮不出现」而无从判断原因。
+        const artifactSeg = buildArtifactRootSegment(root, cfg.baseExcludes, rt.isWin)
+        if (artifactSeg) notice.buildRootNotice = buildRootNotice(artifactSeg)
       }
       // 顺带下发客户端行为开关（fillDraft 等）：Client 无须为读配置单开请求，
       // init 是每会话必经的预热通道
@@ -72,7 +77,15 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       // 终止轮询并 toast，不再空等 20 次；has 时附带 skipped 让用户知道
       // fail-open 跳过了哪些路径
       const feedback = await snaps.feedbackFor(args ? args.sessionId : null, id)
-      return { has: Boolean(snap), time: snap ? snap.time : null, id, ...feedback }
+      // issue #18：构建产物工作区根不会有快照（captureSnapshot 早退），客户端轮询
+      // 到 has:false 且无 failed 会静默放弃——补一条说明性 notice 让「按钮不出现」
+      // 有原因可查。root 解析走 state.roots 缓存，重复轮询不额外付费用。
+      const sroot = await rt.resolveRoot(args && args.sessionId ? String(args.sessionId) : null)
+      const artifactSeg = sroot ? buildArtifactRootSegment(sroot, cfg.baseExcludes, rt.isWin) : null
+      return {
+        has: Boolean(snap), time: snap ? snap.time : null, id, ...feedback,
+        notice: artifactSeg ? buildRootNotice(artifactSeg) : undefined
+      }
     },
 
     'preview': async (args: PreviewArgs): Promise<PreviewResponse> => {

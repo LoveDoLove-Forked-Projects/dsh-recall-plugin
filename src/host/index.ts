@@ -55,7 +55,9 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   const cfg = createConfig(config)
   const rt = createRuntime(ctx, cfg)
   const snaps = createSnapshots(ctx, rt, cfg)
-  const maint = createMaintenance(ctx, rt, snaps, cfg)
+  // dumpStores 是下方同作用域的函数声明（提升可见）：M3 起「立即 gc」按磁盘
+  // 枚举补齐 store 全集 + 回收空仓目录——内存缓存覆盖不到会话已删的残骸
+  const maint = createMaintenance(ctx, rt, snaps, cfg, { dumpStores })
   const state = rt.state
 
   // ---- settings namespace「dsh-recall」：设置页「插件配置」分区正规接入 ----

@@ -39,6 +39,7 @@ import type { Runtime, StoreInfo, SnapshotInfo } from '../types/state.js'
 import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
 import type { ResolvedConfig } from '../types/config.js'
 import type { SnapshotsApi } from './snapshots.js'
+import type { StoreDumpInfo } from './dump-parse.js'
 
 // P1-3 纯逻辑：按 root 分组选出超限部分的最旧快照（time 升序，time=0 孤儿
 // 最旧优先），模块级导出供 tests/unit 直接钉边界；工厂内 enforceLimits 复用。
@@ -91,7 +92,14 @@ export interface MaintenanceApi {
   sweepDeletedSessions(): Promise<void>
 }
 
-export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: SnapshotsApi, config: ResolvedConfig): MaintenanceApi {
+// M3（issue #18 收尾）：磁盘 store 全集的来源。index.ts 的 dumpStores 一条
+// shell 出「容器子目录 + 降级候选目录」的 root.txt/index.json；缺省（单测、
+// 无容器）时退化为「只用内存缓存」，磁盘覆盖与空仓回收都不生效——保持旧行为。
+export interface MaintenanceDeps {
+  dumpStores?: () => Promise<Map<string, StoreDumpInfo>>
+}
+
+export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: SnapshotsApi, config: ResolvedConfig, deps: MaintenanceDeps = {}): MaintenanceApi {
   const sessions = ctx.sessions
   const state = rt.state
   // 平台选择的脚本模板（gc/purge 两套模板同名导出）
@@ -263,13 +271,93 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     return true
   }
 
-  // 全局 gc（设置卡片没有会话上下文）：清理扫描一次 + 逐 store gc。
-  // store 全集取内存缓存（启动预热与历次操作会填齐已知工作区）；逐个
-  // best-effort，单个失败记错误继续。调用方（manage 端点）把它排进同一条
-  // 串行队列，与快照天然互斥，无 git 锁竞态。
+  // 磁盘 store 全集（M3-1）：内存缓存只覆盖「启动预热与历次操作认识过」的
+  // 工作区；会话已删、或从未在本进程 init 过的仓库在磁盘上有、内存里没有——
+  // 它们恰好是 issue #18 的 GB 级残骸（refs 空 + index 伪可达），此前
+  // runGcAll 对它们完全无感。dump 失败按空处理并记错误（与 dumpStores 既有
+  // 语义一致：枚举失败不等于「没有数据」，但维护是 best-effort）。
+  async function dumpDiskStores(): Promise<Map<string, StoreDumpInfo>> {
+    if (typeof deps.dumpStores !== 'function') return new Map()
+    try {
+      return await deps.dumpStores()
+    } catch (error) {
+      rt.recordError('recall disk store dump failed: ' + String(error))
+      return new Map()
+    }
+  }
+
+  // 内存 + 磁盘并集，按 store.git 去重（同一仓库两来源的 git-dir 必然一致）
+  function mergeStores(disk: Map<string, StoreDumpInfo>): StoreInfo[] {
+    const byGit = new Map<string, StoreInfo>()
+    for (const store of state.stores.values()) {
+      if (store && store.git) byGit.set(store.git, store)
+    }
+    for (const dir of disk.keys()) {
+      if (!dir) continue
+      const store = rt.storeFromDir(dir, false)
+      if (store && store.git && !byGit.has(store.git)) byGit.set(store.git, store)
+    }
+    return Array.from(byGit.values())
+  }
+
+  // 该 store 目录是否还挂着内存快照：防「磁盘索引丢了/被隔离，内存却有条目」
+  // 这种极端组合被误删（root.txt 的 root 是权威映射，内存 stores 的表是补充）
+  function memorySnapshotCount(dir: string, root: string | null): number {
+    let n = 0
+    for (const snap of state.snapshots.values()) {
+      if (!snap) continue
+      const owner = state.stores.get(snap.root)
+      if ((owner && owner.dir === dir) || (root && snap.root === root)) n++
+    }
+    return n
+  }
+
+  // M3-2：整目录回收——M1 只清对象库（目录与 root.txt 还在），这一步把「确认
+  // 没有任何可回退数据」的空仓库目录整个删掉（issue #18 报告者手工做的那步）。
+  // 逐条保守判定，任一条不满足就留着：
+  //   * entries 必须是**明确解析出来的空数组**（index.json 存在且为 []）：
+  //     entries 为 null 表示索引缺失或损坏（可能是待复查的隔离现场），不删；
+  //   * 任何 snap-* tag 存在即代表有可回退快照，不删（以磁盘真值二次确认）；
+  //   * 内存里还有该目录/该 root 的快照，不删。
+  // 删前留 console.error（不可逆操作必须可追溯，同 purgeSession 的纪律）；
+  // best-effort，单条失败只记错误继续。调用点在逐 store gc **之后**：先让 M1
+  // 的条件清理把那批伪可达对象回收掉，再删空壳，避免「刚删目录、gc 又对着它跑」。
+  async function reapEmptyStores(disk: Map<string, StoreDumpInfo>): Promise<number> {
+    if (!state.gitExe) return 0
+    let removed = 0
+    for (const [dir, info] of disk) {
+      if (!dir || !info) continue
+      if (!Array.isArray(info.entries) || info.entries.length) continue
+      if (memorySnapshotCount(dir, info.root) > 0) continue
+      const store = rt.storeFromDir(dir, false)
+      try {
+        const tags = S.stripBom(await rt.runShell(S.listTagsScript(store, state.gitExe), { timeoutMs: 60000, stdoutMaxBytes: 4096 }))
+        if (String(tags).trim()) continue
+        await rt.runShell(S.legacyRmScript(dir), { timeoutMs: 120000, stdoutMaxBytes: 4096 })
+        // 内存侧同步摘除：后续操作不该再对着已删目录跑
+        for (const [root, st] of state.stores.entries()) {
+          if (st && st.dir === dir) state.stores.delete(root)
+        }
+        state.gcLastAt.delete(store.git)
+        state.gcCount.delete(store.git)
+        if (info.root) state.indexLoaded.delete(info.root)
+        console.error('recall reaped empty store:', dir)
+        removed++
+      } catch (error) {
+        rt.recordError('recall reap store failed for ' + dir + ': ' + String(error))
+      }
+    }
+    return removed
+  }
+
+  // 全局 gc（设置卡片没有会话上下文）：清理扫描一次 + 逐 store gc（内存 ∪ 磁盘）
+  // + 空仓目录回收。逐个 best-effort，单个失败记错误继续。调用方（manage 端点）
+  // 把它排进同一条串行队列，与快照天然互斥，无 git 锁竞态。
   async function runGcAll(): Promise<boolean> {
-    const stores = Array.from(new Set(Array.from(state.stores.values()).filter((s): s is StoreInfo => Boolean(s))))
-    if (!stores.length || !state.gitExe) return false
+    if (!state.gitExe) return false
+    const disk = await dumpDiskStores()
+    const stores = mergeStores(disk)
+    if (!stores.length) return false
     try {
       await sweepDeletedSessions()
     } catch (error) {
@@ -300,6 +388,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
       }
       state.gcCount.set(store.git, 0)
     }
+    await reapEmptyStores(disk)
     return true
   }
 
