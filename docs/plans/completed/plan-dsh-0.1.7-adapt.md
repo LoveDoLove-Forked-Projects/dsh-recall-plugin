@@ -1,6 +1,6 @@
 # dsh 0.1.7-alpha.1 适配计划（shell 接缝换 execute / settings 接缝换 SettingsForms）
 
-> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：实施中（M1–M4 已实施、自动化门禁全绿；M5 双平台人工实弹待做，见实施记录）
+> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：已完成（M1–M4 自动化门禁全绿 + M5 双平台实弹全过，见实施记录；M5-6② 附件复验因环境无图片模型受限记账）
 > 评估底稿：[dsh-0.1.7-alpha.1.md](../../upgrade-assessments/dsh-0.1.7-alpha.1.md)（含全部消费点结论与本机实装产物出处；本计划只写「怎么做」，不复述证据）
 > 触发：2026-09-22 本机全局实装 0.1.7-alpha.1 后门禁 `test:probe` 35/39（4 红），`verify:host` 因自带 settings 桩而掩盖 settings 换代（实证与出处见 [dsh-0.1.7-alpha.1.md](../../upgrade-assessments/dsh-0.1.7-alpha.1.md)）
 > 范围：**只做适配，不加功能**。高相关条目（shell 接缝 / settings 接缝）走代码迁移；中相关与低相关条目按「[中/低相关条目的处置](#中低相关条目的处置)」逐条记账——多数零代码，仅事件集同步产生小改，另有若干对照点并入 M5 冒烟。
@@ -269,7 +269,67 @@ M5-6 **中/低相关条目的对照点**（既有冒烟路径上的补充观察�
 
 全部 < 700，未触发拆分线；`store.ts` 与 `routes-manage.ts` 仍是最大两个文件，后续新增逻辑优先落新文件（与计划同结论）。
 
-### 遗留与待人工
+### M5 实弹冒烟（2026-09-23，全过）
 
-* **M5 全部待做（人工）**：POSIX（WSL）撤回全链、win32 全链 + 默认路径归一、设置页保存/热更/复位/重启持久化（npm 安装模式）、fork 子会话首条消息撤回、0.1.6-alpha.2 降级回归与复升，以及六个对照点（V4 旧会话切点、附件回填、插件管理页、link 模式、取消回合后撤回、长对话翻页后按钮可见）。本批次已把其中可自动化的部分前置：《读侧》describe/热更/复位已在真机验证；**写入的端到端「重启后持久化」与旧版降级仍必须人工**。
-* **观察项（未改，超出本计划范围）**：插件 `apply` 末尾的启动预热 IIFE 是 fire-and-forget，若在 fiber 停用后才走到服务访问会冒未捕获拒绝（`cannot get required service … in inactive context`）。verify-host 侧已用「卸载前留一拍」规避；插件侧未加固（属既有行为，非 0.1.7 引入），需要时另开小计划。
+**执行方式**：浏览器实弹（agent-browser）+ 官方 RPC API 直驱 + Host 侧 git tag / index / lineage 磁盘对账。
+API 直驱手法：页面 token 经 `GET /?token=` 换浏览器 cookie 后直调 `/api/*`（官方 RPC 信封
+`{type:'client-request', rpcId, method, payload:{args:{request}}}`；插件端点为裸 JSON）。浏览器自动化的
+React 合成事件坑（原生 click 不触发处理器）用页内 `__reactProps.onClick` 直呼绕开——与冒烟记录既有结论一致。
+
+**环境**：
+- Windows 10 22H2 ｜ 全局 dsh **0.1.7-alpha.1**（`--before=2026-09-22T12:00Z` 钉纯树——`alpha` dist-tag 已推进到
+  0.1.7-alpha.2，直接装得到顶层 alpha.1/嵌套 alpha.2 的混合树）｜ 插件 link 模式 ｜ dsh web 127.0.0.1:3080 ｜
+  测试工作区 `D:\tmp\recall-h0`（历史 22 快照）。
+- WSL2 Ubuntu ｜ 全局 dsh 0.1.1-rc.2 → **0.1.7-alpha.1**（同款钉树）｜ 插件 ext4 副本 `~/src/dsh-recall-plugin`
+  （tar 复制 + `@deepseek-ai/{schemastery,dsh-settings}` symlink 指全局嵌套包）｜ profile 依赖 `link:`（pnpm add
+  撞既有构建工具缺口 node-pty 需 `make`，改手工 link + 依赖改写，语义同 link 安装）｜ dsh web 127.0.0.1:3090 ｜
+  凭证自 Windows 复制 ｜ 测试工作区 `~/ws/recall-017`（自有 git 仓库，验证项目零污染）。
+
+**逐项结论**：
+- **M5-1 WSL（POSIX）撤回全链 — 通过（硬指标达标）**：init → 发消息出快照（tag `snap-<消息ID>`、树含工作区
+  文件）→ 改文件（改/增/删三态）→ 撤回：preview 给出三态清单与 `cutSeq=35`（与 V4 日志里 `turn/end`@35 实际一致），
+  execute `count:3` 后文件精确恢复（added 消失 / 删除的回来 / 修改还原）、项目自带 git 零污染；fork 子会话生成
+  （seed 只含第一条消息 + `session/end-seed` 合成收尾）、标题继承无递增、原会话归档、lineage 落盘；第二次撤回走
+  **UI 全链**（消息上撤回按钮 → 确认面板（三态清单 + scope 单选 + 归档说明）→ 确认）→ 孙会话生成、lineage 2 条、
+  安全快照 2 份、**输入框回填被撤回原文**。日志 `shell.run` 出现 **0 次**。
+- **M5-2 win32 全链 + 默认路径归一 — 通过**：方言探针 `recall shell dialect probe: pwsh`；全链（两条消息 → 快照 →
+  改文件 → preview cutSeq=18 → execute count:3 → 恢复到快照态）；日志 `shell.run` 0 次、**方言探针全程仅 1 次**
+  （RECALL_CLEANUP 清扫路径不触发探针）。
+- **M5-3 设置页配置（npm 安装模式）— 通过**：`npm pack` tarball 以 `file:` 依赖装进 web profile（node_modules 为
+  真实拷贝）→ 保存 gcSnaps=13 立即生效（volatile 热更，无重载）→ profile patch 落盘 `- id: recall / name:
+  dsh-recall-plugin / gcSnaps: 13` → **重启后仍 13（持久化）** → 恢复默认回 50、patch 行清除。验完恢复 link 模式。
+- **M5-4 fork 边界 — 通过**：在 fork 出的子会话里对首条用户消息 preview：`ok:true, cutSeq:null`，无
+  `session/fork-unavailable`（走「首条消息仅回退文件」分支）。
+- **M5-5 旧版回归 — 通过，并实锤一处 P0 回归（见下）**：全局降级 0.1.6-alpha.2（同样钉树）→ 撤回链
+  （create/prompt/快照/preview，走 `run` 旧通道）+ 方言探针 pwsh + 设置卡读写复验 → 复升 0.1.7-alpha.1（版本树
+  核验一致）。
+- **M5-6 对照点**：① V4 旧会话 — 通过（0.1.1 时代 V3 日志在 0.1.7 正常加载/渲染，无「历史加载失败」；旧消息撤回
+  面板切点/清单正确，验后取消不动数据）；② 附件回填 — **环境受限**（见异常项）；③ 插件管理页 — 通过（插件列表
+  列出本 bundle、详情页组件 `recall` 运行中、配置入口「展开: 撤回插件」渲染 9 字段 + 3 折叠区）；④ link 模式 —
+  通过（Windows 与 WSL 两轮全链均在 link 模式下完成）；⑤ 取消回合后撤回 — 通过（cancel 后 `turn/end`@57 可靠
+  落盘，该消息 preview `ok` 且 cutSeq=35 正确）；⑥ 长对话翻页 — 通过（7 轮旧会话轮次导航 1〜7 在位，24 天前旧
+  消息上撤回按钮照常渲染、面板可开）。
+
+**M5-5 实锤的 P0 回归与修复（提交 `c3cc8a7`）**：0.1.6 上 `config-set/config-reset` 报 `settings namespace
+"dsh-recall" is not registered`——namespace 从未注册。根因：`withVolatile` 的 feature-detect 只看 schemastery
+是否有 `.volatile()`，而 0.1.6 树今天解析到 schemastery 3.18.3（volatile 存在），入口 config 被 loader 解析成
+Volatile ref（实测 `{"gcSnaps":{},…}`）；旧 provider 的 `installSection/register` 用 schema 校验 entry，ref 直接
+ValidationError → 注册失败且被吞。修复＝旧面三条注册接线统一传 `unwrapConfig(config)`（对普通值恒等，新面
+ref 解一层）；0.1.7 新面不受影响（不走注册）。教训：feature-detect 探测的是「能力」，但「标记即生效」的解析
+行为取决于解析方——旧面拿到新能力反而受害；降级回归（M5-5）正是为此而设，此处实锤其价值。
+
+**异常/受限项**：
+- **M5-6② 附件回填（环境受限，未复验）**：本环境模型（glm-5.3-flash / deepseek-v4-flash）均不支持图片输入
+  （`session/attachment-invalid` / MODEL_DOES_NOT_SUPPORT_IMAGES），无法构造附件消息；附件链依赖的官方 API 面
+  （`readAttachment→{attachment,data}`、`createDrafts`、`addAttachments`、`releaseDraftAttachments`）已在评估期
+  核验在位且本轮代码未动。装图片模型后补一次即可。
+- 旧会话两条消息文本字面量为 `"undefined"`：0.1.1 时代写入的旧数据（旧日志 seq 8/23 即如此），插件如实渲染，
+  非本版引入。
+- WSL 侧模型连接失败（Connection error / TRANSPORT，重试 5/5 后回合失败关闭）：凭证/网络环境问题；`turn/end`
+  仍可靠记录，反而构成 ⑤ 的正面证据。
+- 观察项转 P1：启动预热 IIFE 未捕获拒绝 → 另立
+  [plan-warmup-unhandled-rejection.md](../plan-warmup-unhandled-rejection.md)。
+
+**验收标准对照**：1 ✓（typecheck/build、425 单测、46 探针、双 pass 装配、check:dsh 四层一致）2 ✓ 3 ✓ 4 ✓
+（保存/热更/复位/重启持久化 + describe 返回本 entry）5 ✓（并实锤修复一处旧面回归）6 ✓ 7 ✓（② 受限已记账）
+8 ✓（peer 无越界、镜像/契约字段与实装一致）。

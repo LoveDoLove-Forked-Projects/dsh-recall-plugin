@@ -23,7 +23,6 @@ docs/
 │   ├── research-competitors-2026-09.md  # 竞品六维度评估第四轮（2026-09-09，三竞品新版本，增量输入 plan-competitor-ux）
 │   ├── pending/                         # 待实施 / 实施中
 │   │   ├── plan-competitor-ux.md    # 第三轮竞品改进：交互补强与可靠性钉子（S1 已随 settings-ui 完成，其余待实施）
-│   │   ├── plan-dsh-0.1.7-adapt.md  # dsh 0.1.7-alpha.1 适配（实施中：shell 接缝换 execute / settings 换 SettingsForms，双分支已落地，M5 实弹待人工）
 │   │   ├── plan-host-seed-fork.md   # Host 自建 seed fork：撤回排队残留源头消除（H0 已实施并实弹验收：按 item id 直删；P2 矩阵与 P3 沙箱待做）
 │   │   ├── plan-p2.md               # P2 打磨项（按需挑选；P2-4/P2-5 已完成）
 │   │   └── plan-settings-ui.md      # 设置页 UI 优化 V1–V9（2026-09-04 全量实施，剩真实窄视口/键盘/读屏 3 项人工复核）
@@ -42,7 +41,8 @@ docs/
 │       ├── plan-session-only.md             # 仅撤回对话模式（execute scope：both/session-only；plan-competitor-ux U2 拆出，2026-09-18 实施 + 实弹 5/5）
 │       ├── smoke-checklist-records.md       # 冒烟测试执行记录（随清单归档）
 │       ├── pr17-review.md                   # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22 合入上游 cd9a9bd，P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验与定案）
-│       └── plan-build-root-guard.md         # 构建产物工作区根的快照护栏与残骸回收（issue #18）：复现验证 + M1/M2/M3 全部实施 + 双平台实弹 6/6、M3 实弹 4/4
+│       ├── plan-build-root-guard.md         # 构建产物工作区根的快照护栏与残骸回收（issue #18）：复现验证 + M1/M2/M3 全部实施 + 双平台实弹 6/6、M3 实弹 4/4
+│       ├── plan-dsh-0.1.7-adapt.md          # dsh 0.1.7-alpha.1 适配（2026-09-23 归档）：shell 接缝换 execute / settings 换 SettingsForms 双分支 + M5 双平台实弹全过（WSL 硬指标零 shell.run）
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿 / 性能回退已修复）

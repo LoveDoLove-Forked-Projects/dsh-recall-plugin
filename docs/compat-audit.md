@@ -42,7 +42,7 @@
 > （旧硬编码 `dsh-recall` 实测抛 `No configurable plugin entry`，正是本轮修复点）。**版本策略已同步**：6 个 `dsh-*` peer 各补 `>=0.1.7-alpha.1 <0.1.8` 段、
 > `dshReleases` 补 `0.1.7-alpha.1: compatible`、`reference/` 镜像按 tag 重拉（13 源中 4 份有差异：05/09/11/12，均非破坏性；其中重写版 12 给出的官方写法
 > ——`z.string().volatile()` + `ctx.on('loader/volatile-update', …)` 读 `config.x.get()`——与本轮实现同构）。**待人工**：双平台实弹冒烟
-> （POSIX 撤回全链、旧版 0.1.6-alpha.2 回归降级）与 `docs/plans/pending/plan-dsh-0.1.7-adapt.md` 的 M5 六项对照点。评估实证见
+> （POSIX 撤回全链、旧版 0.1.6-alpha.2 回归降级）与 `docs/plans/completed/plan-dsh-0.1.7-adapt.md` 的 M5 六项对照点（2026-09-23 实弹全过；M5-5 降级回归另实锤并修复一处旧面注册回归）。评估实证见
 > upgrade-assessments/dsh-0.1.7-alpha.1.md。
 >
 > **0.1.6-alpha.2 核验（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`；`latest`
