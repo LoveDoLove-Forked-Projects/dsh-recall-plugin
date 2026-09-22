@@ -43,7 +43,11 @@
 > `dshReleases` 补 `0.1.7-alpha.1: compatible`、`reference/` 镜像按 tag 重拉（13 源中 4 份有差异：05/09/11/12，均非破坏性；其中重写版 12 给出的官方写法
 > ——`z.string().volatile()` + `ctx.on('loader/volatile-update', …)` 读 `config.x.get()`——与本轮实现同构）。**待人工**：双平台实弹冒烟
 > （POSIX 撤回全链、旧版 0.1.6-alpha.2 回归降级）与 `docs/plans/completed/plan-dsh-0.1.7-adapt.md` 的 M5 六项对照点（2026-09-23 实弹全过；M5-5 降级回归另实锤并修复一处旧面注册回归）。评估实证见
-> upgrade-assessments/dsh-0.1.7-alpha.1.md。
+> upgrade-assessments/dsh-0.1.7-alpha.1.md。**发版核验（2026-09-23）**：插件 **2.4.1 已发布**（npm `latest`＝2.4.1，
+> GitHub Release `v2.4.1`，tag commit `4761999`）；发布前终审补 P1——settings 接线拆出 `src/host/settings-bridge.ts`
+> 并加 5 例 CI 回归钉（c3cc8a7 旧面解包回归的唯一自动化防线，`32d7c82`）。发布后 `check:upgrade` 三层全绿
+> （check:dsh 四层一致 / probe 46/46 / verify:host 双 pass），单测 430/430。遗留记账：M5-6② 附件回填待图片模型
+> 环境补验（官方 API 面已核验、代码未动）；预热 IIFE 加固另立 `docs/plans/pending/plan-warmup-unhandled-rejection.md`。
 >
 > **0.1.6-alpha.2 核验（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`；`latest`
 > 仍 0.1.5-rc.1、`next` 仍 0.1.5-rc.2），`npm install -g @deepseek-ai/dsh@alpha` 全局实装（dsh-settings 随装
