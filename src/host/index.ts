@@ -11,7 +11,8 @@
  * 接线与 store 发现/执行工具，不承载端点业务。
  */
 
-import { createConfig, Config, DEFAULTS, LEGACY_SETTINGS_NS, isLegacySettingsFace, resolveSettingsNs, unwrapConfig } from './config.js'
+import { createConfig, Config, DEFAULTS, unwrapConfig } from './config.js'
+import { installSettingsNamespace } from './settings-bridge.js'
 import { parseStoresDump, parseExcludeDump } from './dump-parse.js'
 
 // dump 解析纯函数住 dump-parse.js（避免 routes-manage 反向 import index 的
@@ -25,7 +26,7 @@ import { createRoutesCore } from './routes-core.js'
 import { createRoutesManage } from './routes-manage.js'
 import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as E from './errors.js'
-import type { HostContext, SessionQueryEngine, SettingsService } from '../types/dsh-contract.js'
+import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
 import type { Runtime, StoreInfo } from '../types/state.js'
 import type { StoreDumpInfo } from './dump-parse.js'
 import type { ResolvedConfig } from '../types/config.js'
@@ -50,7 +51,7 @@ export { Config }
 
 // config 由 cordis.patch.yml 的 insert 行 config 键下发（schema 默认值兜底），
 // 设置页「插件配置」卡片的用户覆盖经 settings namespace 热更新进 cfg
-// （见下方 installSettingsSection 接线）
+// （接线见 settings-bridge.ts 的 installSettingsNamespace）
 export function apply(ctx: HostContext, config: ResolvedConfig) {
   // unwrapConfig：0.1.7 新面下 config 的 volatile 字段是 Volatile ref（本机实测
   // apply 期 config.flag 即 ref），不过一层就解不出来——createConfig 的 typeof/
@@ -63,23 +64,9 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   const maint = createMaintenance(ctx, rt, snaps, cfg, { dumpStores })
   const state = rt.state
 
-  // ---- settings 接入：两代接缝分派 ----
-  // 新版（0.1.7+）：ctx.settings 变成 SettingsForms，整个 SettingsProvider 被
-  // 移除——installSection/register 双双缺席，三分支旧接线会静默 no-op（无异常、
-  // 无日志，namespace 永不注册、配置卡片读不到覆盖字段、保存必失败）。新面
-  // 下配置所有权在 profile：按 settings ns（= profile entry id）经
-  // describe/update/replace 读写，可写字段必须有 schema .volatile() 声明，热更
-  // 经 loader 提交 volatile 值后派发的 loader/volatile-update（值已先行提交）。
-  // 旧版（≤0.1.6）：三分支原样保留——installSettingsSection 独立函数
-  // （0.1.1-rc.2 及以前）→ SettingsProvider.installSection（0.1.2-alpha.2 起）
-  // → register 核心 API（手动复刻独立函数语义：注册 namespace、源指向 scope、
-  // 卸载回退入口 config、watch 热更新）。
-  // 分流判据为什么必须含「旧注册入口缺席」：describe/update 旧面同样有
-  // （routes-manage 一直用它们读写已注册的 namespace），只看读写方法会把
-  // 0.1.6 误判成新面——namespace 不注册即用户配置卡片失联，违反「未升级用户
-  // 不变砖」。分支判断也不能只看静态导入包（插件 node_modules 固定为最新版
-  // dsh-settings，旧版 DSH 运行时会注入旧版实例），故按运行时注入实例的实际
-  // API 分派。
+  // ---- settings 接入：hooks 与 resolved 回填留在本文件（routes-manage 的
+  // deps 消费 readSettings 活绑定，A1）；两代面分派与三条旧面注册路径在
+  // settings-bridge.ts（dshSettings 参数注入，单测可在 CI 直测注册 entry）----
   let readSettings: () => unknown = () => config
   function applyResolvedConfig(resolved: unknown): void {
     // 先解 volatile ref 再走 createConfig：新面下 resolved 的字段是 Volatile
@@ -90,61 +77,13 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     setSource: (fn: () => unknown) => { readSettings = fn },
     onChange: () => applyResolvedConfig(readSettings()),
   }
-  // 新面探针：返回可用的 ns，null = 未命中新面（交回旧三分支）。ns 解析见
-  // config.resolveSettingsNs（apply 期 describe 看不到自身，回退首候选）。
-  function newSettingsNs(settings: SettingsService | null | undefined): string | null {
-    if (!settings) return null
-    if (isLegacySettingsFace(settings)) return null
-    if (typeof settings.describe !== 'function' || typeof settings.update !== 'function') return null
-    try {
-      return resolveSettingsNs(ctx, settings)
-    } catch (error) {
-      return null
-    }
-  }
-  try {
-    // 旧面注册的 entry 必须先解 volatile ref：schemastery ≥3.18.3 的 .volatile()
-    // 是「标记即生效」——插件 node_modules 一旦解析到带 volatile 的 schemastery，
-    // 入口 config 就会被 loader 解析成 Volatile ref（与 settings 面无关，0.1.6 的
-    // 旧 provider 拿到的是同一批 ref）。旧 provider 的 installSection/register 会
-    // 用 schema 校验 entry，ref 不是合法值直接 ValidationError → namespace 永不
-    // 注册、设置卡片读写全废（M5-5 降级回归实锤：报 is not registered）。
-    // unwrapConfig 对普通值恒等（旧 schemastery 树无感），对新面 ref 解一层。
-    const legacyEntry = unwrapConfig(config)
-    if (typeof dshSettings.installSettingsSection === 'function') {
-      // 包解析到旧版 dsh-settings：独立函数辅助
-      dshSettings.installSettingsSection(ctx, LEGACY_SETTINGS_NS, Config, legacyEntry, settingsHooks)
-    } else if (typeof ctx.inject === 'function') {
-      ctx.inject(['settings'], (settingsCtx) => {
-        const settingsService = settingsCtx.settings
-        if (newSettingsNs(settingsService)) {
-          // 新面：没有 namespace 可注册（配置所有权在 profile），改挂 volatile
-          // 热更——loader 把新值提交进运行中 fiber 的 ref 后派发本事件，此刻直接
-          // 重读 config 即拿到新值（读的是同一批 ref，与 fiber.config 同对象）。
-          // ns 不缓存在这里：端点每次调用都重新解析（routes-manage），apply 期的
-          // 回退候选与端点期 describe 的交集结论可能不同。
-          ctx.on('loader/volatile-update', () => applyResolvedConfig(config))
-        } else if (typeof settingsService.installSection === 'function') {
-          // 0.1.2-alpha.2 起：settings 服务方法（inject 声明后取实例，方法
-          // 与独立函数同签名——register 语义/组合 base/卸载回退/onChange
-          // 触发全一致）
-          settingsService.installSection(ctx, LEGACY_SETTINGS_NS, Config, legacyEntry, settingsHooks)
-        } else if (typeof settingsService.register === 'function') {
-          // 0.1.1-rc.2 及以前：仅 register 核心 API，复刻独立函数接线语义
-          const scope = settingsService.register(LEGACY_SETTINGS_NS, Config, { base: legacyEntry })
-          settingsHooks.setSource(() => scope.get())
-          settingsHooks.onChange()
-          scope.watch(() => settingsHooks.onChange())
-          settingsCtx.effect(() => () => {
-            settingsHooks.setSource(() => legacyEntry)
-            settingsHooks.onChange()
-          })
-        }
-      })
-    }
-  } catch (error) {
-    rt.recordError('recall settings namespace skipped: ' + String(error))
-  }
+  // settings 接线本体（两代面分派 + 三条旧面注册路径 + 新面 volatile 热更挂接）：
+  // dshSettings 经参数注入——接线模块不 import 私有 peer，CI 单测可直测
+  // 注册 entry 的解 volatile ref 行为（c3cc8a7 回归钉）。接线抛错按 skip 记录。
+  installSettingsNamespace({
+    ctx, dshSettings, config, settingsHooks, applyResolvedConfig,
+    recordError: (message) => rt.recordError(message),
+  })
 
   // 平台门控：win32 走 PowerShell 模板，linux/darwin 走 bash 模板。
   // 其余平台干净短路：init 返回 unsupported，Client 弹一次性提示。

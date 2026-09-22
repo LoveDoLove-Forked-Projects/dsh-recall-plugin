@@ -9,11 +9,15 @@
  * 2) 两代面判据与 ns 解析（含 apply 期 describe 看不到自身时的构造性回退）；
  * 3) unwrapConfig 解 Volatile ref（不解会把配置读成默认值）；
  * 4) routes 级：config-get/set/reset 在两种面下都用解析出的 ns，ns 缺失时按
- *    RECALL_SETTINGS_UNAVAILABLE 报逃生口文案。
+ *    RECALL_SETTINGS_UNAVAILABLE 报逃生口文案；
+ * 5) 接线级：installSettingsNamespace 三条旧面注册路径收到的 entry 必须是解过
+ *    volatile ref 的普通值（c3cc8a7 回归钉——该缺陷曾从全部 CI 门禁漏出，靠
+ *    M5-5 降级实弹才抓到）。
  *
  * 说明：本文件不 import host/index.js——它裸导入 '@deepseek-ai/dsh-settings'
- * （私有 peer，CI 不装），装配级分派由 verify-host 门禁覆盖（M3-2 的「只给新面
- * 也必须装配成功」断言）。
+ * （私有 peer，CI 不装）。接线逻辑住 src/host/settings-bridge.ts（dshSettings
+ * 参数注入，不依赖该包），本文件直接 import 它覆盖注册路径；index.ts 的
+ * 装配级分派仍由 verify-host 门禁覆盖（M3-2 的「只给新面也必须装配成功」断言）。
  */
 
 import { describe, it, expect } from 'vitest'
@@ -22,8 +26,10 @@ import {
   isLegacySettingsFace,
   resolveSettingsNs,
   unwrapConfig,
+  Config,
   DEFAULTS,
 } from '../../src/host/config.js'
+import { installSettingsNamespace } from '../../src/host/settings-bridge.js'
 import { createRoutesManage } from '../../src/host/routes-manage.js'
 import * as E from '../../src/host/errors.js'
 
@@ -156,6 +162,143 @@ describe('unwrapConfig（Volatile ref 取值收口）', () => {
     expect(raw.gcSnaps).toBe(9)
     expect(raw.refillDraft).toBe(false)
     expect(raw.maxSnapshotsPerWorkspace).toBe(3)
+  })
+})
+
+// ---- 接线级：旧面注册 entry 解 volatile ref（c3cc8a7 回归钉）----
+
+// 复刻 M5-5 降级现场：schemastery ≥3.18.3 下 loader 把 volatile 标记字段解析成
+// Volatile ref 后才交给 apply（与 settings 面无关——0.1.6 旧面 DSH 同样拿到 ref）
+const ref = (value) => ({ get: () => value })
+const refConfig = () => ({
+  gcSnaps: ref(9),
+  refillDraft: ref(false),
+  maxSnapshotsPerWorkspace: ref(3),
+})
+const plainEntry = { gcSnaps: 9, refillDraft: false, maxSnapshotsPerWorkspace: 3 }
+
+// ctx 桩：inject 立即执行回调（cordis 可选注入就绪形态）；on 收集事件监听；
+// effect 立即执行并把返回值留作 disposer（cordis effect 语义）
+function makeHostCtx({ settings } = {}) {
+  const effects = []
+  const listeners = {}
+  const ctx = {
+    // 复刻 cordis fiber.entry 增补（0.1.7 起 apply 期可读）——新面 ns 解析读 options.id
+    fiber: { entry: FIBER.entry },
+    inject(names, cb) { cb({ settings, effect: (fn) => effects.push(fn()) }) },
+    on(event, listener) { (listeners[event] = listeners[event] || []).push(listener) },
+  }
+  return { ctx, effects, listeners }
+}
+
+// hooks 桩：setSource 记活绑定、onChange 触发时读当前 source——复刻 index.ts
+// 的 settingsHooks 语义（applied 与 applyResolvedConfig 共用一个数组，断言时序）
+function makeHooks() {
+  let source = null
+  const applied = []
+  return {
+    hooks: {
+      setSource: (fn) => { source = fn },
+      onChange: () => applied.push(source ? source() : undefined),
+    },
+    applied,
+  }
+}
+
+function makeDeps({ dshSettings = {}, settings, config, recordError = () => {} } = {}) {
+  const { ctx, effects, listeners } = makeHostCtx({ settings })
+  const { hooks, applied } = makeHooks()
+  const deps = {
+    ctx,
+    dshSettings,
+    config: config ?? refConfig(),
+    settingsHooks: hooks,
+    applyResolvedConfig: (value) => applied.push(value),
+    recordError,
+  }
+  return { deps, effects, listeners, applied }
+}
+
+describe('installSettingsNamespace（旧面注册 entry 解 volatile ref——c3cc8a7 回归钉）', () => {
+  it('路径 1（独立函数在位）：installSettingsSection 收到解过 ref 的普通 entry', () => {
+    const got = []
+    const { deps } = makeDeps({ dshSettings: { installSettingsSection: (...args) => got.push(args) } })
+    installSettingsNamespace(deps)
+    expect(got).toHaveLength(1)
+    const [owner, ns, schema, entry, hooks] = got[0]
+    expect(ns).toBe('dsh-recall')
+    expect(schema).toBe(Config)
+    // 回归锚点：entry 逐字段是普通值——接线若丢掉 unwrapConfig，字段是 { get }
+    // 对象，toEqual 即红（真实后果是旧 provider schema 校验入口抛、ns 永不注册）
+    expect(entry).toEqual(plainEntry)
+    expect(hooks).toBe(deps.settingsHooks)
+  })
+
+  it('路径 2（服务方法面 0.1.2-alpha.2+）：installSection 收到普通 entry，hooks 接通', () => {
+    const got = []
+    const settings = {
+      installSection: (owner, ns, schema, entry, hooks) => got.push({ ns, entry, hooks }),
+      describe: () => [{ ns: 'dsh-recall' }],
+      update: async () => {},
+    }
+    const { deps } = makeDeps({ settings })
+    installSettingsNamespace(deps)
+    expect(got).toHaveLength(1)
+    expect(got[0].ns).toBe('dsh-recall')
+    expect(got[0].entry).toEqual(plainEntry)
+    expect(got[0].hooks).toBe(deps.settingsHooks)
+  })
+
+  it('路径 3（register 核心 API 0.1.1-rc.2-）：base 是普通 entry；卸载回退 legacyEntry', () => {
+    const got = []
+    const watchFns = []
+    let scopeValue = { gcSnaps: 7 }
+    const settings = {
+      register: (ns, schema, options) => {
+        got.push({ ns, schema, options })
+        return { get: () => scopeValue, watch: (fn) => watchFns.push(fn) }
+      },
+      describe: () => [{ ns: 'dsh-recall' }],
+      update: async () => {},
+    }
+    const { deps, applied, effects } = makeDeps({ settings })
+    installSettingsNamespace(deps)
+    expect(got).toHaveLength(1)
+    expect(got[0].ns).toBe('dsh-recall')
+    // base 必须是解过 ref 的普通值（M5-5 现场：ref 进 register 的 schema 校验即抛）
+    expect(got[0].options.base).toEqual(plainEntry)
+    // 注册期语义：source 指向 scope、onChange 先触发一次（读到 scope 值）、watch 已挂
+    expect(applied).toEqual([{ gcSnaps: 7 }])
+    expect(watchFns).toHaveLength(1)
+    // 卸载语义：effect disposer 把 source 回退到 legacyEntry（同样解过 ref）再触发
+    expect(effects).toHaveLength(1)
+    scopeValue = undefined
+    effects[0]()
+    expect(applied[1]).toEqual(plainEntry)
+  })
+
+  it('新面（无旧注册入口）：不注册 namespace，volatile-update 重读入口 config', () => {
+    const { deps, listeners, applied } = makeDeps({ settings: makeModernSettings() })
+    installSettingsNamespace(deps)
+    expect(listeners['loader/volatile-update']).toHaveLength(1)
+    // ref 形态的 config 原样交给 applyResolvedConfig：读同一批 ref 是有意设计，
+    // 解 ref 是 applyResolvedConfig 自己的事（index.ts / settings-bridge 各司其职）。
+    // 断引用相等而非深比较——{ get } 是闭包，跨实例深比较必假红。
+    listeners['loader/volatile-update'][0]()
+    expect(applied).toHaveLength(1)
+    expect(applied[0]).toBe(deps.config)
+  })
+
+  it('接线抛错 → recordError 收到 skip 文案（catch 兜底，不让装配炸）', () => {
+    const errors = []
+    const { deps } = makeDeps({
+      dshSettings: { installSettingsSection: () => { throw new Error('boom') } },
+      recordError: (message) => errors.push(message),
+    })
+    installSettingsNamespace(deps)
+    expect(errors).toHaveLength(1)
+    expect(errors[0]).toContain('recall settings namespace skipped')
+    expect(errors[0]).toContain('boom')
   })
 })
 

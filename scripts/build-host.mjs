@@ -15,7 +15,7 @@ const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const HOST_ENTRIES = [
   'index', 'store', 'snapshots', 'maintenance', 'routes-core', 'routes-manage',
-  'config', 'diagnostics', 'errors', 'dump-parse', 'session-info', 'exclude-patterns',
+  'config', 'settings-bridge', 'diagnostics', 'errors', 'dump-parse', 'session-info', 'exclude-patterns',
   'scripts.pwsh', 'scripts.posix',
 ]
 
