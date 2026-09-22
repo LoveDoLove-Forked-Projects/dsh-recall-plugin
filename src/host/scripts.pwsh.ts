@@ -84,9 +84,20 @@ function dropGitlinksBlock() {
 // Get-ChildItem -Force；阈值按调用注入（store.maxFileBytes，config 可调）。
 // PF-9 合批：命中路径先收进 List 再多路径合参（每批 100，与 purgeTags
 // 分块同款纪律），update-index 子进程数 N → N/100。
-// 依赖外层已定义的 $git/$g/$root。
+// 目录级跳过：exclude 表里 basename 形式（无通配、无内部斜杠、非 ! 反选）
+// 的 pattern 按 gitignore 语义匹配任意层级同名目录，遍历时整棵子树跳过
+// （node_modules/target/dist 等大目录不再被全树扫）。复杂 pattern 不参与
+// 跳过、回退全扫该子树——多扫不漏检，fail-open 语义不变。
+// 依赖外层已定义的 $git/$g/$root；$lines 由前置的 excludeSyncBlock 定义。
 function oversizeBlock(maxBytes: number): string {
   return [
+    '$oversizeSkip = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)',
+    'foreach ($p in $lines) {',
+    '  $t = "$p".Trim()',
+    "  if (-not $t -or $t.StartsWith('#') -or $t.StartsWith('!')) { continue }",
+    "  $t = $t -replace '/$', ''",
+    "  if ($t -notmatch '[*?\\[\\]/\\\\]') { [void]$oversizeSkip.Add($t) }",
+    '}',
     '$oversizeStack = [System.Collections.Generic.Stack[string]]::new()',
     '$oversizeStack.Push($root)',
     '$oversizeRel = [System.Collections.Generic.List[string]]::new()',
@@ -99,7 +110,9 @@ function oversizeBlock(maxBytes: number): string {
     "        $oversizeRel.Add($f.FullName.Substring($root.Length + 1).Replace('\\','/'))",
     '      }',
     '    }',
-    '    foreach ($d in $di.EnumerateDirectories()) { $oversizeStack.Push($d.FullName) }',
+    '    foreach ($d in $di.EnumerateDirectories()) {',
+    '      if (-not $oversizeSkip.Contains($d.Name)) { $oversizeStack.Push($d.FullName) }',
+    '    }',
     '  } catch {}',
     '}',
     'for ($i = 0; $i -lt $oversizeRel.Count; $i += 100) {',

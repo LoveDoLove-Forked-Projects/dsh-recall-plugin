@@ -81,9 +81,25 @@ function dropGitlinksBlock() {
 // 批次（规避 ARG_MAX）等价 win32 侧显式 100 条/批；-0 保证路径不分裂；
 // xargs 失败/空输入 || true 兜住（fail-open 语义与逐条版一致，残留条目
 // 不进 index 的代价由下次快照幂等重试）。
+// 目录级跳过：exclude 表 basename 形式 pattern（见 pwsh 版同注释）转
+// find 的 \( -name A -o -name B \) -prune -o 前缀，大目录整棵子树不进扫描；
+// 复杂 pattern 回退全扫，fail-open 语义不变。$new_exc 由前置的
+// excludeSyncBlock 定义（同脚本作用域）。
 function oversizeBlock(maxBytes: number): string {
   return [
-    'find "$root" -type f -size +' + String(maxBytes || MAX_FILE_BYTES) + 'c -print0 2>/dev/null | while IFS= read -r -d \'\' f; do',
+    'oversize_args=()',
+    'while IFS= read -r line || [ -n "$line" ]; do',
+    "  t=${line%$'\\r'}",
+    '  t="${t#"${t%%[![:space:]]*}"}"; t="${t%"${t##*[![:space:]]}"}"',
+    '  if [ -z "$t" ]; then continue; fi',
+    '  case "$t" in \\#* | \\!*) continue ;; esac',
+    '  t="${t%/}"',
+    '  case "$t" in *\\** | *\\?* | *\\[* | */*) continue ;; esac',
+    '  if [ ${#oversize_args[@]} -eq 0 ]; then oversize_args+=(-name "$t"); else oversize_args+=(-o -name "$t"); fi',
+    'done <<< "$new_exc"',
+    'oversize_prune=()',
+    'if [ ${#oversize_args[@]} -gt 0 ]; then oversize_prune=("\\(" "${oversize_args[@]}" "\\)" -prune -o); fi',
+    'find "$root" "${oversize_prune[@]}" -type f -size +' + String(maxBytes || MAX_FILE_BYTES) + 'c -print0 2>/dev/null | while IFS= read -r -d \'\' f; do',
     '  printf \'%s\\0\' "${f#"$root"/}"',
     "done | xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" update-index --force-remove -- 2>/dev/null || true",
   ].join('\n')

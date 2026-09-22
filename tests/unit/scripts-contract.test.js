@@ -286,6 +286,17 @@ describe('关键模板结构断言', () => {
     // PF-9 方案明确「保留不动」的（gitlink 常态 0 条，无收益）
     expect(posixSnap).not.toContain('update-index --force-remove -- "$rel"')
   })
+
+  it('oversize 目录级跳过：两平台按 exclude basename pattern 跳过大目录子树', () => {
+    // pwsh：HashSet skip 集 + 压栈过滤（依赖前置 excludeSyncBlock 的 $lines）
+    const pwshSnap = pwsh.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect(pwshSnap).toContain('$oversizeSkip')
+    expect(pwshSnap).toContain('if (-not $oversizeSkip.Contains($d.Name)) { $oversizeStack.Push($d.FullName) }')
+    // posix：find \( -name A \) -prune -o 前缀（依赖前置 excludeSyncBlock 的 $new_exc）
+    const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect(posixSnap).toContain('oversize_prune')
+    expect(posixSnap).toContain('"\\(" "${oversize_args[@]}" "\\)" -prune -o')
+  })
 })
 
 describe('F-S1 rescue tag 前缀契约（跨函数）', () => {

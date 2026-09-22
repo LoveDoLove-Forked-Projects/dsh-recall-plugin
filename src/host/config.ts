@@ -16,16 +16,26 @@
 import Schema from '@deepseek-ai/schemastery'
 import type { ResolvedConfig, RawConfig } from '../types/config.js'
 
+// 排除表必须同时覆盖两种存储目录名：降级存储是项目内 .dsh-recall-snapshots/，
+// 而 home 存储目录名是 dsh-recall-snapshots/（无点）——工作区 root 恰为
+// HOME 时（容器 root=/root 等）它落在工作区内，漏排除会让 git add -A
+// 把影子仓库自己吞进去、快照全部失败（issue #6）。
+// 编译产物目录与常见二进制/压缩包默认排除：快照只按 maxFileBytes 挡单个
+// 大文件，挡不住 target/ 这类上万小文件、整体 GB 级的构建产物——它们既拖慢
+// 每次快照的 add/遍历，也会让对象库膨胀到 GB 级（实测 3.35 GB loose）。
+const BASE_EXCLUDES = [
+  '.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/',
+  'target/', 'dist/', 'build/', 'out/', 'coverage/', '.next/', '.nuxt/', '.output/', '.cache/', '.gradle/',
+  '*.exe', '*.dll', '*.pdb', '*.so', '*.dylib', '*.msi',
+  '*.zip', '*.7z', '*.rar', '*.tar', '*.tar.gz', '*.iso',
+]
+
 export const Config = Schema.object({
   gcSnaps: Schema.number().default(50).description('每积累多少条快照触发一次 git gc'),
   gcHours: Schema.number().default(24).description('距上次 gc 超过多少小时触发（与条数先到先触发）'),
   maxFileBytes: Schema.number().default(104857600).description('超过该字节数的文件不进快照、不被回退触碰'),
   maxSnapshotsPerWorkspace: Schema.number().default(500).description('每个工作区保留的最大快照数，超限删除最旧的'),
-  // 排除表必须同时覆盖两种存储目录名：降级存储是项目内 .dsh-recall-snapshots/，
-  // 而 home 存储目录名是 dsh-recall-snapshots/（无点）——工作区 root 恰为
-  // HOME 时（容器 root=/root 等）它落在工作区内，漏排除会让 git add -A
-  // 把影子仓库自己吞进去、快照全部失败（issue #6）
-  baseExcludes: Schema.array(Schema.string()).default(['.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/']).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）'),
+  baseExcludes: Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）'),
   refillDraft: Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框'),
   snapshotEnabled: Schema.boolean().default(true).description('启用消息快照（关闭后不再新建，已有快照仍可撤回）'),
   archiveOriginal: Schema.boolean().default(true).description('撤回后归档原会话（关闭后原会话保留在列表中）'),
@@ -37,9 +47,8 @@ export const Config = Schema.object({
 // 形状——schema 增删字段时 ResolvedConfig（types/config.ts）同步改，漏改
 // DEFAULTS 编译期报错（消灭「改默认值两处同步改」的人工同步面）。
 // DEFAULTS 同时供 config-reset 降级路径（settings.replace 不可用时的兜底，
-// 见 index.js config-reset 端点）——默认值只此一份，避免重置与 schema 漂移。
-const BASE_EXCLUDES = ['.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/']
-
+// 见 index.js config-reset 端点）——默认值只此一份（BASE_EXCLUDES 同时供
+// schema default 引用），避免重置与 schema 漂移。
 export const DEFAULTS: ResolvedConfig = {
   gcSnaps: 50,
   gcHours: 24,

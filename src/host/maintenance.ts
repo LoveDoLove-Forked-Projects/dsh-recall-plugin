@@ -17,6 +17,17 @@
 // 每 gcSnaps 条快照或距上次 gc gcHours 小时，先到先触发。默认「50 条或
 // 24 小时」——重活（gc）一天至多一次的量级，轻会话用户也不会等太久。
 
+// gc 失败重试退避（毫秒）：失败（超时/磁盘/杀软）只把 gcLastAt 回拨到
+// 「此刻 - gcHours + 退避」，让下一轮在退避窗口后自动重试，而不是推进完整
+// gcHours 周期。实测教训：失败推进整天周期会让对象库滚雪球——每次 gc 都更
+// 重、更容易超时，最终永远完不成（数 GB loose、in-pack 恒 0）。退避期间
+// gcCount 条数门槛照常生效，不会退化成「每条消息都重试」。
+const GC_RETRY_BACKOFF_MS = 1800000
+
+// 单次 gc 超时（毫秒）：GB 级 loose 对象库 repack 可超 10 分钟，被杀的 gc
+// 永远完不成；30 分钟给大库足够余量。gc 与快照同在串行队列，只影响维护节奏。
+const GC_TIMEOUT_MS = 1800000
+
 import type { Runtime, StoreInfo, SnapshotInfo } from '../types/state.js'
 import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
 import type { ResolvedConfig } from '../types/config.js'
@@ -213,8 +224,9 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
 
   // 维护核心（节流判定 + 清理 + gc）：force 供设置页「立即 gc」手动触发，
   // 跳过阈值检查但仍走同一条串行队列调用方——与快照天然互斥的约束不变。
-  // 失败也推进 gcLastAt：gc 失败往往是环境性的（磁盘/杀软），不推进时间戳
-  // 会让后续每条消息都重试一次重量级 gc，把队列堵住。
+  // 失败不推进完整 gcHours 周期：只回拨到退避窗口后重试（GC_RETRY_BACKOFF_MS），
+  // 避免「失败→整天不重试→对象继续堆积→下次更易失败」的滚雪球；也不清空
+  // 时间戳——那会让后续每条消息都重试一次重量级 gc，把队列堵住。
   async function runGc(sessionId: string, force: boolean): Promise<boolean> {
     const root = await rt.resolveRoot(sessionId)
     if (!root) return false
@@ -226,6 +238,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     state.gcCount.set(store.git, count)
     if (!force && count < config.gcSnaps && now - last < config.gcHours * 3600000) return false
     state.gcCount.set(store.git, 0)
+    let ok = false
     try {
       await sweepDeletedSessions()
       // P1-3：总量上限清理（sweep 之后、gc 之前）——与快照在同一条串行
@@ -234,11 +247,12 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
       await enforceLimits()
       // S2-3：按时间保留清理（与条数上限维度各自独立，同条串行队列）
       await enforceRetention()
-      await rt.runShell(S.gcScript(store, state.gitExe), { timeoutMs: 600000, stdoutMaxBytes: 4096 })
+      await rt.runShell(S.gcScript(store, state.gitExe), { timeoutMs: GC_TIMEOUT_MS, stdoutMaxBytes: 4096 })
+      ok = true
     } catch (error) {
       rt.recordError('recall maintenance failed: ' + String(error))
     }
-    state.gcLastAt.set(store.git, Date.now())
+    state.gcLastAt.set(store.git, ok ? Date.now() : Date.now() - config.gcHours * 3600000 + GC_RETRY_BACKOFF_MS)
     return true
   }
 
@@ -270,12 +284,13 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     let done = 0
     for (const store of stores) {
       try {
-        await rt.runShell(S.gcScript(store, state.gitExe), { timeoutMs: 600000, stdoutMaxBytes: 4096 })
+        await rt.runShell(S.gcScript(store, state.gitExe), { timeoutMs: GC_TIMEOUT_MS, stdoutMaxBytes: 4096 })
         done++
+        state.gcLastAt.set(store.git, Date.now())
       } catch (error) {
         rt.recordError('recall gc failed for ' + (store && store.git) + ': ' + String(error))
+        state.gcLastAt.set(store.git, Date.now() - config.gcHours * 3600000 + GC_RETRY_BACKOFF_MS)
       }
-      state.gcLastAt.set(store.git, Date.now())
       state.gcCount.set(store.git, 0)
     }
     return true
