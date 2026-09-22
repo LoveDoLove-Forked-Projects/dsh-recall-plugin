@@ -11,7 +11,7 @@
  * 接线与 store 发现/执行工具，不承载端点业务。
  */
 
-import { createConfig, Config, DEFAULTS } from './config.js'
+import { createConfig, Config, DEFAULTS, isLegacySettingsFace, resolveSettingsNs, unwrapConfig } from './config.js'
 import { parseStoresDump, parseExcludeDump } from './dump-parse.js'
 
 // dump 解析纯函数住 dump-parse.js（避免 routes-manage 反向 import index 的
@@ -25,7 +25,7 @@ import { createRoutesCore } from './routes-core.js'
 import { createRoutesManage } from './routes-manage.js'
 import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as E from './errors.js'
-import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
+import type { HostContext, SessionQueryEngine, SettingsService } from '../types/dsh-contract.js'
 import type { Runtime, StoreInfo } from '../types/state.js'
 import type { StoreDumpInfo } from './dump-parse.js'
 import type { ResolvedConfig } from '../types/config.js'
@@ -52,7 +52,10 @@ export { Config }
 // 设置页「插件配置」卡片的用户覆盖经 settings namespace 热更新进 cfg
 // （见下方 installSettingsSection 接线）
 export function apply(ctx: HostContext, config: ResolvedConfig) {
-  const cfg = createConfig(config)
+  // unwrapConfig：0.1.7 新面下 config 的 volatile 字段是 Volatile ref（本机实测
+  // apply 期 config.flag 即 ref），不过一层就解不出来——createConfig 的 typeof/
+  // pickNumber 判定会把 ref 当非法值静默回退默认值，profile 行里的用户配置全丢。
+  const cfg = createConfig(unwrapConfig(config))
   const rt = createRuntime(ctx, cfg)
   const snaps = createSnapshots(ctx, rt, cfg)
   // dumpStores 是下方同作用域的函数声明（提升可见）：M3 起「立即 gc」按磁盘
@@ -60,25 +63,44 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   const maint = createMaintenance(ctx, rt, snaps, cfg, { dumpStores })
   const state = rt.state
 
-  // ---- settings namespace「dsh-recall」：设置页「插件配置」分区正规接入 ----
-  // 官方 settings 辅助的版本兼容：0.1.2-alpha.2 起独立函数 installSettingsSection
-  // 移除、改为 SettingsProvider.installSection 方法（bash-local 等官方插件同款
-  // 迁移）；0.1.2-alpha.1 及以前用独立函数。二者语义一致：settings 服务挂载后
-  // 以真 Config schema 注册 namespace、组合 base 取入口 config；服务卸载时源
-  // 回退入口 config。解析层 = schema 默认 → 组合 base → 用户文档（设置卡片
-  // 写入、dsh-settings 持久化），变更经 watch 热更新进运行中的 cfg。
-  // 分支判断不能只看静态导入包（插件 node_modules 固定为最新版 dsh-settings，
-  // 旧版 DSH 运行时会注入旧版实例），要按运行时注入实例的实际 API 分派：
-  // installSection 方法（0.1.2-alpha.2）或 register 核心 API（0.1.1-rc.2 及
-  // 以前，此时手动复刻独立函数接线语义——注册 namespace、源指向 scope、
+  // ---- settings 接入：两代接缝分派 ----
+  // 新版（0.1.7+）：ctx.settings 变成 SettingsForms，整个 SettingsProvider 被
+  // 移除——installSection/register 双双缺席，三分支旧接线会静默 no-op（无异常、
+  // 无日志，namespace 永不注册、配置卡片读不到覆盖字段、保存必失败）。新面
+  // 下配置所有权在 profile：按 settings ns（= profile entry id）经
+  // describe/update/replace 读写，可写字段必须有 schema .volatile() 声明，热更
+  // 经 loader 提交 volatile 值后派发的 loader/volatile-update（值已先行提交）。
+  // 旧版（≤0.1.6）：三分支原样保留——installSettingsSection 独立函数
+  // （0.1.1-rc.2 及以前）→ SettingsProvider.installSection（0.1.2-alpha.2 起）
+  // → register 核心 API（手动复刻独立函数语义：注册 namespace、源指向 scope、
   // 卸载回退入口 config、watch 热更新）。
+  // 分流判据为什么必须含「旧注册入口缺席」：describe/update 旧面同样有
+  // （routes-manage 一直用它们读写已注册的 namespace），只看读写方法会把
+  // 0.1.6 误判成新面——namespace 不注册即用户配置卡片失联，违反「未升级用户
+  // 不变砖」。分支判断也不能只看静态导入包（插件 node_modules 固定为最新版
+  // dsh-settings，旧版 DSH 运行时会注入旧版实例），故按运行时注入实例的实际
+  // API 分派。
   let readSettings: () => unknown = () => config
   function applyResolvedConfig(resolved: unknown): void {
-    Object.assign(cfg, createConfig(resolved && typeof resolved === 'object' ? resolved : {}))
+    // 先解 volatile ref 再走 createConfig：新面下 resolved 的字段是 Volatile
+    // 对象，不解会把用户覆盖值静默读成默认值（见 unwrapConfig 注释）。
+    Object.assign(cfg, createConfig(unwrapConfig(resolved)))
   }
   const settingsHooks = {
     setSource: (fn: () => unknown) => { readSettings = fn },
     onChange: () => applyResolvedConfig(readSettings()),
+  }
+  // 新面探针：返回可用的 ns，null = 未命中新面（交回旧三分支）。ns 解析见
+  // config.resolveSettingsNs（apply 期 describe 看不到自身，回退首候选）。
+  function newSettingsNs(settings: SettingsService | null | undefined): string | null {
+    if (!settings) return null
+    if (isLegacySettingsFace(settings)) return null
+    if (typeof settings.describe !== 'function' || typeof settings.update !== 'function') return null
+    try {
+      return resolveSettingsNs(ctx, settings)
+    } catch (error) {
+      return null
+    }
   }
   try {
     if (typeof dshSettings.installSettingsSection === 'function') {
@@ -87,7 +109,14 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     } else if (typeof ctx.inject === 'function') {
       ctx.inject(['settings'], (settingsCtx) => {
         const settingsService = settingsCtx.settings
-        if (typeof settingsService.installSection === 'function') {
+        if (newSettingsNs(settingsService)) {
+          // 新面：没有 namespace 可注册（配置所有权在 profile），改挂 volatile
+          // 热更——loader 把新值提交进运行中 fiber 的 ref 后派发本事件，此刻直接
+          // 重读 config 即拿到新值（读的是同一批 ref，与 fiber.config 同对象）。
+          // ns 不缓存在这里：端点每次调用都重新解析（routes-manage），apply 期的
+          // 回退候选与端点期 describe 的交集结论可能不同。
+          ctx.on('loader/volatile-update', () => applyResolvedConfig(config))
+        } else if (typeof settingsService.installSection === 'function') {
           // 0.1.2-alpha.2 起：settings 服务方法（inject 声明后取实例，方法
           // 与独立函数同签名——register 语义/组合 base/卸载回退/onChange
           // 触发全一致）

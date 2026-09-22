@@ -245,23 +245,51 @@ export interface SettingsScope<T> {
 export interface SettingsDescriptor {
   ns?: string
   user?: Record<string, unknown>
+  value?: Record<string, unknown>
+  revision?: number
 }
 
+// 两代 settings 接缝共用这一形状：≤0.1.6 的 SettingsProvider 与 ≥0.1.7 的
+// SettingsForms 都有 describe/update/replace，区别在注册入口——新面整个
+// SettingsProvider 被移除（installSection/register 双双缺席），配置所有权移到
+// profile（configEditor，按 entry id 寻址 + volatile 门槛）。故 installSection/
+// register 声明为可选，分流判据是它们的缺席（见 host/index.ts settings 接线）。
 export interface SettingsService {
-  installSection<T>(owner: unknown, ns: string, schema: unknown, entry: T, hooks: SettingsSectionHooks<T>): void
-  register<T>(ns: string, schema: unknown, options?: unknown): SettingsScope<T>
+  installSection?<T>(owner: unknown, ns: string, schema: unknown, entry: T, hooks: SettingsSectionHooks<T>): void
+  register?<T>(ns: string, schema: unknown, options?: unknown): SettingsScope<T>
   describe?(): SettingsDescriptor[]
-  update?(ns: string, patch: Record<string, unknown>): Promise<unknown>
-  replace?(ns: string, value: unknown): Promise<unknown>
+  update?(ns: string, patch: Record<string, unknown>, expectedRevision?: number): Promise<unknown>
+  replace?(ns: string, value: unknown, expectedRevision?: number): Promise<unknown>
+  mutate?(ns: string, ops: unknown[], expectedRevision?: number): Promise<unknown>
+  // 新面独有：只控制「自动页」策略，不是注册 namespace 的入口（插件不消费）
+  configure?(presentation: unknown, owner?: unknown): () => void
   writable?: boolean
 }
 
 // ---- Host 插件 ctx（cordis 4：服务先 inject 声明才能 ctx.<name> 访问，I10）----
 
+// Loader 条目（Fiber.entry 增补，可选：无 Loader 挂载时缺席）。
+// - options.id：containing entry tree 内的局部 id，**settings 面寻址用的就是
+//   它**（C2：官方 write/describe 都按 row.options.id 匹配），本机 0.1.7 实测
+//   插件 bundle patch 的 insert 行 id 为 'recall'；
+// - id：getter，含父 tree 归属前缀（'include:recall'，EntryTree.sep=':'）。
+export interface HostEntry {
+  id?: string
+  options?: { id?: string; name?: string }
+}
+
+export interface HostFiber {
+  entry?: HostEntry | null
+  state?: number
+}
+
 export interface HostContext {
   shell: ShellExecutor
   sessions: SessionStore
   agents: AgentRegistry
+  // 0.1.7 起 cordis 在 Context 上增补 fiber（apply 内可读）；旧版缺席，
+  // 消费侧一律判空（settings ns 解析用 entry.options.id）。
+  fiber?: HostFiber
   get<T = unknown>(name: string): T | undefined
   inject(names: string[], callback: (ctx: InjectedContext) => void): unknown
   on(event: string, listener: (session: Session, event: SessionEvent) => void): unknown

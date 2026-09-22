@@ -10,6 +10,11 @@ declare module '@deepseek-ai/schemastery' {
   export interface SchemaChain<T> {
     default(value: T): SchemaChain<T>
     description(text: string): SchemaChain<T>
+    // schemastery ≥3.18.3 才有的原型方法：标了 volatile 的字段才被 0.1.7 的
+    // settings 面收进可编辑表单（volatileForm 读 schema.meta.volatile）。声明
+    // 为可选是事实——3.18.2 及以前不存在，运行时必须 feature-detect
+    // （host/config.ts withVolatile），不能直接调用。
+    volatile?(): SchemaChain<T>
   }
   export interface SchemaObject<T extends Record<string, unknown>> {
     // 运行时是活 schema 实例（cordis 校验 + settings 注册双角色），

@@ -30,17 +30,132 @@ const BASE_EXCLUDES = [
   '*.zip', '*.7z', '*.rar', '*.tar', '*.tar.gz', '*.iso',
 ]
 
+// ---- dsh 0.1.7 settings 接缝（SettingsForms）适配：三个模块级纯函数 ----
+// 新面只把「schema 标了 .volatile()」的字段收进可编辑表单（volatileForm 读
+// schema.meta.volatile），其余字段既读不到也写不进；而 `.volatile()` 只有
+// schemastery ≥3.18.3 才有（0.1.6-alpha.2 随装 3.18.2）。故必须 feature-detect
+// 而不能直接调用——老 dsh 上模块加载即崩是硬失败；探不到就原样返回，meta
+// 多标一个 volatile 对老版 settings 是无害的未知元数据。
+export function withVolatile<T>(field: T): T {
+  const schema = field as { volatile?: () => T }
+  return typeof schema.volatile === 'function' ? schema.volatile() : field
+}
+
 export const Config = Schema.object({
-  gcSnaps: Schema.number().default(50).description('每积累多少条快照触发一次 git gc'),
-  gcHours: Schema.number().default(24).description('距上次 gc 超过多少小时触发（与条数先到先触发）'),
-  maxFileBytes: Schema.number().default(104857600).description('超过该字节数的文件不进快照、不被回退触碰'),
-  maxSnapshotsPerWorkspace: Schema.number().default(500).description('每个工作区保留的最大快照数，超限删除最旧的'),
-  baseExcludes: Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）'),
-  refillDraft: Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框'),
-  snapshotEnabled: Schema.boolean().default(true).description('启用消息快照（关闭后不再新建，已有快照仍可撤回）'),
-  archiveOriginal: Schema.boolean().default(true).description('撤回后归档原会话（关闭后原会话保留在列表中）'),
-  retentionDays: Schema.number().default(0).description('按天数保留快照，超期自动删除；0 表示不启用'),
+  gcSnaps: withVolatile(Schema.number().default(50).description('每积累多少条快照触发一次 git gc')),
+  gcHours: withVolatile(Schema.number().default(24).description('距上次 gc 超过多少小时触发（与条数先到先触发）')),
+  maxFileBytes: withVolatile(Schema.number().default(104857600).description('超过该字节数的文件不进快照、不被回退触碰')),
+  maxSnapshotsPerWorkspace: withVolatile(Schema.number().default(500).description('每个工作区保留的最大快照数，超限删除最旧的')),
+  baseExcludes: withVolatile(Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）')),
+  refillDraft: withVolatile(Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框')),
+  snapshotEnabled: withVolatile(Schema.boolean().default(true).description('启用消息快照（关闭后不再新建，已有快照仍可撤回）')),
+  archiveOriginal: withVolatile(Schema.boolean().default(true).description('撤回后归档原会话（关闭后原会话保留在列表中）')),
+  retentionDays: withVolatile(Schema.number().default(0).description('按天数保留快照，超期自动删除；0 表示不启用')),
 })
+
+// 旧面判据（≤0.1.6 的 SettingsProvider）：配置所有权在插件——namespace 由
+// installSection/register 注册，ns 是注册时给的字面量 'dsh-recall'。新面
+// （0.1.7 SettingsForms）整个 Provider 被移除，两个入口都不在，ns 变成 profile
+// entry id。分流与 ns 候选都用这一条判据（index.ts 同源引用，避免两处漂移）。
+export function isLegacySettingsFace(settings: unknown): boolean {
+  const svc = settings as { installSection?: unknown; register?: unknown } | null | undefined
+  if (!svc) return false
+  return typeof svc.installSection === 'function' || typeof svc.register === 'function'
+}
+
+// settings ns 解析（0.1.7 的 ns = profile entry id，不是注册出来的 namespace 名）。
+// 官方只有一条匹配式：configEditor.entries() 里找 row.options.id === ns。本机
+// 0.1.7 实测：插件的 profile 行 id 是 bundle patch 的 insert 行 id（'recall'），
+// 而 entry.id 是带父 tree 前缀的 'include:recall'（EntryTree.sep = ':'）——两者
+// 不同，故候选按 options.id → 全 id 排序，并先与 describe() 返回的 ns 集合求
+// 交集（那是唯一权威的「官方认得的值」，端点期走这条）。
+// 交集为空**不等于**新面不可用：describe() 跳过 fiber.state !== 2 的条目，而
+// apply 期本插件自身 fiber 还在 LOADING，自己的 ns 必然不在列表里（本机实测
+// apply 期 11 条 / settled 后 17 条且含自身）。此时取 options.id——官方
+// write/describe 都用它寻址，对 Loader 挂载的条目是构造性正确的；真不可写会由
+// 官方在端点调用时抛错，卡片可见失败而不是静默退化。
+// 历史字面量 'dsh-recall' 只在旧面参与候选（旧面 ns 就是它），新面下它永远不在
+// describe 里、也不该被猜——无 entry 又无旧面注册入口时返回 null（「ns 缺失」的
+// 诚实信号：此时没有任何可寻址的条目，端点按 RECALL_SETTINGS_UNAVAILABLE 报
+// 逃生口提示，而不是拿一个猜出来的 ns 去撞官方错误）。
+export function resolveSettingsNs(ctx: SettingsNsContext | null | undefined, settings: unknown): string | null {
+  const entry = ctx && ctx.fiber ? ctx.fiber.entry : null
+  const entryIds: string[] = []
+  for (const candidate of [entry && entry.options ? entry.options.id : null, entry ? entry.id : null]) {
+    if (typeof candidate === 'string' && candidate && entryIds.indexOf(candidate) < 0) entryIds.push(candidate)
+  }
+  const legacy = isLegacySettingsFace(settings)
+  const candidates = legacy ? entryIds.concat(['dsh-recall']) : entryIds
+  const known = describeNamespaces(settings)
+  for (const candidate of candidates) {
+    if (known.indexOf(candidate) >= 0) return candidate
+  }
+  if (entryIds.length) return entryIds[0]
+  return legacy ? 'dsh-recall' : null
+}
+
+// describe() 的 ns 集合（best-effort：服务缺席/方法报错都按「无交集」处理，
+// 调用方的候选回退不依赖它成功）。
+function describeNamespaces(settings: unknown): string[] {
+  const svc = settings as { describe?: () => unknown } | null | undefined
+  if (!svc || typeof svc.describe !== 'function') return []
+  try {
+    const list = svc.describe()
+    const out: string[] = []
+    for (const row of Array.isArray(list) ? list : []) {
+      const ns = row && (row as { ns?: unknown }).ns
+      if (typeof ns === 'string' && ns) out.push(ns)
+    }
+    return out
+  } catch (error) {
+    return []
+  }
+}
+
+export interface SettingsNsContext {
+  fiber?: { entry?: { id?: string; options?: { id?: string } } | null } | null
+}
+
+// cfg 取值收口（0.1.7 的 volatile 字段在 apply 拿到的是 Volatile<T> ref，不
+// unwrap 会把 cfg.gcSnaps 读成 { get() } 对象——表现为「配置读成空」）。
+// 判定用 duck-type（typeof v.get === 'function'）而不引入 cosmokit 依赖：
+// package.json 无 dependencies、host 构建 bundle:false 裸 import 逐字透传，
+// 新增运行时依赖要赌宿主提升；Volatile 形状是 frozen 的 { get() }（cosmokit
+// createVolatile），duck-type 足够且零依赖。
+// 解一层即止：9 个字段的 volatile 都标在字段节点上（baseExcludes 标在数组节点，
+// 取出来就是字符串数组），不再向下递归——多层递归会把用户数据里的同形对象
+// { get() {...} } 误判成 ref 并吞掉。
+export function unwrapConfig(raw: unknown): RawConfig {
+  const source = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {}
+  const out: Record<string, unknown> = {}
+  for (const key of Object.keys(source)) out[key] = unwrapOnce(source[key])
+  return out as RawConfig
+}
+
+function unwrapOnce(value: unknown): unknown {
+  if (isVolatileRef(value)) return (value as { get(): unknown }).get()
+  if (Array.isArray(value)) return value.map((item) => (isVolatileRef(item) ? (item as { get(): unknown }).get() : item))
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {}
+    const entries = value as Record<string, unknown>
+    for (const key of Object.keys(entries)) {
+      const item = entries[key]
+      out[key] = isVolatileRef(item) ? (item as { get(): unknown }).get() : item
+    }
+    return out
+  }
+  return value
+}
+
+function isVolatileRef(value: unknown): boolean {
+  return Boolean(value) && typeof (value as { get?: unknown }).get === 'function'
+}
+
+function isPlainObject(value: unknown): boolean {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const proto = Object.getPrototypeOf(value)
+  return proto === Object.prototype || proto === null
+}
 
 // schema 默认值的运行时镜像：settings 服务未组装时 createConfig 直接以
 // 入口 config 解析，这组兜底与 Config 保持一致。以 ResolvedConfig 标注钉住

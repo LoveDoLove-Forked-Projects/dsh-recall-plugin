@@ -9,6 +9,7 @@
 
 import { isSafetySnapshotId } from './snapshots.js'
 import { parseExcludeDump } from './dump-parse.js'
+import { resolveSettingsNs } from './config.js'
 import type { Runtime, SharedState, StoreInfo } from '../types/state.js'
 import type { HostContext, SessionQueryEngine, SettingsService, SessionLogSnapshot } from '../types/dsh-contract.js'
 import type { ResolvedConfig } from '../types/config.js'
@@ -322,6 +323,9 @@ export function createRoutesManage(deps: RoutesManageDeps) {
 
     // 设置页「插件配置」卡片读配置：resolved 全量值 + 用户已覆盖字段 + env
     // 锁定字段（环境变量优先级最高）+ 可写性（只读 provider 禁存）。
+    // ns 不写死：0.1.7 的 settings ns 是 profile entry id（本机实测 'recall'），
+    // ≤0.1.6 才是注册出来的 namespace 'dsh-recall'——统一由 resolveSettingsNs
+    // 按 describe 交集解析（解析不到时按「无覆盖」读，卡片仍展示 resolved 值）。
     'config-get': async (): Promise<ConfigGetResponse> => {
       const envLocks = {
         gcSnaps: Boolean(process.env && process.env.DSH_RECALL_GC_SNAPS),
@@ -333,7 +337,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         const settings = ctx.get<SettingsService>('settings')
         if (settings && typeof settings.describe === 'function') {
           const list = settings.describe()
-          const ours = (Array.isArray(list) ? list : []).find((d) => d && d.ns === 'dsh-recall')
+          const ns = resolveSettingsNs(ctx, settings)
+          const ours = ns ? (Array.isArray(list) ? list : []).find((d) => d && d.ns === ns) : null
           if (ours && ours.user && typeof ours.user === 'object') overridden = ours.user
           writable = settings.writable !== false
         }
@@ -358,7 +363,10 @@ export function createRoutesManage(deps: RoutesManageDeps) {
     },
 
     // 设置页「插件配置」卡片存配置：白名单字段 + 类型清洗后经 settings.update
-    // 写进用户层，watch 链路把新值热更新进 cfg，无需重启。
+    // 写进用户层（旧面）或 profile entry（新面），热更链路把新值更新进 cfg，
+    // 无需重启。ns 取解析结果——未解析到时与「服务不可用」同一出口：文案保留
+    // 「按 id: recall 覆盖配置」的逃生口（改 profile 的 cordis.patch.yml 仍是
+    // 任何版本下都能生效的兜底路径）。
     'config-set': async (args: unknown): Promise<ConfigSetResponse> => {
       const patch = args && (args as { patch?: unknown }).patch && typeof (args as { patch?: unknown }).patch === 'object'
         ? (args as { patch: Record<string, unknown> }).patch
@@ -389,11 +397,12 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       if (!Object.keys(clean).length) return { ok: false, code: E.RECALL_EMPTY_PATCH, message: '没有可写入的配置字段' }
       let settings: SettingsService | null | undefined = null
           try { settings = ctx.get<SettingsService>('settings') } catch (error) { settings = null }
-      if (!settings || typeof settings.update !== 'function') {
+      const ns = settings ? resolveSettingsNs(ctx, settings) : null
+      if (!settings || !ns || typeof settings.update !== 'function') {
         return { ok: false, code: E.RECALL_SETTINGS_UNAVAILABLE, message: '设置服务不可用：请在 profile 的 cordis.patch.yml 按 id: recall 覆盖配置' }
       }
       try {
-        await settings.update('dsh-recall', clean)
+        await settings.update(ns, clean)
       } catch (error) {
         const se = error as { message?: string } | null | undefined
         return { ok: false, code: E.RECALL_SETTINGS_WRITE_FAILED, message: '配置写入失败：' + String(se && se.message ? se.message : error) }
@@ -646,14 +655,15 @@ export function createRoutesManage(deps: RoutesManageDeps) {
     'config-reset': async (): Promise<ConfigResetResponse> => {
       let settings: SettingsService | null | undefined = null
       try { settings = ctx.get<SettingsService>('settings') } catch (error) { settings = null }
-      if (!settings || typeof settings.update !== 'function') {
+      const ns = settings ? resolveSettingsNs(ctx, settings) : null
+      if (!settings || !ns || typeof settings.update !== 'function') {
         return { ok: false, code: E.RECALL_SETTINGS_UNAVAILABLE, message: '设置服务不可用：请在 profile 的 cordis.patch.yml 按 id: recall 覆盖配置' }
       }
       try {
         if (typeof settings.replace === 'function') {
-          await settings.replace('dsh-recall', {})
+          await settings.replace(ns, {})
         } else {
-          await settings.update('dsh-recall', Object.assign({}, DEFAULTS, { baseExcludes: DEFAULTS.baseExcludes.slice() }) as unknown as Record<string, unknown>)
+          await settings.update(ns, Object.assign({}, DEFAULTS, { baseExcludes: DEFAULTS.baseExcludes.slice() }) as unknown as Record<string, unknown>)
         }
       } catch (error) {
         const re = error as { message?: string } | null | undefined
