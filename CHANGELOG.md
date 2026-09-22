@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 修复
+
+- **CI 单测缺 `@deepseek-ai/schemastery` 致 4 个测试文件收集失败**：`src/host/config.ts` 在运行时裸导入 `@deepseek-ai/schemastery`（Config schema 本体），但它此前只是 peerDependency——本机靠工作区 junction 解析所以本地全绿，CI `npm ci --legacy-peer-deps` 不装 peer 即 `ERR_MODULE_NOT_FOUND`。M2 起 manage-list/manage-list-stale/manage-usage/settings-bridge 四个单测文件经 routes-manage/config 链传递依赖 config.ts，而 0.1.7 适配批次（M1 起）当天才首次推送过 CI，问题首次暴露。修复＝schemastery 入 devDependencies（`^3.18.3`，与 `.volatile()` feature-detect 的下限对齐；peer 声明 `^3.18.1` 不动）。**对 2.4.1 已发布包零影响**：生产环境 schemastery 由宿主 dsh 提供，此缺包只影响 CI/裸克隆环境的单测。AGENTS.md junction 约定同步更新（schemastery 不再需要 junction；npm install 会修剪 dsh-settings junction，已记录重建方法）。
+
 ## [2.4.1] - 2026-09-23
 
 ### 修复

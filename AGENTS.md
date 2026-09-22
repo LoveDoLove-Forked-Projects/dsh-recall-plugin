@@ -180,8 +180,9 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
   * 判断当前是哪种模式：看 profile package.json 依赖字段即可；本机验证新发布版本前先确认（npm 模式下跑的还是旧版）。
 
-* **工作区 junction**：`node_modules/@deepseek-ai/{schemastery,dsh-settings}` 是 junction（Host 直接 import，ESM 按真实路径解析；link: 开发安装的真实路径是工作区，必须自备）；注意 dsh-settings 0.1.1-rc.2 未发布公共 npm，只能从 dsh 安装目录链接。junction 丢失时重建：
-  `cmd /c mklink /J node_modules\@deepseek-ai\schemastery "%APPDATA%\npm\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\schemastery"`（dsh-settings 同理）。
+* **工作区 junction**：`node_modules/@deepseek-ai/dsh-settings` 是 junction（Host 直接 import，ESM 按真实路径解析；link: 开发安装的真实路径是工作区，必须自备）；注意 dsh-settings 0.1.1-rc.2 未发布公共 npm，只能从 dsh 安装目录链接。junction 丢失时重建：
+  `cmd /c mklink /J node_modules\@deepseek-ai\dsh-settings "%APPDATA%\npm\node_modules\@deepseek-ai\dsh\node_modules\@deepseek-ai\dsh-settings"`（PowerShell 下用 `New-Item -ItemType Junction -Target <目标>`，mklink 的 %APPDATA% 在 PS 传参下不展开）。
+  `@deepseek-ai/schemastery` 已入 devDependencies（npm 直接装，不再需要 junction）；**npm install 会把 dsh-settings junction 当 extraneous 修剪掉**，装完依赖发现 link 模式起不来时先重建它。
 
 * **冒烟路径**：中文路径工作区 → 发消息（出快照）→ 改文件 → 撤回（清单正确、文件恢复、对话回退、标题不变）→ 设置页快照管理（树形展开/折叠、叶子消息内容、三级/批量删除、立即 gc）。完整待办清单（各批次实弹验收项）见 [docs/plans/completed/smoke-checklist.md](docs/plans/completed/smoke-checklist.md)（2026-08-29 七节全部通过；新批次验收项追加新节）；执行记录（环境/结果/发现/发版判定）见同目录 [smoke-checklist-records.md](docs/plans/completed/smoke-checklist-records.md)。
 

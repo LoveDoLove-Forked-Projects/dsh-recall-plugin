@@ -17,7 +17,9 @@ jobs:
           cache: npm
       - name: Install dev deps only
         # 项目 peerDeps 是私有 @deepseek-ai 包（CI 不可得），--legacy-peer-deps
-        # 跳过、只装 devDependencies（vitest）；发布仍走现有手动流程。
+        # 跳过、只装 devDependencies；devDependencies 现含 vitest 与
+        # @deepseek-ai/schemastery（config.ts 运行时裸导入它，单测经
+        # routes-manage/settings-bridge 传递依赖，缺包即 ERR_MODULE_NOT_FOUND）。
         run: npm ci --legacy-peer-deps
       - name: Typecheck
         # 置于单测之前：tests/types 编译期断言（M3 起）漏跑即假绿，顺序写死
