@@ -7,10 +7,10 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
-> **0.1.7-alpha.1 核验（2026-09-22）——破坏性版本，待改码**：**npm 已发布**（dist-tag `alpha` 指向本版，
+> **0.1.7-alpha.1 核验与适配（2026-09-22）——破坏性版本，两处接缝已双分支适配**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
 > 全局实装。**包布局变化**：官方包从全局扁平位收进 `dsh/node_modules/@deepseek-ai/*`；插件工作区 junction 已随之指向
-> 新路径，`@deepseek-ai/{schemastery,dsh-settings}` 实测解析正常（I11 无破坏）。三层门禁：`test:probe` **35/39（4 红）**、
+> 新路径，`@deepseek-ai/{schemastery,dsh-settings}` 实测解析正常（I11 无破坏）。**适配前**三层门禁：`test:probe` **35/39（4 红）**、
 > `verify:host` 装配断言通过（唯一警告＝方言探针降级）、`typecheck` + `npm test` 391/391 通过（插件自身逻辑零回归）。
 > **两处硬破坏**：
 > ① **shell 接缝换代**——`ShellExecutor` 删除 `run`/`start` 抽象方法，只剩 `resolve` + `execute(spec): Promise<ShellExecution>`
@@ -27,15 +27,22 @@
 > `sessionQuery.observeSession`、`boundary = atSeq ?? latestCompletedPrefixBoundary()`、校验 `events[boundary].seq === boundary`
 > 否则 `session/fork-unavailable`、`buildForkSeed` = 前缀 + `session/end-seed` + 开放轮合成 closer、`inheritedEventCount = boundary + 1`），
 > 3 条切点探针红；**语义上插件用法等价**——`atSeq` 由「吸附到 ≥atSeq 的首条 turn/end」改为「包含式真实事件 seq」，插件传的本就是
-> 目标消息前最近一次 `turn/end` 的 seq，两种语义结果一致（I35 根治保持）。**零交集/在位项**：事件集 54→**60**（新增
+> 目标消息前最近一次 `turn/end` 的 seq，两种语义结果一致（I35 根治保持）。**零交集/在位项**：事件集 54→**59**（新增
 > `deliverables/presented`、`developer/message`、`image/offload`、`subagent/catalog`、`workspace/changes`；插件只扫 `user/message`+`turn/end`，
 > Session V4 迁移保留原始 message id）；`UserMessage.id`/`content` 与 `ImageBlock`/`FileBlock` 的 `attachment.attachmentId` 不变
 > （release notes「仅存于自定义事件的附件不再自动读取/导出」针对插件自定义事件，本插件不写会话事件 → I34 附件链零影响，
 > `readAttachment`→`{attachment,data}`、`createDrafts`/`releaseDraftAttachments`/`input.shell().actions.{setDraft,addAttachments}`、`updateQueue` 全在位）；
 > `DshBundleManifest.patch: string | string[]`（单文件 patch 写法保留）；`plugins.bundle.config` 仍在；`ISessions.fork` 签名逐字不变、
 > `ISessions.open` 仍缺席、`uiWorkspace.openSession` 与归档集合判据（I37）探针绿；`snapshotEvents(fromSeq?, toSeqExclusive?)`/`eventAt`/`ownEvents` 在位
-> （后两者仍 `@deprecated`）；`readBytes` 迁移与插件零交集（插件文件读写全走自建 shell 模板）。**版本策略：本轮不同步 peer 范围与 `dshReleases`**
-> ——0.1.7-alpha.1 不声明 compatible，待 shell/settings 两处迁移落地 + 实弹冒烟后再补 `>=0.1.7-alpha.1 <0.1.8` 段。评估实证见
+> （后两者仍 `@deprecated`）；`readBytes` 迁移与插件零交集（插件文件读写全走自建 shell 模板）。**适配落地（同批次，两次独立提交可分别 revert）**：
+> shell 接缝双分支（`runViaExecutor` 按运行时方法分流 + `exitCode === null` 分级，见 **I38**）与 settings 双分支（`SettingsForms` 按 profile entry id 寻址 +
+> `Config` 标 volatile + ref 解包热更，见 **I39**）；探针按新实现重钉、verify-host 桩补「只给新面」的第二 pass、台账补 I38/I39。**门禁复核**：
+> `typecheck` 通过、`npm test` 425/425、`test:probe` 46/46、`verify:host` 两个 pass 全过；实机在装 0.1.7-alpha.1 上验证——方言探针回归 `pwsh`、
+> `describe()` 已返回本插件 entry（`ns=recall`、`applies: live`、writable）、`settings.update('recall', …)` 生效且 `replace(ns, {})` 复位干净
+> （旧硬编码 `dsh-recall` 实测抛 `No configurable plugin entry`，正是本轮修复点）。**版本策略已同步**：6 个 `dsh-*` peer 各补 `>=0.1.7-alpha.1 <0.1.8` 段、
+> `dshReleases` 补 `0.1.7-alpha.1: compatible`、`reference/` 镜像按 tag 重拉（13 源中 4 份有差异：05/09/11/12，均非破坏性；其中重写版 12 给出的官方写法
+> ——`z.string().volatile()` + `ctx.on('loader/volatile-update', …)` 读 `config.x.get()`——与本轮实现同构）。**待人工**：双平台实弹冒烟
+> （POSIX 撤回全链、旧版 0.1.6-alpha.2 回归降级）与 `docs/plans/pending/plan-dsh-0.1.7-adapt.md` 的 M5 六项对照点。评估实证见
 > upgrade-assessments/dsh-0.1.7-alpha.1.md。
 >
 > **0.1.6-alpha.2 核验（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`；`latest`

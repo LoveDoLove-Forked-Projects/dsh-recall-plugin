@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-recall-plugin?style=flat-square&label=npm&color=3178C6)](https://www.npmjs.com/package/dsh-recall-plugin)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-recall-plugin?style=flat-square&label=downloads&color=1F883D)](https://www.npmjs.com/package/dsh-recall-plugin)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-[![DSH](https://img.shields.io/badge/DSH-0.1.6--alpha.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.6-alpha.2)
+[![DSH](https://img.shields.io/badge/DSH-0.1.7--alpha.1-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-alpha.1)
 ---
 在任意一条你发过的消息下方点「↶ 撤回」——**工作区文件和对话历史一起回到那条消息发出之前的状态**。
 ---
@@ -67,7 +67,7 @@
 
 ## 安装
 
-前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.2-alpha.1` 至 `0.1.6-alpha.2`（peerDependencies 为按 minor 版本线开窗 `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未验证的新 minor 线（如 0.1.7）仍被拦截）。`0.1.1-rc.2` 及更早不再声明支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
+前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.2-alpha.1` 至 `0.1.7-alpha.1`（peerDependencies 为按 minor 版本线开窗 `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未核验的新 minor 线仍被拦截）。**0.1.7-alpha.1 是破坏性版本**（`ShellExecutor` 的 `run`/`start` 换成 `execute().result()`；settings 面换成 `SettingsForms`、按 profile 条目 id 寻址并要求字段标 `.volatile()`），插件已做**双分支共存适配**——同一次发布同时兼容 0.1.2–0.1.6 各线段与 0.1.7，老版本 DSH 上的行为不变。`0.1.1-rc.2` 及更早不再声明支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
 
 
 - DSH 官方插件命令：安装并自动挂载进 web profile
@@ -168,9 +168,9 @@ pnpm install
 
 ### 测试
 
-- `npm test`：纯逻辑单测（vitest，28 个文件 361 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
-- `npm run test:probe`：官方 API 字段探针（依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle`、`listSessions` 记录结构、`AgentRegistry` 等字段，违反即红；
-- `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件，断言 inject 声明、端点注册、Config schema、卸载清理，装配回归发版前即可拦截；
+- `npm test`：纯逻辑单测（vitest，34 个文件 425 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm run test:probe`：官方 API 字段探针（依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
+- `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件跑两个 pass（旧面桩 + 只给新面的桩），断言 inject 声明、端点注册、Config schema、卸载清理与 settings 面分派，装配回归发版前即可拦截；
 - `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）。
 - CI（GitHub Actions）跑 `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + 产物新鲜度统一校验（`npm run build && git diff --exit-code lib/`；探针与装配门禁只在有 dsh 的机器跑）。
 

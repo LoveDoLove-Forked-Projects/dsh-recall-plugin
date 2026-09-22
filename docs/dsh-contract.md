@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.6-alpha.2**（tag `dsh-v0.1.6-alpha.2` commit `ddefc45`，npm dist-tag `alpha` 指向本版、`latest` 仍为 0.1.5-rc.1、`next` 仍为 0.1.5-rc.2；`npm install -g @deepseek-ai/dsh@alpha` 全局实装；前序 0.1.6-alpha.1 `0a15e36`、0.1.5-rc.2 `fb2c4b9` 等基线均已并入；Session format 为 V3。alpha.2 的行为级变化：① 旧设置页插件 tab 整体移除，`settings.plugin.item` slot 死亡，新增 ui-plugin-manager 的 `plugins.item`/`plugins.bundle.config`/`plugins.row.config` 体系（插件设置卡片已迁挂 `plugins.bundle.config`，key=bundle 包名）；② client sessions 服务改 retain/release 引用模型（多实例共存），`binding()` 语义收窄为「只借已 retain 的会话」——插件附件链 typeof 探测降级兜住；③ 插件依赖运行时解析 + 插件管理页运行时卸载。fork 切点 `cut = boundary.seq + 1`（I35 根治）在 alpha.2 保持——见 compat-audit 头部 alpha.2 核验段）
+> * 对应版本：**dsh 0.1.7-alpha.1**（tag `dsh-v0.1.7-alpha.1` commit `c36a83f`，2026-09-22 发布；npm dist-tag `alpha` 指向本版、`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3；`npm install -g @deepseek-ai/dsh@alpha` 全局实装；前序 0.1.6-alpha.2 `ddefc45`、0.1.6-alpha.1 `0a15e36`、0.1.5-rc.2 `fb2c4b9` 等基线均已并入；Session format 为 **V4**）。**破坏性版本，两处接缝换代（本轮已双分支适配）**：① **shell 执行接缝**——`ShellExecutor` 删 `run`/`start`，改 `resolve` + `execute(spec): Promise<ShellExecution>`（结果走 `result()`），详见 §1.1 shell；② **settings 面**——`dsh-settings` 导出面只剩 `SettingsForms`，ns 变成 profile entry id、可写字段需 schema 标 `.volatile()`，详见 §1.1 settings。另：包布局收进 `dsh/node_modules/@deepseek-ai/*`（I11 无破坏）、fork 实现重写（边界语义等价，I35 保持）、事件集 54→59（§四）、Session 日志升级 V4 并附批量迁移工具（保留原始 message id，插件以 id 为主键、以真实 `e.seq` 推 cutSeq，免疫）。**核验与实施记录见 compat-audit 头部 0.1.7 段与 I38/I39**）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -25,14 +25,32 @@
 两版逐字节一致，0.1.2-alpha.1 零变更（2026-08-30 双 tag diff 实证：`dsh-v0.1.1-rc.2 ↔ dsh-v0.1.2-alpha.1` 的 types.ts 零差异）。插件全量使用面：
 
 ```ts
+// ≤0.1.6（旧面）：前台执行走 run
 interface ShellExecutor {
   resolve(request: ShellExecRequest): ShellExecSpec   // 填充并封顶必填字段
   run(spec: ShellExecSpec): Promise<ShellRunResult>   // 前台执行，stdout 截断可判定
   // 另有 start()：后台进程句柄（插件未用）
 }
+// ≥0.1.7（新面）：run/start 抽象方法被删除，改为 handle + result()
+interface ShellExecutor {
+  resolve(request: ShellExecRequest): ShellExecSpec
+  execute(spec: ShellExecSpec): Promise<ShellExecution>   // 准备期超时返回已 settled 的 handle
+}
+interface ShellExecution extends ShellProcess {
+  result(): Promise<ShellRunResult>   // 只在基础设施失败（spawn 未产出进程）时 reject
+}
 // 插件 ShellExecRequest 字段：command / timeoutMs / stdoutMaxBytes / stdin / sandboxPolicy{mode:'danger-full-access', workspaceRoot}
-// 插件 ShellRunResult 读取字段：exitCode / stdout.text / stdout.truncated / stderr.text
+// 插件 ShellRunResult 读取字段：exitCode（**可为 null**：准备期超时/信号终止）/ stdout.text / stdout.truncated / stderr.text / timedOut
 ```
+
+**插件对策（双分支，I38）**：`src/host/store.ts` 的 `runViaExecutor(shell, spec)` 按运行时方法探测分流
+（`typeof shell.run === 'function'` → 旧通道；否则 `execute` + `result()`），两分支共用同一 spec 构造与
+同一失败分级——peer 保留 0.1.2–0.1.6 各线段，单路径会把老用户全断；也不能只看「宿主里装的 dsh-shell 版本」
+（宿主注入的是它自己的执行器实例）。失败分级：`exitCode === null` 且无 stderr（或 first-cause `timedOut`
+在场）→「命令准备期超时」；有 stderr / 非零退出 → 回显 stderr 原文（无 stderr 时由兜底落 `exit <code>`）。
+探针见 `tests/probe/api-surface.test.js`（抽象面无 `run`/`start`、`result()` 与可空 `exitCode`）与
+`tests/unit/store-shell-execute.test.js`。**方言面（I36）不受影响**：`ShellExecutor` 仍无「我是 bash 还是
+pwsh」的字段，行为探针 + 直连 powershell.exe 兜底照旧。
 
 #### sessions —— 会话注册表（`core/session/src/index.ts`，`SessionStore`）
 
@@ -117,7 +135,38 @@ class SettingsProvider {
 }
 ```
 
-签名与 0.1.1-rc.2 一致（entry 为组合 `base`、hooks.setSource + onChange）；内部 `ctx.inject(['settings'])` 后 `settings.register(ns, schema, ...)`。**0.1.2-alpha.2 破坏性变更：独立函数** **`installSettingsSection`** **移除**，官方插件（bash-local/pwsh-local 等）改 `ctx.inject(['settings'], sctx => sctx.settings.installSection(ctx, ns, schema, entry, hooks))`。插件 `src/host/index.ts` 双版本兼容：`typeof dshSettings.installSettingsSection === 'function'` 时走旧函数，否则走 `settings.installSection`（verify-host 桩同步提供 installSection）。
+```ts
+// ≥0.1.7（新面）：整个 SettingsProvider 移除，只剩 SettingsForms
+class SettingsForms extends Service {
+  describe(options?): SettingsDescriptor[]            // ns = entry.options.id；无 volatile 字段的 entry 被跳过
+  update(ns, patch, expectedRevision?): Promise<void> // ns 不存在抛 No configurable plugin entry "<ns>"
+  replace(ns, section, expectedRevision?): Promise<void>   // 恢复默认路径
+  mutate(ns, ops, expectedRevision?): Promise<void>
+  configure(presentation, owner?): () => void         // 只控制「自动页」策略，非注册入口
+  get writable(): boolean
+}
+```
+
+签名与 0.1.1-rc.2 一致（entry 为组合 `base`、hooks.setSource + onChange）；内部 `ctx.inject(['settings'])` 后 `settings.register(ns, schema, ...)`。**0.1.2-alpha.2 破坏性变更：独立函数** **`installSettingsSection`** **移除**，官方插件（bash-local/pwsh-local 等）改 `ctx.inject(['settings'], sctx => sctx.settings.installSection(ctx, ns, schema, entry, hooks))`。插件 `src/host/index.ts` 双版本兼容：`typeof dshSettings.installSettingsSection === 'function'` 时走旧函数，否则走 `settings.installSection`。
+
+**0.1.7-alpha.1 换代（I30/I39，本轮已双分支适配）**：`installSection`/`register`/`installSettingsSection`
+**全树零命中**（旧三分支在新面上静默 no-op），配置所有权移到 profile：
+
+* **ns = profile entry id**——`configEditor.entries().find(row => row.options.id === ns)` 是官方唯一匹配式；
+  本机实测插件的行 id 是 bundle patch 的 insert 行 id **`recall`**（`entry.id` 则是带父 tree 前缀的
+  `include:recall`），`describe()` 也按 `entry.options.id` 报 ns，并跳过 `fiber.state !== 2` 的条目
+  （**apply 期看不到自身**是常态——插件因此保留 `options.id` 回退候选，见 `host/config.ts resolveSettingsNs`）。
+* **volatile 门槛**：只有 schema 标 schemastery `.volatile()` 的字段被 `describe()` 收录、被
+  `update/replace` 写入（无 volatile 字段的 entry 被跳过、写入抛 `has no volatile fields`）。`.volatile()`
+  只在 schemastery ≥3.18.3 存在（0.1.6-alpha.2 随装 3.18.2），故插件 **feature-detect**（`withVolatile`）。
+* **热更**：`cordis-plugin-loader` 的 `Entry.update → _commitVolatile` 把新值 commit 进运行中 fiber 的 ref，
+  再经**只对目标 fiber 可见**的上下文派发 `loader/volatile-update(paths)` → 插件只能在自己 `ctx` 上监听、
+  收到后重读 `config`（与 `fiber.config` 同对象）并解一层 Volatile ref（`unwrapConfig`，duck-type
+  `typeof v.get === 'function'`，不引入 cosmokit 依赖）。
+* **分派判据**：旧注册入口是否缺席——只看「`describe`/`update` 是函数」分不了流（旧面同样有），
+  误判会让 0.1.6 上的 namespace 不注册（卡片失联）。
+* 官方 Cookbook 佐证：`docs/reference/12-cookbook-settings-card.md`（0.1.7 重写版）给出的官方写法就是
+  `z.string().volatile()` + `ctx.on('loader/volatile-update', …)` 读 `config.x.get()`。
 
 #### conversation —— 会话级输入服务（**0.1.2 新增**，插件可选探测）
 
@@ -202,7 +251,7 @@ interface PluginConfigViewProps { readonly view: 'summary' | 'page' }
 
 * `'turn/end'`：关闭 turn，携带 `e.seq`（单调递增事件序号）；`resolveCutSeq` 取目标消息之前最近一次
 
-事件信封：`{ type, seq, time, data, ignorable? }`；持久化读路径对未知类型 **fail-closed**——拒绝解释含集合外类型的日志（防新版日志被旧版错误重建，known-event-types.ts:8-17）；插件只扫描上述两种类型，官方新增类型对扫描逻辑天然向后兼容。**0.1.2-alpha.2 恢复：0.1.2-alpha.1 曾移除信封** **`ignorable?: true`** **字段（未知类型从「带标记可跳过」改为一律拒绝、fail-closed 取代 ignorable），alpha.2 回滚该变更**——已装产物实证（`dsh-session/lib/index.js` 事件校验 `event.ignorable !== void 0 && event.ignorable !== true` 分支、`dsh-session-persistence` 未知类型按 ignorable 区分拒绝/跳过）恢复 0.1.1-rc.2 语义；插件只扫 `user/message` + `turn/end`，不读 ignorable，无影响。另 `tool/call` 的 `callId` 类型由 `CallId` 改名为 `ToolCallId`（插件不读 tool/call，无影响）。
+事件信封：`{ type, seq, time, data, ignorable? }`；持久化读路径对未知类型 **fail-closed**——拒绝解释含集合外类型的日志（防新版日志被旧版错误重建，known-event-types.ts:8-17）；插件只扫描上述两种类型，官方新增类型对扫描逻辑天然向后兼容。**0.1.2-alpha.2 恢复：0.1.2-alpha.1 曾移除信封** **`ignorable?: true`** **字段（未知类型从「带标记可跳过」改为一律拒绝、fail-closed 取代 ignorable），alpha.2 回滚该变更**——已装产物实证（`dsh-session/lib/index.js` 事件校验 `event.ignorable !== void 0 && event.ignorable !== true` 分支、`dsh-session-persistence` 未知类型按 ignorable 区分拒绝/跳过）恢复 0.1.1-rc.2 语义；插件只扫 `user/message` + `turn/end`，不读 ignorable，无影响。另 `tool/call` 的 `callId` 类型由 `CallId` 改名为 `ToolCallId`（插件不读 tool/call，无影响）。**0.1.7-alpha.1（Session format V4）**：事件集 54→**59**（新增 `deliverables/presented`、`developer/message`、`image/offload`、`subagent/catalog`、`workspace/changes`，见 §四），并附 V3→V4 批量迁移工具、兼容部分 V3 会话缺轮次结束记录。插件按 `type` 精确匹配（只认 `user/message` + `turn/end`），新增类型天然被忽略；迁移保留原始 message id，插件以 id 为主键定位消息、`scanCutSeq` 用实际 `e.seq` 而非数组下标——坐标系与 fork 同源，免疫。**V3 缺 `turn/end` 的容忍是正向变化**：`resolveCutSeq` 依赖该记录，官方让它更可靠。
 
 ### 1.4 环境约束（0.1.2-alpha.1 实测）
 
@@ -306,29 +355,32 @@ interface PluginConfigViewProps { readonly view: 'summary' | 'page' }
 
 **client 半专用**（Host 不可见）：`connection`、`locale`、`modules`/`clientModules`、`slots`/`uiRenderer`、`layout`、`uiSession`、`uiConversation`/`conversation`、`commandUi`、`inputTriggers`、`modelDirectories`、`chatFileMentions`、`settingsSchema`/`settingsScope`、`theme`、`uiWorkspace`、`timer`（cordis-client-runner 提供，声明后可用 `ctx.timeout` 等计时动词）
 
-## 四、会话事件类型全集（54 种）
+## 四、会话事件类型全集（59 种）
 
-已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.5-alpha.1）：
+已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.7-alpha.1；`dsh-session/lib/types/known-event-types.js`，由官方 `gen-persistence-catalog` 生成）：
 
 ```
 agent-preset/selected   agent/inbox/spliced    approval/asked      approval/decided
 approval/policy         assistant/attempt      assistant/message   command/done
 command/run             compaction/end         compaction/prune    compaction/start
-compaction/summary      feedback/message-delete feedback/message-put feedback/record
-goal/change             hook/invoked           hook/result         llm/retry
+compaction/summary      deliverables/presented(*新)                developer/message(*新)
+feedback/message-delete feedback/message-put  feedback/record     goal/change
+hook/invoked            hook/result            image/offload(*新)  llm/retry
 llm/retry-started       model/selection        permission/preset   plan/mode
 request/context         request/header         sandbox/mode        schedule/change
 session-log-deepseek/delivery-accepted         session/end-seed    session/title
 session/title-llm-request                      step/end            step/start
-subagent/descriptor     subagent/model-selection-policy            system/message(*新)
-team/member             team/message/delivered team/message/queued team/task
-todo/write              tool-workflow/agent-end                    tool-workflow/agent-start
-tool-workflow/run-end   tool-workflow/run-start                    tool/call
-tool/ptc-dispatch(*改)  tool/ptc-dispatch-start(*改)               tool/result
-turn/end                turn/start             user/message        web/deepseek-search-llm-request
+subagent/catalog(*新)   subagent/descriptor    subagent/model-selection-policy
+system/message(*新)     team/member            team/message/delivered
+team/message/queued     team/task              todo/write          tool-workflow/agent-end
+tool-workflow/agent-start                      tool-workflow/run-end
+tool-workflow/run-start                        tool/call           tool/ptc-dispatch(*改)
+tool/ptc-dispatch-start(*改)                   tool/result         turn/end
+turn/start              user/message           web/deepseek-search-llm-request
+workspace/changes(*新)
 ```
 
-0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**0.1.5-alpha.1（Session format v3）三处变化**：① 新增 `system/message`（系统提示词纳入消息历史，取代 `request/header` 的 `header.system` 字段）；② `tool/code-dispatch`/`tool/code-dispatch-start` 更名为 `tool/ptc-dispatch`/`tool/ptc-dispatch-start`（PTC 词汇规范化，读取侧 V2→V3 迁移会把旧 `ptc-dispatch` 重命名回 `code-dispatch` 供旧消费方，但 v3 原生写入用 `ptc-dispatch`）；③ 新增 `feedback/message-put`/`feedback/message-delete`（反馈独立提交）。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v3 对旧 v0/v1/v2 日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后密集重映射语义（V2→V3 会插入 `system/message` 事件并 remap seq，但保留原始 message id——插件以 id 为主键定位消息、以恢复后 seq 推导 cutSeq，坐标系与 fork 同源，不受影响）。
+0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**0.1.5-alpha.1（Session format v3）三处变化**：① 新增 `system/message`（系统提示词纳入消息历史，取代 `request/header` 的 `header.system` 字段）；② `tool/code-dispatch`/`tool/code-dispatch-start` 更名为 `tool/ptc-dispatch`/`tool/ptc-dispatch-start`（PTC 词汇规范化，读取侧 V2→V3 迁移会把旧 `ptc-dispatch` 重命名回 `code-dispatch` 供旧消费方，但 v3 原生写入用 `ptc-dispatch`）；③ 新增 `feedback/message-put`/`feedback/message-delete`（反馈独立提交）。**0.1.7-alpha.1（Session format v4）新增 5 种**：`deliverables/presented`、`developer/message`、`image/offload`、`subagent/catalog`、`workspace/changes`（另有 V3→V4 批量迁移工具；「部分 V3 会话缺轮次结束记录」的兼容属正向，`resolveCutSeq` 依赖的 `turn/end` 更可靠）。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v3/v4 对旧日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后密集重映射语义（V2→V3 会插入 `system/message` 事件并 remap seq，但保留原始 message id——插件以 id 为主键定位消息、以恢复后 seq 推导 cutSeq，坐标系与 fork 同源，不受影响）。
 
 ## 五、内置 Tool 包清单（19 个）
 
