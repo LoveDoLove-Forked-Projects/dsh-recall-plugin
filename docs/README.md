@@ -25,8 +25,7 @@ docs/
 │   │   ├── plan-competitor-ux.md    # 第三轮竞品改进：交互补强与可靠性钉子（S1 已随 settings-ui 完成，其余待实施）
 │   │   ├── plan-host-seed-fork.md   # Host 自建 seed fork：撤回排队残留源头消除（H0 已实施并实弹验收：按 item id 直删；P2 矩阵与 P3 沙箱待做）
 │   │   ├── plan-p2.md               # P2 打磨项（按需挑选；P2-4/P2-5 已完成）
-│   │   ├── plan-settings-ui.md      # 设置页 UI 优化 V1–V9（2026-09-04 全量实施，剩真实窄视口/键盘/读屏 3 项人工复核）
-│   │   └── pr17-review.md           # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22；P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验，待 PR 合入上游后归档）
+│   │   └── plan-settings-ui.md      # 设置页 UI 优化 V1–V9（2026-09-04 全量实施，剩真实窄视口/键盘/读屏 3 项人工复核）
 │   └── completed/                       # 已实施（原地保留实施记录与验收依据，完成不删除）
 │       ├── plan-p0.md                   # P0 安全洞堵补（已实施，待发版）
 │       ├── plan-p1.md                   # P1 工程补课
@@ -40,7 +39,8 @@ docs/
 │       ├── smoke-checklist.md               # 冒烟测试待办清单（八节全部通过：2026-08-29 七节 + 2026-09-18 追加第八节）
 │       ├── plan-shell-dialect-win32.md      # win32 shell 方言冲突修复（issue #15，2026-09-16 实施并随 2.3.22 发版）：方言探针 + 直连 powershell.exe 通道
 │       ├── plan-session-only.md             # 仅撤回对话模式（execute scope：both/session-only；plan-competitor-ux U2 拆出，2026-09-18 实施 + 实弹 5/5）
-│       └── smoke-checklist-records.md       # 冒烟测试执行记录（随清单归档）
+│       ├── smoke-checklist-records.md       # 冒烟测试执行记录（随清单归档）
+│       └── pr17-review.md                   # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22 合入上游 cd9a9bd，P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验与定案）
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿 / 性能回退已修复）

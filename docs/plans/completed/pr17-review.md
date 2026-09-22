@@ -1,6 +1,6 @@
 # PR #17 审查：gc 失败退避 / oversize 跳过排除目录 / baseExcludes 加宽
 
-> 状态：审查完成（Linux 侧实机验证 + Windows 侧实弹复核）；PR 已合并进本地 main，P0/P1/P2-1/P2-2/P2-3 已修复并复验，P2-4/P2-5 已核验并定案（见末节）；仅剩版本号待发版时 bump
+> 状态：已完成并归档（2026-09-22）。PR #17 已合入上游 main（merge commit `cd9a9bd`），修复与文档提交 `1c270eb` / `874ae0d` 已推送、CI 绿；P0/P1/P2-1 已修复并实弹复验，P2-2/P2-3 已同步，P2-4/P2-5 已核验并定案（见末节）；仅剩版本号待发版时 bump
 > 对象：[PR #17](https://github.com/limbo947/dsh-recall-plugin/pull/17)（`fix/snapshot-io-storm` → `main`，1 commit，14 文件 +266/-43，2026-09-22）
 > 审查环境：Linux x86_64（bash 5.2.21 / GNU find 4.9.0），PR 分支 worktree 实跑
 
