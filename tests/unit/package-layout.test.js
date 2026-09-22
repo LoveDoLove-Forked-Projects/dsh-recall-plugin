@@ -37,7 +37,8 @@ beforeAll(() => {
     shell: process.platform === 'win32' && cmd === 'npm',
   })
   const parsed = JSON.parse(stdout)
-  const item = Array.isArray(parsed) ? parsed[0] : parsed
+  // npm < 11 输出数组 [{...}]，npm 11+ 输出 {<包名>: {...}}——两种形状都取首个条目
+  const item = Array.isArray(parsed) ? parsed[0] : Object.values(parsed)[0]
   files = (item && Array.isArray(item.files) ? item.files : []).map((f) => f.path)
 })
 

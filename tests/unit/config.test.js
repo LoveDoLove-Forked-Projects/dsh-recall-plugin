@@ -46,7 +46,10 @@ describe('createConfig', () => {
       gcHours: 24,
       maxFileBytes: 104857600,
       maxSnapshotsPerWorkspace: 500,
-      baseExcludes: ['.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/'],
+      baseExcludes: expect.arrayContaining([
+        '.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/',
+        'target/', 'dist/', '*.exe',
+      ]),
       refillDraft: true,
       snapshotEnabled: true,
       archiveOriginal: true,
@@ -90,11 +93,12 @@ describe('createConfig', () => {
     expect(createConfig({}).maxSnapshotsPerWorkspace).toBe(500)
   })
 
-  it('baseExcludes 过滤空串与非法类型；空/缺失回退内置表', () => {
+  it('baseExcludes 过滤空串与非法类型；空/缺失回退内置表（含构建产物与二进制）', () => {
     const cfg = createConfig({ baseExcludes: ['.git', '  ', 42, null, 'dist/'] })
     expect(cfg.baseExcludes).toEqual(['.git', 'dist/'])
-    expect(createConfig({ baseExcludes: [] }).baseExcludes).toEqual(['.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/'])
-    expect(createConfig({}).baseExcludes).toEqual(['.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/'])
+    expect(createConfig({ baseExcludes: [] }).baseExcludes).toEqual(DEFAULTS.baseExcludes)
+    expect(createConfig({}).baseExcludes).toEqual(DEFAULTS.baseExcludes)
+    expect(DEFAULTS.baseExcludes).toEqual(expect.arrayContaining(['target/', 'dist/', 'build/', '*.exe', '*.zip']))
   })
 
   it('refillDraft 只接受布尔，非布尔回退 true', () => {

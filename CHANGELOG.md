@@ -2,6 +2,19 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 修复
+
+- **gc 失败后走退避重试，不再推进完整 gcHours 周期（快照仓库 GB 级膨胀的根因）**：实测一台重度机器上单工作区影子仓库积到 **3.35 GB loose 对象、in-pack 恒 0**——定期 gc 从未成功完成过。机制：`runGc` 失败（超时/磁盘/杀软）也把 `gcLastAt` 推进到此刻，等于失败一次就放弃整个 gcHours（默认 24h）周期；期间对象继续堆积，下一次 gc 只会更重、更容易超时，「失败→整天不重试→更重→更易失败」滚雪球，对象库永远压不进 pack。修复：失败只把 `gcLastAt` 回拨到「此刻 − gcHours + GC_RETRY_BACKOFF_MS（30 分钟）」，退避窗口后自动重试；成功维持原有「推进到此刻」语义；退避期间 gcCount 条数门槛照常生效，不会退化成「每条消息都重试」。`runGc` / `runGcAll` 两路径同修。新增 `tests/unit/maintenance-gc-backoff.test.js` 4 例钉住成功/失败/节流三条语义。
+- **超大文件扫描（oversize）跳过被排除的大目录子树（两平台）**：原先 .NET 手动栈 / `find` 全工作树递归，`node_modules/`、`target/` 等已排除目录照样被逐文件 stat——一个 11943 个文件、10.96 GB 的 Rust `target/` 让每条消息的快照都多付一次全树扫描（I/O 风暴实测可拖垮宿主全部 HTTP 接口）。修复：把 exclude 表里 basename 形式（无通配、无内部斜杠、非 `!` 反选）的 pattern 按 gitignore 语义转为「任意层级同名目录整棵跳过」（pwsh 压栈过滤 HashSet；posix 转 `\( -name A -o -name B \) -prune -o` 前缀）；复杂 pattern 不参与跳过、回退全扫该子树——多扫不漏检，fail-open 语义不变。
+- **`package-layout` 单测兼容 npm 11+ 的 `pack --json` 输出形状**：新版输出 `{<包名>: {...}}`（旧版为数组 `[{...}]`），原解析取错层导致 `files` 恒空、两断言恒红。两种形状都取首个条目。
+
+### 变更
+
+- **`baseExcludes` 默认表加宽：编译产物目录与常见二进制/压缩包默认不进快照**：原先默认仅 `.git`、`node_modules/` 与两种存储目录名，`maxFileBytes` 只挡单个大文件、挡不住 `target/` 这类上万小文件整体 GB 级的构建产物——它们既拖慢每次快照的 `add`/遍历，也直接喂大对象库（上条实测的 3.35 GB loose 即由此而来）。新增 `target/`、`dist/`、`build/`、`out/`、`coverage/`、`.next/`、`.nuxt/`、`.output/`、`.cache/`、`.gradle/` 与 `*.exe`、`*.dll`、`*.pdb`、`*.so`、`*.dylib`、`*.msi`、`*.zip`、`*.7z`、`*.rar`、`*.tar`、`*.tar.gz`、`*.iso`。排除只作用于新增暂存（已有命中条目由 excludeSync 的清理循环在下次快照移出），仍可在设置页「基础排除表」逐条删改。
+- **单次 gc 超时 10 分钟 → 30 分钟（`GC_TIMEOUT_MS`）**：GB 级 loose 对象库的单次 repack 可超 10 分钟，被杀的 gc 永远完不成；gc 与快照同在串行队列，加长只影响维护节奏。
+
 ## [2.3.24] - 2026-09-18
 
 ### 新增
