@@ -22,11 +22,18 @@
  *   4. Config 是活 Schemastery object schema（合规清单 #3）；
  *   5. settings 桩在位时，全程 console.error 无 'recall settings namespace
  *      skipped'（settings 桩接入生效，skip 分支未被触发）；
- *   6. 卸载后 connection 路由注册清零（合规清单 #2/#5，HMR 无 module 级残留）。
+ *   6. 卸载后 connection 路由注册清零（合规清单 #2/#5，HMR 无 module 级残留）；
+ *   7. **只给新面**的 settings 桩（无 installSection/register，复刻 0.1.7 的
+ *      SettingsForms）也必须装配成功，且 ns 解析贯通到端点读写（config-get 读到
+ *      describe 的 user 覆盖、config-set/reset 把 profile entry id 交给官方）。
+ *      为什么单独跑一个 pass：旧桩同时提供两代面时旧三分支先命中，新面永远不被
+ *      走通——这正是 0.1.7 真实换代被本门禁掩盖的根因（断言 5 只能证明「没报
+ *      skip」，证明不了走的是哪一代）。
  *
  * 定位与 CI 语义同 test:probe：优先 DSH_ROOT，否则 %APPDATA%\npm\...\dsh；
- * 无 dsh 环境整体 skip（退出 0），不 fail。本门禁不起真 git/真会话，只做
- * 装配层断言——不替代活体冒烟。
+ * 无 dsh 环境整体 skip（退出 0），不 fail。本门禁不起真 git/真会话——shell 桩
+ * 应答方言探针让插件判 pwsh 留在官方通道、其余命令回空输出，只做装配层断言，
+ * 不替代活体冒烟。
  */
 
 import { createRequire } from 'node:module'
@@ -57,6 +64,11 @@ const { Context } = requireFromDsh('@deepseek-ai/cordis')
 // Windows 绝对路径必须转 file:// URL，否则 ESM loader 把盘符当协议。
 const { apply, inject, name, Config } = await import(pathToFileURL(path.join(root, 'lib', 'index.js')).href)
 
+// 方言探针哨兵取自插件自身产物（不重抄字面量）：shell 桩据此应答探针、让插件
+// 判成 pwsh 留在官方通道——本门禁的定位是装配断言（「不起真 git/真会话」），
+// 判成 bash 会改走自建直连通道、真的去 spawn powershell.exe 跑 git 命令。
+const { SHELL_PROBE_SENTINEL } = await import(pathToFileURL(path.join(root, 'lib', 'store.js')).href)
+
 // ---- 最小服务桩：只实现插件实际调用的方法面（字段面来自 probe 已核验事实）----
 const registered = [] // connection fetch 路由注册记录（端点注册 + 卸载清零的载体）
 const ctx = new Context()
@@ -73,6 +85,36 @@ console.error = (...args) => {
 // inject 声明完整时必被触达；漏声明时插件守卫 fail-open、桩零访问。
 let agentsTouched = 0
 
+// 两代 settings 桩（0.1.7 换代）：新面（SettingsForms）只有 describe/update/
+// replace(+mutate/configure)，旧面的 installSection/register 整体移除、旧三分支
+// 在新面上静默 no-op。面由参数选择，两个装配 pass 各取一代——「只给新面」这一代
+// 是本轮新增的：旧桩同时提供 installSection 时旧三分支照常命中、新面永远不被走通，
+// 这正是 0.1.7 真实换代被本门禁掩盖的根因。
+function makeSettingsStub(face, record) {
+  const stub = {
+    describe() {
+      record.describes += 1
+      // 新面按 entry id 寻址：桩报的就是插件 profile 行的 options.id（含 user 覆盖，
+      // 供 config-get 的 overridden 通路断言）；旧面桩报空表（旧面 describe 只列
+      // 已注册 namespace，与 profile 行无关）。
+      return face === 'modern' ? [{ ns: 'recall', user: { gcSnaps: 42 } }] : []
+    },
+    writable: true,
+    async update(ns, patch) { record.updates.push([ns, patch]) },
+    async replace(ns, section) { record.replaces.push([ns, section]) },
+  }
+  if (face === 'legacy') {
+    // 0.1.2-alpha.2 起插件走 settings.installSection（独立函数被官方移除）；
+    // 桩实现注册语义的最小面：setSource 接入口 config、onChange 触发一次。
+    stub.installSection = (owner, ns, schema, entry, hooks) => {
+      record.installs.push(ns)
+      if (hooks && typeof hooks.setSource === 'function') hooks.setSource(() => entry)
+      if (hooks && typeof hooks.onChange === 'function') hooks.onChange()
+    }
+  }
+  return stub
+}
+
 // 桩服务由「提供者插件」fiber 提供（ctx.provide），与被测插件互为兄弟——
 // 复刻生产拓扑（dsh-base 提供 agents、host 提供其余服务）。为什么不能用
 // ctx.reflect.provide 直接挂 root：cordis 属性访问的 fiber-walk 沿祖先链
@@ -80,52 +122,58 @@ let agentsTouched = 0
 // 不抛 "cannot get property without inject"，门禁失效（删 agents 实证仍绿）。
 // 兄弟 fiber 提供的服务只进 inject 快照（声明才解析），未声明即抛——与
 // 生产一致。
+function provideStubs(c, opts) {
+  const routes = opts.registered
+  const touchAgents = opts.touchAgents || (() => {})
+  c.provide('connection', {
+    fetch: {
+      // 复刻官方 registerFetchRoute 的可观测语义：登记 route、返回异步
+      // disposer。真实实现里注册本体挂在 connection fiber 的 effect 上
+      // （owner = this.ctx），插件用 ctx.effect 包裹返回值——卸载时 cordis
+      // 调用该 disposer，路由随之清除。
+      register(route) {
+        routes.push(route)
+        return async () => {
+          const i = routes.indexOf(route)
+          if (i >= 0) routes.splice(i, 1)
+        }
+      },
+    },
+  })
+  c.provide('shell', {
+    resolve(spec) { return spec },
+    // 方言探针按 pwsh 应答（回显哨兵）→ 插件判 pwsh 走官方通道，全程不 spawn。
+    // 其余命令回空输出：门禁只做装配断言，不制造真实 git 副作用（见头部定位）。
+    async run(spec) {
+      const command = spec && typeof spec.command === 'string' ? spec.command : ''
+      const text = command.indexOf(SHELL_PROBE_SENTINEL) >= 0 ? SHELL_PROBE_SENTINEL + '\n' : ''
+      return { stdout: { text }, stderr: { text: '' }, exitCode: 0 }
+    },
+  })
+  c.provide('sessions', {
+    list() { return [] },
+    get() { return null },
+  })
+  c.provide('agents', {
+    list() { touchAgents(); return [] },
+    get() { touchAgents(); return null },
+  })
+  c.provide('sandboxPolicy', { workspaceRoot: process.cwd() })
+  c.provide('sessionQuery', {
+    async listSessions() { return [] },
+    async readSession() { return null },
+  })
+  c.provide('settings', opts.settings)
+}
+
+const legacyRecord = { installs: [], updates: [], replaces: [], describes: 0 }
 await ctx.plugin({
   name: 'verify-host-stubs',
   apply(c) {
-    c.provide('connection', {
-      fetch: {
-        // 复刻官方 registerFetchRoute 的可观测语义：登记 route、返回异步
-        // disposer。真实实现里注册本体挂在 connection fiber 的 effect 上
-        // （owner = this.ctx），插件用 ctx.effect 包裹返回值——卸载时 cordis
-        // 调用该 disposer，路由随之清除。
-        register(route) {
-          registered.push(route)
-          return async () => {
-            const i = registered.indexOf(route)
-            if (i >= 0) registered.splice(i, 1)
-          }
-        },
-      },
-    })
-    c.provide('shell', {
-      resolve(spec) { return spec },
-      async run() { return { stdout: { text: '' }, stderr: { text: '' }, exitCode: 0 } },
-    })
-    c.provide('sessions', {
-      list() { return [] },
-      get() { return null },
-    })
-    c.provide('agents', {
-      list() { agentsTouched++; return [] },
-      get() { agentsTouched++; return null },
-    })
-    c.provide('sandboxPolicy', { workspaceRoot: process.cwd() })
-    c.provide('sessionQuery', {
-      async listSessions() { return [] },
-      async readSession() { return null },
-    })
-    c.provide('settings', {
-      describe() { return [] },
-      writable: true,
-      async update() {},
-      async replace() {},
-      // 0.1.2-alpha.2 起插件走 settings.installSection（独立函数被官方移除）；
-      // 桩实现注册语义的最小面：setSource 接入口 config、onChange 触发一次。
-      installSection(owner, ns, schema, entry, hooks) {
-        if (hooks && typeof hooks.setSource === 'function') hooks.setSource(() => entry)
-        if (hooks && typeof hooks.onChange === 'function') hooks.onChange()
-      },
+    provideStubs(c, {
+      registered,
+      settings: makeSettingsStub('legacy', legacyRecord),
+      touchAgents: () => { agentsTouched += 1 },
     })
   },
 }, {})
@@ -246,6 +294,105 @@ assert(registered.length === 0, '卸载后 connection 路由注册清零（' + b
 console.error = origConsoleError
 assert(!consoleErrors.some((m) => m.indexOf('recall settings namespace skipped') >= 0),
   'settings 桩在位时无 settings skip 记录（得到 ' + consoleErrors.length + ' 条 console.error）')
+
+// 6. 首个 pass 确实走了旧面：installSection 被以旧字面量 ns 调用（旧路径未被
+// 新分支吃掉）。0.1.7 上这条不存在，故只在旧桩 pass 断言。
+assert(legacyRecord.installs.includes('dsh-recall'),
+  '旧面桩：installSection 以 dsh-recall 注册 namespace（得到 ' + JSON.stringify(legacyRecord.installs) + '）')
+
+// ---- 7. 只给新面（无 installSection/register）也必须装配成功 ----
+// 为什么单独跑一个 pass：旧桩同时提供两代面时，旧三分支先命中、新面永远不被走通
+// ——这正是 0.1.7 真实换代被掩盖的根因。本 pass 只给新面，并复刻 Loader 的
+// Fiber.entry 增补（生产上由 cordis-plugin-loader 注入；新面 ns 解析读的就是
+// entry.options.id），断言装配成功 + ns 解析贯通到端点读写。
+const modernRecord = { installs: [], updates: [], replaces: [], describes: 0 }
+const modernRegistered = []
+const modernSettings = makeSettingsStub('modern', modernRecord)
+assert(typeof modernSettings.installSection === 'undefined' && typeof modernSettings.register === 'undefined',
+  '新面桩不含旧注册入口（否则新一代缺失又会像本轮一样被自己的桩掩盖）')
+
+const modernErrors = []
+console.error = (...args) => {
+  modernErrors.push(args.map((a) => String(a && a.message ? a.message : a)).join(' '))
+  origConsoleError(...args)
+}
+let modernAgentsTouched = 0
+const modernCtx = new Context()
+try {
+  await modernCtx.plugin({
+    name: 'verify-host-stubs-modern',
+    apply(c) {
+      provideStubs(c, {
+        registered: modernRegistered,
+        settings: modernSettings,
+        touchAgents: () => { modernAgentsTouched += 1 },
+      })
+    },
+  }, {})
+
+  // ctx.plugin 返回带 then 的 wrapped fiber（Object.create(fiber)），真实 Fiber
+  // 在原型上；apply 在微任务里才跑，故此处的 entry 赋值先于插件读它。
+  const modernFiber = modernCtx.plugin({ name, apply, inject, Config }, {})
+  const realFiber = Object.getPrototypeOf(modernFiber)
+  if (realFiber && typeof realFiber === 'object') {
+    realFiber.entry = { id: 'include:recall', options: { id: 'recall', name } }
+  } else {
+    failures.push('取不到插件 fiber（cordis plugin() 返回形态变化）')
+  }
+  await modernFiber
+} catch (error) {
+  failures.push('新面-only 装配抛错（settings 换代后新路径未走通）：' + (error && error.message ? error.message : error))
+}
+
+assert(modernRegistered.length === EXPECTED_ENDPOINTS.length,
+  '新面-only：端点仍注册齐全（' + modernRegistered.length + ' vs ' + EXPECTED_ENDPOINTS.length + '）')
+
+async function callModern(endpointName, args) {
+  const route = modernRegistered.find((r) => r && r.path === '/api/recall/' + endpointName)
+  if (!route) return { status: 404, body: null }
+  const response = await route.fetch(new Request('http://dsh.internal/api/recall/' + endpointName, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(args || {}),
+  }))
+  let parsed = null
+  try { parsed = await response.json() } catch (error) { parsed = null }
+  return { status: response.status, body: parsed }
+}
+
+const modernGet = await callModern('config-get', {})
+assert(modernGet.body && modernGet.body.ok === true, '新面-only：config-get 正常应答（' + JSON.stringify(modernGet.body).slice(0, 120) + '）')
+assert(modernGet.body && modernGet.body.overridden && modernGet.body.overridden.gcSnaps === 42,
+  '新面-only：config-get 按解析出的 entry id 读到 describe 的 user 覆盖（得到 ' + JSON.stringify(modernGet.body && modernGet.body.overridden) + '）')
+
+const modernSet = await callModern('config-set', { patch: { gcSnaps: 11 } })
+assert(modernSet.body && modernSet.body.ok === true, '新面-only：config-set 正常应答（' + JSON.stringify(modernSet.body).slice(0, 120) + '）')
+assert(modernRecord.updates.length === 1 && modernRecord.updates[0][0] === 'recall' && modernRecord.updates[0][1].gcSnaps === 11,
+  '新面-only：config-set 把 ns=recall 交给官方 update（旧面硬编码 dsh-recall 在 0.1.7 上必失败；得到 ' + JSON.stringify(modernRecord.updates) + '）')
+
+const modernReset = await callModern('config-reset', {})
+assert(modernReset.body && modernReset.body.ok === true, '新面-only：config-reset 正常应答（' + JSON.stringify(modernReset.body).slice(0, 120) + '）')
+assert(modernRecord.replaces.length === 1 && modernRecord.replaces[0][0] === 'recall',
+  '新面-only：config-reset 走官方 replace(ns, {})（得到 ' + JSON.stringify(modernRecord.replaces) + '）')
+
+// preview 同样走 agentBusy → ctx.agents.list()：与 pass 1 同一个漏声明即红的
+// 行为断言，确认换代后的新路径没有绕开 inject 门禁。
+await callModern('preview', {})
+assert(modernAgentsTouched > 0, '新面-only：agents 通路仍被触达（inject 声明在两种面下都成立）')
+
+// 让 apply 期的启动预热 IIFE 先跑完再卸载：它内部会经 ctx.sessions 访问服务，
+// fiber 一旦停用该访问会变成未捕获拒绝（"cannot get required service ... in
+// inactive context"），而预热是 fire-and-forget（外部无法 await）——卸载前留一拍
+// 是门禁侧的确定性手段（探针已由桩应答，预热此后的步骤全是微任务，无 I/O）。
+await new Promise((resolve) => { setTimeout(resolve, 50) })
+
+try { await modernCtx.fiber.dispose() } catch (error) {
+  failures.push('新面-only：dispose 抛错：' + (error && error.message ? error.message : error))
+}
+assert(modernRegistered.length === 0, '新面-only：卸载后路由清零（' + modernRegistered.length + '）')
+console.error = origConsoleError
+assert(!modernErrors.some((m) => m.indexOf('recall settings namespace skipped') >= 0),
+  '新面-only：无 settings skip 记录（得到 ' + modernErrors.length + ' 条 console.error）')
 
 // ---- 输出 ----
 if (failures.length) {

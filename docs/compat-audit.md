@@ -7,6 +7,37 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.7-alpha.1 核验（2026-09-22）——破坏性版本，待改码**：**npm 已发布**（dist-tag `alpha` 指向本版，
+> tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
+> 全局实装。**包布局变化**：官方包从全局扁平位收进 `dsh/node_modules/@deepseek-ai/*`；插件工作区 junction 已随之指向
+> 新路径，`@deepseek-ai/{schemastery,dsh-settings}` 实测解析正常（I11 无破坏）。三层门禁：`test:probe` **35/39（4 红）**、
+> `verify:host` 装配断言通过（唯一警告＝方言探针降级）、`typecheck` + `npm test` 391/391 通过（插件自身逻辑零回归）。
+> **两处硬破坏**：
+> ① **shell 接缝换代**——`ShellExecutor` 删除 `run`/`start` 抽象方法，只剩 `resolve` + `execute(spec): Promise<ShellExecution>`
+> （`ShellExecution.result(): Promise<ShellRunResult>`），官方消费方统一 `(await ctx.shell.execute(spec)).result()`，全树 grep `shell.run` 零调用
+> （I36 探针红即此）。插件 `src/host/store.ts` 的 `runShellMeta` 与方言探针两处命中：**POSIX 上必经官方通道 → `shell.run is not a function` → 建仓/快照/回退/gc 全失效**；
+> **win32 上探针抛错被 catch 折成 null → 误判 bash → 走自建 spawn 直连通道侥幸可用**（代价是失去官方通道语义 + 误导性启动日志）。
+> ② **settings 接缝换代**——`dsh-settings` 导出面只剩 `SettingsForms`（`configure`/`describe`/`update`/`replace`/`mutate`/`writable`），
+> `installSection`/`installSettingsSection` **全树零命中**（I30 由「在位」改判「0.1.7 起移除」）；寻址键变成 **profile entry id**
+> （`configEditor.entries().find(row => row.options.id === ns)`，未知 ns 抛 `No configurable plugin entry`），且**只有 schema 标
+> `.volatile()` 的字段**才被 `describe()` 收录、被 `update/replace` 写入（无 volatile 字段→写入抛 `has no volatile fields`、entry 被跳过）。
+> 插件三分支 settings 接线在 0.1.7 上**静默 no-op**（无异常无日志）→ namespace 不注册、热更失效；`config-get` 恒找不到 `ns='dsh-recall'`
+> → 覆盖字段恒空；`config-set`/`config-reset` 必抛 → **设置页配置卡片在 0.1.7 上只读且保存必失败**。`verify:host` 的自带 settings 桩
+> 同时提供 `installSection`，故本门禁掩盖了该换代（需补探针）。**一处锚点更新**：fork 实现重写（源改走
+> `sessionQuery.observeSession`、`boundary = atSeq ?? latestCompletedPrefixBoundary()`、校验 `events[boundary].seq === boundary`
+> 否则 `session/fork-unavailable`、`buildForkSeed` = 前缀 + `session/end-seed` + 开放轮合成 closer、`inheritedEventCount = boundary + 1`），
+> 3 条切点探针红；**语义上插件用法等价**——`atSeq` 由「吸附到 ≥atSeq 的首条 turn/end」改为「包含式真实事件 seq」，插件传的本就是
+> 目标消息前最近一次 `turn/end` 的 seq，两种语义结果一致（I35 根治保持）。**零交集/在位项**：事件集 54→**60**（新增
+> `deliverables/presented`、`developer/message`、`image/offload`、`subagent/catalog`、`workspace/changes`；插件只扫 `user/message`+`turn/end`，
+> Session V4 迁移保留原始 message id）；`UserMessage.id`/`content` 与 `ImageBlock`/`FileBlock` 的 `attachment.attachmentId` 不变
+> （release notes「仅存于自定义事件的附件不再自动读取/导出」针对插件自定义事件，本插件不写会话事件 → I34 附件链零影响，
+> `readAttachment`→`{attachment,data}`、`createDrafts`/`releaseDraftAttachments`/`input.shell().actions.{setDraft,addAttachments}`、`updateQueue` 全在位）；
+> `DshBundleManifest.patch: string | string[]`（单文件 patch 写法保留）；`plugins.bundle.config` 仍在；`ISessions.fork` 签名逐字不变、
+> `ISessions.open` 仍缺席、`uiWorkspace.openSession` 与归档集合判据（I37）探针绿；`snapshotEvents(fromSeq?, toSeqExclusive?)`/`eventAt`/`ownEvents` 在位
+> （后两者仍 `@deprecated`）；`readBytes` 迁移与插件零交集（插件文件读写全走自建 shell 模板）。**版本策略：本轮不同步 peer 范围与 `dshReleases`**
+> ——0.1.7-alpha.1 不声明 compatible，待 shell/settings 两处迁移落地 + 实弹冒烟后再补 `>=0.1.7-alpha.1 <0.1.8` 段。评估实证见
+> upgrade-assessments/dsh-0.1.7-alpha.1.md。
+>
 > **0.1.6-alpha.2 核验（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`；`latest`
 > 仍 0.1.5-rc.1、`next` 仍 0.1.5-rc.2），`npm install -g @deepseek-ai/dsh@alpha` 全局实装（dsh-settings 随装
 > 0.1.6-alpha.2、schemastery 仍 3.18.2；junction 存活无需重建）。三层门禁：`test:probe` 37/37 + `verify:host`
@@ -639,13 +670,27 @@
   读 .d.ts 也不覆盖）；`verify:host` 装配门禁在升级后必红并给出此症状——插件
   `src/host/index.ts` 静态 import 即崩。已做双版本兼容分支
   （`typeof dshSettings.installSettingsSection === 'function'` 走旧函数，否则走
-  `ctx.inject(['settings'])` + `installSection`），verify-host 桩补 installSection。
+  `ctx.inject(['settings'])` + `installSection`）；verify-host 桩自 0.1.7 适配起
+  **同时提供两代面**，且「只给新面（无 installSection）」单独跑一个 pass（断言 7）——
+  桩只提供旧面时本换代会被自己的桩掩盖（见下）。
 - **失效症状**：插件 Host 半启动即崩——SyntaxError `does not provide an export
   named 'installSettingsSection'`，`/api/recall/*` 全 404，UI 按钮可能报 snapshot
   失败。若 npm 版与本地并行（本机曾装 alpha.1 未发 npm），新旧并存时此症状
   只出现在新 dsh 环境。
 - **复查动作**：dsh 升级后 `npm run verify:host` 必跑；若官方再次调整接入路径
   （如 installSection 改名/改签名），同步兼容分支与 verify-host 桩。
+- **0.1.7-alpha.1 起整个 `SettingsProvider` 移除（已适配，双分支）**：`installSection`、
+  `installSettingsSection`、`register` 全树零命中，导出面只剩 `SettingsForms`
+  （`configure`/`describe`/`update`/`replace`/`mutate`/`writable`）；namespace 概念消失，
+  读写按 **profile entry id**（`entry.options.id`）寻址，且只有 schema 标 schemastery
+  `.volatile()` 的字段可写（无 volatile 字段的 entry 在 `describe()` 被跳过、写入抛
+  `has no volatile fields`）——面换代与 volatile 门槛的完整台账见 **I39**。
+  插件的三分支兼容在此环境下**全不命中且静默 no-op**（无异常、无日志，故 verify:host 桩
+  若只提供 installSection 就会掩盖它）→ namespace 不注册、配置热更失效、
+  `config-get`/`config-set`/`config-reset` 三条端点读写失效。**插件对策**：按运行时实例的
+  **旧注册入口是否缺席**分派（`installSection`/`register` 任一在位即旧面，否则新面）——
+  只按「`describe`/`update` 是函数」分不了流（旧面同样有它们），这条判据是 0.1.6 上
+  「不变砖」的关键；新面不注册 namespace、挂 `loader/volatile-update` 热更（I39）。
 
 ### I31 slots.entries 快照与 slots.inject 回调执行时机（PR #13 动态避让依赖）
 - **依赖的官方行为**：`conversation.chat.node` 的 priority 动态避让
@@ -828,6 +873,11 @@
   `ShellExecutor` 的公开面只有 `resolve(request)` / `run(spec)` / `start(spec)` 与 `sandboxMode`
   getter，`ShellExecRequest` / `ShellRunResult` 里**没有任何「我是 bash 还是 pwsh」的字段**——方言
   不可查询。插件按 `process.platform` 单选 pwsh 模板，与宿主实际执行器之间没有任何契约约束。
+  **0.1.7-alpha.1 起公开面变为 `resolve(request)` / `execute(spec)` 两方法**（`run`/`start` 抽象方法
+  已删除，官方消费方统一 `(await ctx.shell.execute(spec)).result()`）——方言字段依旧不存在，探针式
+  对策继续成立；执行接缝本身的双分支与失败分级见 **I38**。该断点在 POSIX 上会使整条 shell 链路抛
+  `shell.run is not a function`（win32 因探针抛错后判 bash 走自建直连通道而侥幸可用），
+  **已在 2.3.25 落地双分支适配**（`run 优先 → execute 兜底`，两分支共用 spec 构造与失败分级）。
 - **症状**：这类宿主上 pwsh 模板被 bash 执行，第一行编码前导即语法错误
   （`bash: -c: line 1: syntax error near unexpected token '('`），`ensureGit` 起每一步都失败——
   快照从未成功、撤回按钮不可用，win32 上功能面整个死亡（issue #15 实测：dsh 0.1.6-alpha.1 + Windows 11）。
@@ -848,17 +898,22 @@
   argv `-NoLogo -NoProfile -NonInteractive -Command <单 argv>`、`ENV_OVERRIDES`）；`dsh-subprocess/lib/index.js`
   （`SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i`、`key.toUpperCase().startsWith("DSH_")`）；
   issue #15（报告者实测 Git Bash 宿主下方言冲突）。
-- **探针/单测**：`tests/probe/api-surface.test.js`「win32 shell 方言」3 例（ShellExecutor 无方言字段；
-  直连复刻的三项官方事实：PS 5.1 候选路径 + argv 旗标 + env overrides；env 清洗口径）；
+- **探针/单测**：`tests/probe/api-surface.test.js`「win32 shell 方言与执行接缝」4 例（ShellExecutor 无方言字段
+  且抽象面只有 `resolve`/`execute`（断言「无 `abstract run(`」——官方若把 `run` 加回来即红，提示重估双分支
+  判据优先级）；`ShellExecution.result()` 与可空 `exitCode`/`timedOut`；直连复刻的三项官方事实：PS 5.1 候选
+  路径 + argv 旗标 + env overrides；env 清洗口径）；
   `tests/unit/store-shell-dialect.test.js` 31 例（判定/收集/清洗/路径四个纯函数 + 假 child 覆盖 stdin
   字节透传、截断、超时 kill、spawn error + 分流接线：pwsh 方言零触达 spawn、bash 方言走直连且官方
-  通道只跑探针那一次、in-flight 去重、POSIX 不探测、清扫脚本不探测、直连失败仍走清扫）。
+  通道只跑探针那一次、in-flight 去重、POSIX 不探测、清扫脚本不探测、直连失败仍走清扫）；
+  `tests/unit/store-shell-execute.test.js` 10 例（两代执行器分流、`result()` reject 原样上抛、
+  `exitCode === null` 分级、截断透传、新面在 POSIX 上走得通）。
 - **失效症状**：探针误判 pwsh 为 bash → 走直连通道（pwsh 模板同样能跑，功能不受影响；代价是绕开
   官方托管环境——无 `dshEnv`/PATH 注入、无进程树级终止，宿主崩溃可能留下孤儿 git 与陈旧锁，靠 M3
   心跳/陈旧锁分级清扫自愈）；探针误判 bash 为 pwsh（bash 意外能回显哨兵）→ 维持原状（功能死）；
   直连可执行文件缺失 → `spawn` reject → 命令失败并进「最近错误」。
 - **复查动作**：dsh 升级后确认 `ShellExecutor` 仍无方言字段（有则改读字段、探针与探测命令一并退役）
-  且官方 pwsh 候选路径/argv/env 清洗未变——上述 3 条探针自动盯防；实弹按
+  且官方 pwsh 候选路径/argv/env 清洗未变——上述 4 条探针自动盯防；接缝面同看 I38（公开面 = `resolve` +
+  `execute`，`run`/`start` 缺席）；实弹按
   `docs/plans/pending/plan-shell-dialect-win32.md` 验收 3「profile 只启用 bash-sandbox」全链复跑。
 
 
@@ -906,9 +961,91 @@
   打开该会话。
 
 
+### I38 shell 执行接缝换代：`run`/`start` → `execute(spec).result()`，且 `exitCode` 可为 null
+- **依赖的官方行为**：0.1.7-alpha.1 起 `ShellExecutor` 的前台执行面是
+  `resolve(request): ShellExecSpec` + `execute(spec): Promise<ShellExecution>`，结果经
+  `ShellExecution.result(): Promise<ShellRunResult>` 取（按需创建、记忆化）；`run`/`start` 抽象方法被
+  删除。语义要点（决定失败分级怎么写）：`result()` **只在基础设施失败**（spawn 未产出进程）时 reject，
+  非零退出/超时 kill/abort kill 一律 resolve 并以 first-cause 标 `timedOut`/`aborted`、回显生效的
+  `timeoutMs`；`exitCode: number | null`（null = 准备期超时或信号终止）；`stdout`/`stderr` 仍是
+  `CollectedOutput { text, truncated, spillPath? }`（F-G3 的「读截断 ≠ 内容损坏」判定不受影响）；
+  `sandboxPolicy: { mode: 'danger-full-access', workspaceRoot }` 仍是合法形态。
+- **出处**：`dsh-shell/lib/types/index.d.ts`（`abstract resolve(...)` / `abstract execute(...)`，无
+  `abstract run(`）、`dsh-shell/lib/types/types.d.ts`（`ShellExecution extends ShellProcess` +
+  `result()`、`ShellRunResult.exitCode: number | null` / `timedOut: boolean`）；
+  `dsh-tool-pwsh/lib/index.js` 官方消费方形态 `const result = await (await ctx.shell.execute(ctx.shell.resolve({...}))).result()`。
+- **插件对策**：`src/host/store.ts` 新增 `runViaExecutor(shell, spec)`——按**运行时方法探测**分流
+  （`typeof shell.run === 'function'` → 旧通道；否则 `execute` + `result()`），两分支共用同一 spec 构造
+  与同一失败分级。为什么按方法探测而非包版本：宿主注入的是它自己的执行器实例，插件 `node_modules` 里的
+  dsh-shell 版本与运行时无关；peer 保留 0.1.2–0.1.6 各线段（老用户仍可能装），单路径等于把老用户全断。
+  失败分级：`exitCode` 为 `null` 且无 stderr（或 first-cause `timedOut` 在场）→ 文案「命令准备期超时」；
+  有 stderr / 非零退出 → 回显 stderr 原文（无 stderr 时由 `throwShellFailure` 落 `exit <code>`），
+  两类文案各自可读且 `diagnostics.classifyEnvError` 的环境错误分类保持可命中。
+- **探针/单测**：`tests/probe/api-surface.test.js`「win32 shell 方言与执行接缝」中的 2 例（抽象面无
+  `run`/`start`；`ShellExecution.result()` + 可空 `exitCode`/`timedOut`）；
+  `tests/unit/store-shell-execute.test.js` 10 例（旧/新执行器分流、spec 逐字透传、两代都缺时响亮报错、
+  `result()` reject 原样上抛、两分支 `truncated` 透传一致、**新面在 POSIX 上走得通**（本轮硬指标：
+  旧调用在此必 TypeError）、`exitCode === null` 归超时 / 有 stderr 归非零退出）。
+- **失效症状**：POSIX 上 `shell.run is not a function` → 建仓/快照/diff/回退/gc/索引读写全部失败、
+  撤回不可用（win32 上被自建直连通道掩盖，只表现为误导日志与失去官方通道语义）；新面下若漏判
+  `exitCode === null`，超时会被报成 `exit null` 这类不可读文案且丢掉诊断分类。
+- **复查动作**：dsh 升级后跑上述探针（抽象面变化即红）；实弹＝win32 与 WSL 各跑一轮撤回全链，且
+  启动日志应为 `recall shell dialect probe: pwsh`（0.1.7 上判成 bash 即是接缝未走通的信号）。
+
+
+### I39 settings 面换代：`SettingsForms` + profile entry id 寻址 + volatile 门槛（0.1.7-alpha.1）
+- **依赖的官方行为**：0.1.7-alpha.1 起 `ctx.settings` 是 `SettingsForms`，整个 `SettingsProvider` 移除
+  （I30 末段）；**ns = profile entry id**——`write/update/replace` 经
+  `configEditor.entries().find(row => row.options.id === ns)` 定位（找不到抛 `No configurable plugin entry "<ns>"`），
+  `describe()` 报 `ns: entry.options.id` 并跳过 `entry.fiber` 未就绪（`state !== 2`）的条目；
+  **可写门槛 = schema 标 schemastery `.volatile()`**（`volatileForm` 读 `schema.meta.volatile`，
+  无 volatile 字段的 entry 在 `describe()` 直接跳过、写入抛 `Plugin entry "<ns>" has no volatile fields`）。
+  热更链路：`cordis-plugin-loader` 的 `Entry.update → _commitVolatile` 把新值 commit 进运行中 fiber 的
+  ref（`updateVolatile`），再经**只对目标 fiber 可见**的上下文派发 `loader/volatile-update(paths)`
+  （`self[Context.filter] = (owner) => owner.fiber === fiber`）——所以插件只能在**自己 ctx** 上监听。
+  另两条运行时可访问面事实：`Context.fiber` 在 cordis 上增补、`Fiber.entry` 由 loader 增补
+  （**可选**：无 Loader 挂载时缺席，消费侧必须判空）。
+- **出处**：`dsh-settings/lib/index.js`（`var SettingsForms = class extends Service`、`entries().find(row => row.options.id === ns)`、
+  `ns: entry.options.id`、`volatileForm` 的 `schema.meta.volatile` 判据与两条错误文案）；
+  `cordis-plugin-loader/lib/index.js`（`_commitVolatile`：`volatileEntries(fiber.config)` → `updateVolatile(ref, source)`
+  → `fiber.ctx.emit(self, "loader/volatile-update", paths)`）与其 `lib/types/index.d.ts` 的
+  `interface Fiber { entry?: Entry }`；`lib/types/config/entry.d.ts`（`options.id` = 「Stable id inside the
+  containing entry tree」、`get id()` 带父 tree 前缀）。**本机实测（2026-09-22，0.1.7-alpha.1 link 模式）**：
+  插件的 profile 行 id 是 bundle patch 的 insert 行 id **`recall`**（`include:recall` 的局部 id），
+  `entry.options.id` 即它；apply 期 `describe()` **看不到自身**（fiber 仍 LOADING，实测 11 条不含 recall），
+  boot 落定后 17 条含 `recall`；`config.flag` 在 apply 期就是 `Volatile` ref（`{ get() }`）。
+- **插件对策**：`src/host/config.ts` 三个模块级纯函数——`withVolatile(field)`（`.volatile()` 只有
+  schemastery ≥3.18.3 才有，0.1.6-alpha.2 随装 3.18.2，故 **feature-detect**，探不到原样返回）、
+  `resolveSettingsNs(ctx, settings)`（旧面 → 注册字面量 `dsh-recall`；新面 → 候选按 `entry.options.id`
+  → `entry.id` 与 `describe()` 的 ns 集合求交集，交集为空时回退 `options.id`（apply 期 describe 看不到
+  自身是常态，不是「新面不可用」），无 entry 又非旧面 → `null`）、`unwrapConfig(raw)`（Volatile ref 用
+  duck-type `typeof v.get === 'function'` 解一层——不引入 cosmokit 依赖；`applyResolvedConfig` 与 **apply
+  初始 cfg** 两处都要解，否则用户覆盖值被静默读成默认值）。`src/host/index.ts` 分派判据是「旧注册入口
+  缺席」（见 I30）；新面挂 `ctx.on('loader/volatile-update', () => applyResolvedConfig(config))`
+  （apply 拿到的 `config` 就是 `fiber.config` 同对象，ref 被 commit 后重读即得新值）。`routes-manage` 的
+  `config-get/set/reset` 一律用解析出的 ns，未解析到时按 `RECALL_SETTINGS_UNAVAILABLE` 报逃生口文案。
+- **探针/单测**：`tests/probe/api-surface.test.js`「settings 面换代」3 例（导出面只剩 `SettingsForms`
+  且 `installSection`/`register` 零命中；ns = profile entry id 的两处匹配式；volatile 门槛与两条错误文案）
+  +「volatile 热更链路与运行时可访问面」3 例（`loader/volatile-update` 的 dispatch 与按 fiber 过滤；
+  `Fiber.entry` 增补形状；`Entry.id`/`options.id` 双形态）；`tests/unit/settings-bridge.test.js` 24 例
+  （`withVolatile` 两态、旧/新面判据、ns 解析六种路径含「旧面回退不得误用 options.id」、`unwrapConfig`
+  解 ref/数组/嵌套、routes 级 config-get/set/reset 在两代面下都用解析出的 ns 与 ns 缺失时的错误码文案）；
+  `verify:host` 断言 7（只给新面的桩也必须装配成功且 ns 贯通到端点读写）。
+- **失效症状**：旧接线在新面上静默 no-op（无异常无日志）→ namespace 不注册、设置卡片读不到覆盖字段、
+  保存与恢复默认必失败（`No configurable plugin entry "dsh-recall"`）；volatile 漏标 → entry 在
+  `describe()` 里不可见（卡片空/只读）；`unwrapConfig` 漏点 → 配置「读成默认值」（用户改了不生效）；
+  ns 解析错面（旧面误用 options.id）→ 0.1.6 上写入必失败。
+- **复查动作**：dsh 升级后跑上述探针（导出面/匹配式/volatile 判据/事件名/`Fiber.entry` 任一漂移即红——
+  这些漂移在运行期都是静默失效，正是本轮被自建桩掩盖的同类面）；实弹＝0.1.7 上设置页保存若干字段
+  → 立即生效（volatile 热更，无重载日志）→ 恢复默认 → 重启复查持久化；旧版回归＝0.1.6-alpha.2 上
+  卡片照常可写（双分支旧路径未破坏）。
+
+
 ## 与 E1 verify-host 的对应关系
 
 装配层条目（I10 inject 门禁、端点注册、Config schema、卸载清零）由
-`scripts/verify-host.mjs` 机器化断言；字段层条目（I2/I6/I8 等）由 `tests/probe/`
+`scripts/verify-host.mjs` 机器化断言；自 0.1.7 适配起该脚本跑**两个 pass**（旧面桩 +
+「只给新面（无 `installSection`）」的桩），后者专治本轮的实际教训——自建桩同时提供
+两代面时旧三分支先命中、新面从未被走通，换代被自家桩掩盖（I30/I39）；字段层条目（I2/I6/I8 等）由 `tests/probe/`
 字段探针断言；纯逻辑与脚本契约由 `tests/unit/` 断言。矩阵里「探针/单测」标注
 `无直接探针` 的条目即为测试缺口，dsh 升级后优先补。

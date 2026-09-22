@@ -138,30 +138,34 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
     })
   })
 
-  describe('sessions.fork 切点语义（G1/I35：0.1.6-alpha.1 起精确切到选中轮次结束）', () => {
-    // 0.1.5 线的官方行为是「cut 从 boundary+1 向后跳过非 turn/start 事件」——把
-    // boundary 那条 turn/end 之后、下一个 turn/start 之前的 inbox 入队事件一并切进
-    // seed，这是撤回残留排队消息的根源（I35）。0.1.6-alpha.1 起官方改为固定
-    // cut = boundary.seq + 1：结束事件之后的排队输入、标题、模型设置均不入 seed
-    // （见 .agents/notes/implemented/bug-fix/2026-09-11-session-controller-fork-turn-cut）。
-    // 三条锚点分钉 boundary 解析、cut 固定切分、seed 前缀切片。官方若回退到向后推进
-    // 语义，cut 锚点即红——那是坏消息：残留排队消息复活，scanStaleQueueItemIds 清理
-    // 重新生效；重构改名同样会红，按复查信号处理（与产物类探针的既有约定一致）。
+  describe('sessions.fork 切点语义（G1/I35：0.1.7 起 boundary 校验 + buildForkSeed）', () => {
+    // 插件的 cutSeq 是「该消息之前最近一次 turn/end 的真实 seq」，官方把它当**包含式**
+    // 切点：boundary = atSeq ?? latestCompletedPrefixBoundary(events)，并要求
+    // events[boundary].seq === boundary（否则 session/fork-unavailable）。三条锚点
+    // 分钉 boundary 解析、边界校验、seed 与前缀计数——官方改边界语义（如回到
+    // 「向后推进到下一个 turn/start」）即红：那正是残留排队消息复活的形态，
+    // scanStaleQueueItemIds 清理链要跟着重估。
     // 0.1.1 旧实现的产物锚点未核验，旧版安装整体 skip（fork 签名探针仍覆盖旧包）。
     const p = 'dsh-api-session-controller'
     const f = '/lib/index.js'
     const guard = () => has(p, f)
 
-    probeIf(guard)('boundary 以「seq >= atSeq 的首条 turn/end」解析（atSeq 只认轮次边界）', () => {
-      expect(read(p, f)).toMatch(/event\.type === "turn\/end" && event\.seq >= atSeq/)
+    probeIf(guard)('boundary = atSeq ?? latestCompletedPrefixBoundary（省略 atSeq 才取最近完成轮次前缀）', () => {
+      const src = read(p, f)
+      expect(src).toMatch(/const boundary = atSeq \?\? latestCompletedPrefixBoundary\(source\.events\);/)
+      // 前缀解析以最后一条 turn/end 为锚（插件传的 cutSeq 同源，不会被跳过）
+      expect(src).toMatch(/const lastTurnEnd = events\.findLast\(\(event\) => event\.type === "turn\/end"\);/)
     })
 
-    probeIf(guard)('cut 固定为 boundary.seq + 1（0.1.6-alpha.1 起精确切到选中轮次结束，不再向后推进）', () => {
-      expect(read(p, f)).toMatch(/const cut = SessionLogOffset\(boundary\.seq \+ 1\)/)
+    probeIf(guard)('boundary 必须是真实事件 seq（events[boundary]?.seq !== boundary 即 fork-unavailable）', () => {
+      expect(read(p, f)).toMatch(/source\.events\[boundary\]\?\.seq !== boundary\) throw new RemoteError\("session\/fork-unavailable"/)
     })
 
-    probeIf(guard)('seed 为切点前完整前缀 slice(0, cut)（结束事件之后的排队输入不入 seed）', () => {
-      expect(read(p, f)).toMatch(/seed: source\.events\.slice\(0, cut\)/)
+    probeIf(guard)('seed = buildForkSeed(events, boundary)，inheritedEventCount = boundary + 1', () => {
+      const src = read(p, f)
+      expect(src).toMatch(/const seed = buildForkSeed\(source\.events, boundary\);/)
+      expect(src).toMatch(/inheritedEventCount: SessionLogOffset\(boundary \+ 1\),/)
+      expect(src).toMatch(/import \{ buildForkSeed \} from "@deepseek-ai\/dsh-session\/fork";/)
     })
   })
 
@@ -253,6 +257,73 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       const src = read('dsh-settings', '/lib/types/types.d.ts')
       expect(src).toMatch(/op: 'set'/)
       expect(src).toMatch(/op: 'unset'/)
+    })
+  })
+
+  describe('settings 面换代（I39：0.1.7 起 SettingsForms + profile entry id + volatile 门槛）', () => {
+    // 0.1.7 把 dsh-settings 整体换成 SettingsForms：整个 SettingsProvider 移除
+    // （installSection/register 双双缺席，插件旧三分支静默 no-op）、ns 变成
+    // profile entry id（configEditor.entries() 按 row.options.id 匹配）、且只有
+    // schema 标了 schemastery .volatile() 的字段可被 describe 收录与写入。
+    // 三条锚点正是插件双分支与 volatile 声明的合法性依赖——官方改名/改判据即红
+    // （本机实测 apply 期 describe 看不到自身、settled 后可返回，故插件同时保留
+    // options.id 候选回退，见 host/config.ts resolveSettingsNs）。
+    const p = 'dsh-settings'
+    const f = '/lib/index.js'
+    const guard = () => has(p, f)
+
+    probeIf(guard)('导出面只剩 SettingsForms（旧注册入口 installSection/register 已整体移除）', () => {
+      const src = read(p, f)
+      expect(src).toMatch(/var SettingsForms = class extends Service \{/)
+      expect(src).toMatch(/export \{ SettingsConflictError, SettingsForms/)
+      // 这是「旧三分支静默 no-op」的机器化表达：官方若把注册入口加回来，插件应重估分流优先级
+      expect(src).not.toMatch(/installSettingsSection|installSection/)
+      expect(src).not.toMatch(/\bregister\s*\(/)
+    })
+
+    probeIf(guard)('ns = profile entry id：write 按 entries().find(options.id === ns)、describe 报 entry.options.id', () => {
+      const src = read(p, f)
+      expect(src).toMatch(/configEditor\.entries\(\)\.find\(\(row\) => row\.options\.id === ns\)/)
+      expect(src).toMatch(/ns: entry\.options\.id,/)
+    })
+
+    probeIf(guard)('volatile 门槛：volatileForm 读 schema.meta.volatile，无 volatile 字段即拒写/拒显', () => {
+      const src = read(p, f)
+      expect(src).toMatch(/if \(schema\.meta\.volatile\) return plainSchema\(schema\);/)
+      expect(src).toMatch(/`No configurable plugin entry "\$\{ns\}"`/)
+      expect(src).toMatch(/`Plugin entry "\$\{ns\}" has no volatile fields`/)
+    })
+  })
+
+  describe('volatile 热更链路与运行时可访问面（I39：loader 提交 ref 后按 fiber 派发事件）', () => {
+    // 插件新面的热更依赖两条官方事实，此前完全没有盯防——官方改名即静默失效
+    // （热更悄悄死掉、新面悄悄不启用），与本轮被 verify-host 自建桩掩盖的换代
+    // 属同类面，故一并钉住：
+    // 1) loader 把新值写进运行中 fiber 的 ref 后，经只对目标 fiber 可见的上下文
+    //    派发 loader/volatile-update（所以插件必须在自己 ctx 上 on，别的插件收不到）；
+    // 2) Fiber.entry 增补（可选：无 Loader 挂载时缺席）+ Entry.id/options.id 双形态
+    //    ——ns 解析读的就是 options.id。
+    const p = 'cordis-plugin-loader'
+    const f = '/lib/index.js'
+    const guard = () => has(p, f)
+
+    probeIf(guard)('loader/volatile-update 在产物里存在且被 dispatch（按 fiber 过滤 + ref 已先行提交）', () => {
+      const src = read(p, f)
+      expect(src).toMatch(/const refs = volatileEntries\(fiber\.config\);/)
+      expect(src).toMatch(/updateVolatile\(ref, source\);/)
+      expect(src).toMatch(/fiber\.ctx\.emit\(self, "loader\/volatile-update", paths\);/)
+      expect(src).toMatch(/self\[Context\.filter\] = \(owner\) => owner\.fiber === fiber;/)
+    })
+
+    probeIf(() => has(p, '/lib/types/index.d.ts'))('Fiber.entry 增补形状在位（ns 解析的读取面）', () => {
+      expect(read(p, '/lib/types/index.d.ts')).toMatch(/interface Fiber \{\s*entry\?: Entry;/)
+    })
+
+    probeIf(() => has(p, '/lib/types/config/entry.d.ts'))('Entry.options.id 是局部 id、Entry.id 带父 tree 前缀（候选顺序依据）', () => {
+      const src = read(p, '/lib/types/config/entry.d.ts')
+      expect(src).toMatch(/Stable id inside the containing entry tree/)
+      expect(src).toMatch(/options: EntryOptions;/)
+      expect(src).toMatch(/get id\(\): string;/)
     })
   })
 
@@ -398,26 +469,39 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
     })
   })
 
-  describe('win32 shell 方言（I36：官方无方言字段，插件只能行为探测 + 直连兜底）', () => {
+  describe('win32 shell 方言与执行接缝（I36/I38：无方言字段；0.1.7 起 run/start → execute().result()）', () => {
     // 官方 shell 是提供方注册制：win32 上宿主可把 ctx.shell 配成 bash，此时 pwsh
     // 模板被 bash 执行、首行编码前导即语法错误（issue #15）。插件的路线是行为探针
     // 判方言 + 判成 bash 时 Node spawn 直连 powershell.exe，其合法性依赖以下官方
     // 事实——任一漂移即红：
     // 1) ShellExecutor 公开面没有「我是 bash 还是 pwsh」的字段：有字段就该改读字段
     //    （探针与探测命令可一并退役）；
-    // 2) 直连通道复刻的三件事仍在官方实现里：PS 5.1 候选路径、argv 旗标形态、
+    // 2) 0.1.7 起前台接缝换成 resolve + execute(spec) → handle.result()（run/start
+    //    被删除）。插件按运行时方法探测双分支（store.runViaExecutor），判据优先级
+    //    与「run 是否存在」绑定：官方若回退（把 run 加回来）本探针即红，提示重估；
+    // 3) 直连通道复刻的三件事仍在官方实现里：PS 5.1 候选路径、argv 旗标形态、
     //    env 清洗与 overrides 口径。
     const p = 'dsh-shell'
     const f = '/lib/types/index.d.ts'
     const guard = () => has(p, f)
 
-    probeIf(guard)('ShellExecutor 公开面无方言字段（resolve/run/start + sandboxMode）', () => {
+    probeIf(guard)('ShellExecutor 公开面无方言字段，接缝为 resolve + execute（抽象 run/start 已移除）', () => {
       const m = read(p, f).match(/export declare abstract class ShellExecutor[\s\S]*?\n\}/)
       expect(m).toBeTruthy()
-      expect(m[0]).toMatch(/abstract resolve\(/)
-      expect(m[0]).toMatch(/abstract run\(/)
-      expect(m[0]).toMatch(/abstract start\(/)
+      expect(m[0]).toMatch(/abstract resolve\(request: ShellExecRequest\): ShellExecSpec/)
+      expect(m[0]).toMatch(/abstract execute\(spec: ShellExecSpec\): Promise<ShellExecution>/)
+      expect(m[0]).not.toMatch(/abstract run\(|abstract start\(/)
       expect(m[0]).not.toMatch(/dialect|shellKind|flavor/i)
+    })
+
+    probeIf(() => has(p, '/lib/types/types.d.ts'))('ShellExecution.result() 与可空 exitCode（双分支调用形态 + 失败分级的类型依据）', () => {
+      const types = read(p, '/lib/types/types.d.ts')
+      expect(types).toMatch(/export interface ShellExecution extends ShellProcess \{/)
+      expect(types).toMatch(/result\(\): Promise<ShellRunResult>/)
+      // exitCode 可空是 runShellMeta「准备期超时 vs 非零退出」分级的官方事实依据；
+      // timedOut 是超时的 first-cause 标记（有它就不必靠「null + 无 stderr」推断）
+      expect(types).toMatch(/exitCode: number \| null;/)
+      expect(types).toMatch(/timedOut: boolean;/)
     })
 
     const pwsh = 'dsh-pwsh-local'

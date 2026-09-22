@@ -250,7 +250,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I29 dsh 0.1.2 client 服务层迁移：`client/runtime` 包删除、slots/sessions/workspaces 迁入 ui-renderer 与新增 api 包后，插件 client 对象必须 `inject: [...]` 声明 + `ctx.<name>` 属性访问服务，`ctx.get('slots')` 在未声明作用域下静默 undefined 导致 apply 首行退出——症状「Host 活 Client 死」UI 全消失无报错（guard 门禁 0.1.1-rc.2 已存在，触发点是服务层重组）；guard 对 shadowing slot 强制分配 priority（插件传入值被覆盖，重试循环失效但无害）。详见 compat-audit I29。
 
-* I30 settings 独立辅助函数移除：0.1.2-alpha.2 起 `installSettingsSection` 改 `SettingsProvider.installSection`——按运行时注入实例的 API 分派（旧版走 `register` 复刻接线），静态 import 判断会误判。
+* I30 settings 独立辅助函数移除：0.1.2-alpha.2 起 `installSettingsSection` 改 `SettingsProvider.installSection`；**0.1.7-alpha.1 起整个 `SettingsProvider` 移除**（`installSection`/`register` 零命中、旧三分支静默 no-op），分流改为「旧注册入口是否缺席」——按运行时注入实例的 API 分派（旧面走 `installSection`/`register`），静态 import 判断会误判。面换代细节见 I39。
 
 * I31 `slots.entries(key)` 是只读快照、`slots.inject(key, cb)` 回调同步/延迟两态——priority 动态避让只在无 guard 环境真实生效（I1 的冲突递减重试在 inject 延迟路径是死代码）。
 
@@ -262,7 +262,11 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I35 0.1.5 线 `sessions.fork` 切点取 `boundary+1` 后跳到下一个 `turn/start`——切点后的 inbox 入队事件（排队消息）一并进子会话 seed，被撤回消息以「排队消息」复活；0.1.6-alpha.1 官方修复（cut 固定 `boundary.seq+1`）后从源头消失，插件清理链在 0.1.6 上退化为无害空操作（peer 仍覆盖 0.1.5 线）。详见 compat-audit I35。
 
-* I36 win32 下 `ctx.shell` 方言不受插件控制（提供方注册制，profile 可把 win32 配成 bash 执行器），pwsh 模板被 bash 执行首行即语法错误、快照/撤回全死；官方 `ShellExecutor` 公开面无方言字段，只能行为探测——探针判 bash 时改走直连 powershell.exe 通道（stdin 字节透传/尾部截断/超时 kill/失败清扫四语义对齐官方）。详见 compat-audit I36。
+* I36 win32 下 `ctx.shell` 方言不受插件控制（提供方注册制，profile 可把 win32 配成 bash 执行器），pwsh 模板被 bash 执行首行即语法错误、快照/撤回全死；官方 `ShellExecutor` 公开面无方言字段，只能行为探测——探针判 bash 时改走直连 powershell.exe 通道（stdin 字节透传/尾部截断/超时 kill/失败清扫四语义对齐官方）。0.1.7 起公开面另换成 `resolve` + `execute`（I38）。详见 compat-audit I36。
 
 * I37 0.1.6-alpha.2 移除 `ISessions.open`（导航归视图所有者）：会话导航改走独立 `uiWorkspace` 服务的 `openSession`（`ctx.workspaces` 只有归档能力、无导航），撤回 fork 后打开子会话依赖它；同版 `sessions.list.byId` 含归档会话而归档不是合法主视图选择（官方清空 → 空态），故「切换」类导航的判据须叠加 `workspaces.list` 快照的 `archivedSessionIds` 排除。详见 compat-audit I37。
+
+* I38 0.1.7-alpha.1 换 shell 执行接缝：`ShellExecutor` 删 `run`/`start`，改 `resolve(request)` + `execute(spec)` → `ShellExecution.result()`；`result()` 只在基础设施失败时 reject，`exitCode` 可为 `null`（准备期超时/信号终止）。POSIX 上旧调用必 `shell.run is not a function`（全链死），故插件按运行时方法探测双分支（`run` 优先 → `execute` 兜底），两分支共用 spec 构造与失败分级（null + 无 stderr 或 first-cause `timedOut` → 判超时）。详见 compat-audit I38。
+
+* I39 0.1.7-alpha.1 换 settings 面：`ctx.settings` 变 `SettingsForms`，**ns = profile entry id**（官方按 `entry.options.id` 寻址，本机实测为 profile 行的 `recall`），且只有 schema 标 `.volatile()` 的字段可被 `describe()` 收录/写入（`.volatile()` 需 schemastery ≥3.18.3 → 必须 feature-detect）。热更经 loader 提交 ref 后**只对目标 fiber** 派发的 `loader/volatile-update`（故只能在自己 ctx 监听），取值需解一层 Volatile ref。详见 compat-audit I39。
 
