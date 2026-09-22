@@ -292,10 +292,27 @@ describe('关键模板结构断言', () => {
     const pwshSnap = pwsh.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
     expect(pwshSnap).toContain('$oversizeSkip')
     expect(pwshSnap).toContain('if (-not $oversizeSkip.Contains($d.Name)) { $oversizeStack.Push($d.FullName) }')
-    // posix：find \( -name A \) -prune -o 前缀（依赖前置 excludeSyncBlock 的 $new_exc）
+    // posix：find ( -type d ( -name A -o -name B ) ) -prune -o 前缀（依赖前置
+    // excludeSyncBlock 的 $new_exc）。括号必须是数组元素里的单字符数据——写成
+    // "\(" 时 bash 不剥反斜杠，find 收到两字符 token 直接报「paths must
+    // precede expression」退出，整条剔除被 2>/dev/null + || true 吞成静默空操作
+    // （2026-09-22 Windows 实弹复现，Linux/macOS 同样命中）。-type d 限定与 pwsh
+    // 侧 EnumerateDirectories 对齐：prune 只剪目录，不误伤同名大文件。
     const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
     expect(posixSnap).toContain('oversize_prune')
-    expect(posixSnap).toContain('"\\(" "${oversize_args[@]}" "\\)" -prune -o')
+    expect(posixSnap).toContain("'(' -type d '(' \"${oversize_args[@]}\" ')' ')' -prune -o")
+    expect(posixSnap).not.toContain('"\\("')
+  })
+
+  it('gc 失败可见：pwsh 模板让 git gc 非零退出变成脚本失败（posix 靠 set -e）', () => {
+    // pwsh 对原生命令非零退出不抛（EAP 不作用于 native）：不查 $LASTEXITCODE 就会
+    // 带着失败继续写 gc.stamp、输出 GC_OK、以 0 退出，runShell 只看进程退出码，
+    // 于是快速失败被记成成功、退避在 Windows 上完全失效（2026-09-22 实弹：
+    // exit 0 + GC_OK + stamp 刷新）。检查必须落在 gc 之后、写 stamp 之前。
+    const pwshGc = pwsh.gcScript(FAKE_STORE, 'git-exe')
+    expect(pwshGc).toContain('if ($LASTEXITCODE -ne 0) { throw ("git gc failed (exit " + $LASTEXITCODE + ")") }')
+    expect(pwshGc.indexOf('$LASTEXITCODE')).toBeLessThan(pwshGc.indexOf('gc.stamp'))
+    expect(posix.gcScript(FAKE_STORE, 'git-exe').startsWith('set -e')).toBe(true)
   })
 })
 

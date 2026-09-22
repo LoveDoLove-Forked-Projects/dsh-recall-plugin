@@ -501,12 +501,19 @@ export function listTagsWithTimeScript(store: ScriptStore, gitExe: string): stri
 // （默认 2 周宽限期内对象仍占盘）——安全前提是 gc 与快照在同一条串行
 // 队列里执行（见 maintenance.js），不存在并发竞态。
 // 结尾写 gc.stamp：跨重启的节流凭据（ensureGit 回读）。
+// 显式查 $LASTEXITCODE（同 rescueScript/diffScript）：pwsh 对原生命令非零退出
+// 不抛（EAP 不作用于 native），不查就会带着「gc 失败」继续写 stamp、输出
+// GC_OK、以 0 退出——runShell 只看进程退出码，于是快速失败（磁盘满 / 锁冲突 /
+// 杀软锁 pack，实测 40~150ms 内以 128 返回）被记成成功，maintenance 据此推进
+// 完整 gcHours 周期，失败退避在 Windows 上对快速失败完全失效（PS 5.1/pwsh 7
+// 均如此，实测）。posix 版有 set -e 天然正确，无需改。
 export function gcScript(store: ScriptStore, gitExe: string): string {
   return [
     "$ErrorActionPreference = 'Stop'",
     '$git = ' + psq(gitExe),
     '$g = ' + psq(store.git),
     '& $git --git-dir=$g gc --quiet --prune=now',
+    'if ($LASTEXITCODE -ne 0) { throw ("git gc failed (exit " + $LASTEXITCODE + ")") }',
     "Set-Content -LiteralPath (Join-Path $g 'gc.stamp') -Value ([DateTimeOffset]::UtcNow.ToUnixTimeSeconds().ToString()) -Encoding ascii",
     "Write-Output 'GC_OK'"
   ].join('\n')

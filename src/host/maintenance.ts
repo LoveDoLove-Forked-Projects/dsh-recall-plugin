@@ -22,10 +22,17 @@
 // gcHours 周期。实测教训：失败推进整天周期会让对象库滚雪球——每次 gc 都更
 // 重、更容易超时，最终永远完不成（数 GB loose、in-pack 恒 0）。退避期间
 // gcCount 条数门槛照常生效，不会退化成「每条消息都重试」。
+// 与 GC_TIMEOUT_MS 同属内部策略常量，不走 Config：回拨量由「gcHours − 退避」
+// 决定，退避单开成字段就能配出「退避长于周期」（gcLastAt 落到未来、永不重试）
+// 这类无意义组合；同类先例见 scripts.posix.js 的 STALE_LOCK_MIN、snapshots.js
+// 的 FUSE_AFTER（合规清单 #3 的豁免面）。
 const GC_RETRY_BACKOFF_MS = 1800000
 
 // 单次 gc 超时（毫秒）：GB 级 loose 对象库 repack 可超 10 分钟，被杀的 gc
 // 永远完不成；30 分钟给大库足够余量。gc 与快照同在串行队列，只影响维护节奏。
+// 此处是把原先内联的 timeoutMs: 600000 具名化，不是新增可调参数；不走 Config
+// 的定性同 GC_RETRY_BACKOFF_MS——要改 gc 节奏的用户改 gcHours 即可，超时是被
+// 动兜底而非节流旋钮。
 const GC_TIMEOUT_MS = 1800000
 
 import type { Runtime, StoreInfo, SnapshotInfo } from '../types/state.js'

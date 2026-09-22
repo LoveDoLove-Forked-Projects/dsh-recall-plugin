@@ -82,9 +82,15 @@ function dropGitlinksBlock() {
 // xargs 失败/空输入 || true 兜住（fail-open 语义与逐条版一致，残留条目
 // 不进 index 的代价由下次快照幂等重试）。
 // 目录级跳过：exclude 表 basename 形式 pattern（见 pwsh 版同注释）转
-// find 的 \( -name A -o -name B \) -prune -o 前缀，大目录整棵子树不进扫描；
-// 复杂 pattern 回退全扫，fail-open 语义不变。$new_exc 由前置的
+// find 的 ( -type d ( -name A -o -name B ) ) -prune -o 前缀，大目录整棵子树
+// 不进扫描；复杂 pattern 回退全扫，fail-open 语义不变。$new_exc 由前置的
 // excludeSyncBlock 定义（同脚本作用域）。
+// 括号是数组元素里的**数据**，不经过 shell 分词——写成 "\(" 时 bash 不剥
+// 反斜杠，find 收到两字符 token \( 直接报「paths must precede expression」
+// 退出 1，整条剔除被 2>/dev/null 与 || true 吞成静默空操作。killOrphansScript
+// 里的 \( 是另一种东西：脚本源码内联写法，分词阶段就被剥掉，两者不可混用。
+// 外层 -type d：prune 只该剪目录，否则与排除目录同名的大文件（dist/target/
+// .git）会被 -name 一并剪掉；pwsh 侧只对 EnumerateDirectories 判名，两侧同语义。
 function oversizeBlock(maxBytes: number): string {
   return [
     'oversize_args=()',
@@ -98,7 +104,7 @@ function oversizeBlock(maxBytes: number): string {
     '  if [ ${#oversize_args[@]} -eq 0 ]; then oversize_args+=(-name "$t"); else oversize_args+=(-o -name "$t"); fi',
     'done <<< "$new_exc"',
     'oversize_prune=()',
-    'if [ ${#oversize_args[@]} -gt 0 ]; then oversize_prune=("\\(" "${oversize_args[@]}" "\\)" -prune -o); fi',
+    "if [ ${#oversize_args[@]} -gt 0 ]; then oversize_prune=('(' -type d '(' \"${oversize_args[@]}\" ')' ')' -prune -o); fi",
     'find "$root" "${oversize_prune[@]}" -type f -size +' + String(maxBytes || MAX_FILE_BYTES) + 'c -print0 2>/dev/null | while IFS= read -r -d \'\' f; do',
     '  printf \'%s\\0\' "${f#"$root"/}"',
     "done | xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" update-index --force-remove -- 2>/dev/null || true",
