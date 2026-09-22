@@ -167,14 +167,31 @@ export interface ShellExecRequest {
 }
 
 export interface ShellRunResult {
-  exitCode?: number
+  // 0.1.7 起可为 null：准备期超时（已 settled 的无输出 handle）与信号终止两种
+  // 情形。非零退出/超时/abort 一律 resolve 不 reject——插件侧 `!== 0` 判失败对
+  // null 依旧成立，只是错误文案要按 null 分级（store.ts runShellMeta）
+  exitCode?: number | null
   stdout?: { text?: string; truncated?: boolean }
   stderr?: { text?: string }
+  // 0.1.7 新增 first-cause 标记（超时 kill 与 abort kill 各标一个）
+  timedOut?: boolean
+  aborted?: boolean
+}
+
+// 0.1.7 的前台执行句柄：execute(spec) 返回它，结果经 result() 取（按需创建、
+// 记忆化）。只有基础设施失败（spawn 未产出进程）才 reject。
+export interface ShellExecution {
+  result(): Promise<ShellRunResult>
 }
 
 export interface ShellExecutor {
   resolve(request: ShellExecRequest): ShellExecRequest
-  run(spec: ShellExecRequest): Promise<ShellRunResult>
+  // 双代接缝共存（peer 保留 0.1.2–0.1.6 各线段）：≤0.1.6 只有 run、≥0.1.7 删
+  // run/start 换成 execute()。声明为可选，运行时按方法探测分流
+  // （store.ts runViaExecutor）——宿主注入的是它自己的执行器实例，插件
+  // node_modules 的 dsh-shell 版本与运行时无关。
+  run?(spec: ShellExecRequest): Promise<ShellRunResult>
+  execute?(spec: ShellExecRequest): Promise<ShellExecution>
 }
 
 // ---- agents（Agent 注册表，P0-1 运行中 agent 拦截）----

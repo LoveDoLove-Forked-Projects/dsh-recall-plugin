@@ -17,7 +17,7 @@ import * as posixScripts from './scripts.posix.js'
 import { classifyEnvError } from './diagnostics.js'
 import type { Runtime, SharedState, StoreInfo, ShellRunOptions, ErrorRecord, ShellDialect } from '../types/state.js'
 import type { PwshScripts, PosixScripts } from '../types/scripts.js'
-import type { HostContext, SessionQueryEngine, ShellRunResult } from '../types/dsh-contract.js'
+import type { HostContext, SessionQueryEngine, ShellExecutor, ShellExecRequest, ShellRunResult } from '../types/dsh-contract.js'
 import type { ResolvedConfig } from '../types/config.js'
 
 // home 不可写时迁移重试的节流间隔：避免每条消息都白试一次注定失败的迁移
@@ -261,6 +261,27 @@ export async function runViaSpawn(spawn: SpawnLike, req: DirectShellRequest): Pr
   })
 }
 
+// ---- 官方执行通道的双代分流（0.1.7 shell 接缝）----
+// 0.1.7 删掉了 ShellExecutor 的 run/start，改为 resolve + execute(spec) 返回
+// 句柄、前台结果走 handle.result()。peer 保留 0.1.2–0.1.6 各线段（老用户仍可能
+// 装），所以按**运行时方法探测**分流而非按包版本：宿主注入的是它自己的执行器
+// 实例，插件 node_modules 里的 dsh-shell 版本与运行时无关。两分支共用同一 spec
+// 构造与同一失败分级（result() 与 run() 的返回形状一致、失败语义一致）。
+// 判据顺序先 run 后 execute：0.1.7 官方执行器已无 run，风险只在第三方执行器
+// 同时提供两者时拿到旧语义——探针锚点（M3-1）绑定了这一判据，官方回退会先红。
+export async function runViaExecutor(shell: ShellExecutor, spec: ShellExecRequest): Promise<ShellRunResult> {
+  if (typeof shell.run === 'function') return await shell.run(spec)
+  if (typeof shell.execute === 'function') {
+    const handle = await shell.execute(spec)
+    // result() 只在基础设施失败（spawn 未产出进程）时 reject；非零退出、超时
+    // kill、abort kill 一律 resolve 并以 first-cause 标记回显（C1 语义）。
+    // reject 原样上抛——与旧通道 run reject 的语义保持一致（失败分级只服务
+    // resolve 出来的失败结果）。
+    return await handle.result()
+  }
+  throw new Error('recall: ctx.shell 未提供 run 也未提供 execute，无法执行命令（dsh 执行接缝不兼容）')
+}
+
 export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: { spawn?: SpawnLike }): Runtime {
   const shell = ctx.shell
   const sessions = ctx.sessions
@@ -360,7 +381,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
         let res: ShellRunResult | null = null
         try {
           const sp = ctx.get<{ workspaceRoot?: string }>('sandboxPolicy')
-          res = await shell.run(shell.resolve({
+          res = await runViaExecutor(shell, shell.resolve({
             command: SHELL_PROBE_COMMAND,
             timeoutMs: 30000,
             stdoutMaxBytes: 4096,
@@ -449,9 +470,20 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
       ...((opts && opts.stdin !== undefined) ? { stdin: opts.stdin } : {}),
       sandboxPolicy: { mode: 'danger-full-access', workspaceRoot }
     })
-    const res = await shell.run(spec)
+    const res = await runViaExecutor(shell, spec)
     if (res && res.exitCode !== 0) {
-      await throwShellFailure(command, (res && res.stderr && res.stderr.text) || '', res.exitCode)
+      // 失败分级：0.1.7 起 exitCode 可为 null（准备期超时 / 信号终止），旧的
+      // `'exit ' + exitCode` 兜底文案对用户不可读、也命不中 diagnostics 的分类。
+      // 准备期超时无法与「无输出的 abort」用 exitCode 区分，故只在无 stderr 时
+      // 判超时（first-cause 标记 timedOut 在场时直接采用，它是强判据）；有
+      // stderr 则按非零退出处理并回显 stderr 原文。超时文案含「超时」二字，
+      // 非零退出文案含退出码，两类各自可读（验收由 M1-3 ④ 断言）。
+      const stderr = (res && res.stderr && res.stderr.text) || ''
+      const timedOut = res.timedOut === true || (res.exitCode === null && !String(stderr).trim())
+      const detail = timedOut
+        ? '命令准备期超时（' + String(timeoutMs) + 'ms，执行器未产出输出）'
+        : stderr
+      await throwShellFailure(command, detail, res.exitCode)
     }
     return {
       text: (res && res.stdout && res.stdout.text) || '',
