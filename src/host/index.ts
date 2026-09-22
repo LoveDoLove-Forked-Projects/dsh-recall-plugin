@@ -103,9 +103,17 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     }
   }
   try {
+    // 旧面注册的 entry 必须先解 volatile ref：schemastery ≥3.18.3 的 .volatile()
+    // 是「标记即生效」——插件 node_modules 一旦解析到带 volatile 的 schemastery，
+    // 入口 config 就会被 loader 解析成 Volatile ref（与 settings 面无关，0.1.6 的
+    // 旧 provider 拿到的是同一批 ref）。旧 provider 的 installSection/register 会
+    // 用 schema 校验 entry，ref 不是合法值直接 ValidationError → namespace 永不
+    // 注册、设置卡片读写全废（M5-5 降级回归实锤：报 is not registered）。
+    // unwrapConfig 对普通值恒等（旧 schemastery 树无感），对新面 ref 解一层。
+    const legacyEntry = unwrapConfig(config)
     if (typeof dshSettings.installSettingsSection === 'function') {
       // 包解析到旧版 dsh-settings：独立函数辅助
-      dshSettings.installSettingsSection(ctx, LEGACY_SETTINGS_NS, Config, config, settingsHooks)
+      dshSettings.installSettingsSection(ctx, LEGACY_SETTINGS_NS, Config, legacyEntry, settingsHooks)
     } else if (typeof ctx.inject === 'function') {
       ctx.inject(['settings'], (settingsCtx) => {
         const settingsService = settingsCtx.settings
@@ -120,15 +128,15 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
           // 0.1.2-alpha.2 起：settings 服务方法（inject 声明后取实例，方法
           // 与独立函数同签名——register 语义/组合 base/卸载回退/onChange
           // 触发全一致）
-          settingsService.installSection(ctx, LEGACY_SETTINGS_NS, Config, config, settingsHooks)
+          settingsService.installSection(ctx, LEGACY_SETTINGS_NS, Config, legacyEntry, settingsHooks)
         } else if (typeof settingsService.register === 'function') {
           // 0.1.1-rc.2 及以前：仅 register 核心 API，复刻独立函数接线语义
-          const scope = settingsService.register(LEGACY_SETTINGS_NS, Config, { base: config })
+          const scope = settingsService.register(LEGACY_SETTINGS_NS, Config, { base: legacyEntry })
           settingsHooks.setSource(() => scope.get())
           settingsHooks.onChange()
           scope.watch(() => settingsHooks.onChange())
           settingsCtx.effect(() => () => {
-            settingsHooks.setSource(() => config)
+            settingsHooks.setSource(() => legacyEntry)
             settingsHooks.onChange()
           })
         }
