@@ -48,7 +48,10 @@
 > `64aeb3f`）。发布提交链：`dc3dad4`（fix(client)：端点路径按文档基址解析，I40）、`f72a8ce`（docs(compat)：rc.1 评估归档 +
 > 版本声明同步）、`64aeb3f`（chore(release) 2.4.4，含 lockfile 根版本同步）。发版前门禁：`build`（`lib/client.js` 112112 字节）、
 > `typecheck`、单测 **435/435**、`check:upgrade` 三层全绿（探针 **52/52**）。registry 直连 `/2.4.4` 与 `dist-tags.latest` 双确认
-> （传播约 1 分钟）；GitHub Release 为 Latest、非 draft/prerelease。
+> （传播约 1 分钟）；GitHub Release 为 Latest、非 draft/prerelease。**本机 profile 验证**：web profile（npm 模式）经
+> `pnpm update dsh-recall-plugin@2.4.4` 实装 2.4.4（依赖声明随之变 `^2.4.4`；pnpm 12 的 `minimumReleaseAge` 对新发布版本须
+> 显式带版本号，pnpm 已自动写入 `minimumReleaseAgeExclude`），实装产物核验含 I40 修复（`lib/client.js` 的
+> `document.baseURI` 解析在位，仅余两条回落兜底字面量）。
 >
 > **0.1.7-alpha.2 核验（2026-09-23）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `0010283`），
 > `npm install -g @deepseek-ai/dsh@alpha` 全局实装（0.1.7-alpha.1 → alpha.2；cordis 4.0.3→4.0.4、schemastery 3.18.3→3.18.4；
