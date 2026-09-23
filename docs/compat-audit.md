@@ -7,6 +7,31 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.7-alpha.2 核验（2026-09-23）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `0010283`），
+> `npm install -g @deepseek-ai/dsh@alpha` 全局实装（0.1.7-alpha.1 → alpha.2；cordis 4.0.3→4.0.4、schemastery 3.18.3→3.18.4；
+> 包布局不变，junction 无需重建）。**核验方式为全树内容级 diff**：以 npm 残留的 alpha.1 整包副本为基线做 SHA256 全文件比对——
+> 277 包版本号变化、**342 个非 package.json 文件真实改动**，插件消费面再逐包下钻到签名级。**零改动集合（字节级一致，仅 package.json）**：
+> `dsh-session`、`dsh-session-query`、`dsh-shell`、`dsh-pwsh-local`、`dsh-sandbox-policy`、`dsh-host-webserver`、`dsh-client-connection`、
+> `dsh-shell-env`、`dsh-agent`、`dsh-agent-loop`、`dsh-attachment`、`dsh-attachment-local`、`dsh-api-workspace-controller`、
+> `dsh-client-ui-{slots,renderer,session}`，以及整个 cordis vendor 栈（cordis / plugin-loader / include / timer / group / cosmokit /
+> schemastery）——即 **I9/I10/I13/I20/I28/I29/I30/I31/I32/I36/I38/I39 的出处包在本版未变**，alpha.1 的核验结论与探针锚点原样成立。
+> **消费面逐字/字节核验**：`updateQueue` / `readAttachment` / `QueueAction`（含 `{kind:'remove'}`）签名行逐字一致（G1、I34 不受影响）；
+> `ui-chat` 与 `ui-conversation` 的 slot 契约（`conversation.chat.node`、`ConversationNode` 全集、`records`）**字节未变**（I1/I2/I4/I5）；
+> `__ModuleLoader__.load({id, factory})` 形态逐字在位（I13，仅新增 `importError(id)` 诊断）；`plugins.bundle.config` 仍在（I12）；
+> fork 实现与三条切点锚点未动（I6/I33/I35）。**改动面全部落在插件不消费处**：`dsh-api-session-controller` 仅历史分页
+> （新增 `turnWindow`、`paginate` Turn 对齐）与客户端本地回声 / Inbox claim watermark 记账；`dsh-client-ui-chat` 为滚动跟随钩子
+> （`use-scroll-follow`/`use-process-scroll`）；`dsh-client-ui-conversation` 为排队消息重编辑保留换行（`updateQueue` 契约无关）；
+> `dsh-subprocess-local` 仅新增 spill 失败日志管道；`dsh-tool-pwsh-persistent` 的持久命令等待修复与插件路径无关
+> （插件走 `dsh-shell` → `dsh-pwsh-local` 或直连通道，两者字节未变）。**门禁**：`test:probe` **46/46**、`verify:host` 装配断言全过
+> （方言探针回归 `pwsh`）、`typecheck` 通过、`npm test` **430/430**；`check:dsh` 初跑仅两处文档漂移，本轮同步
+> （reference 镜像按 `dsh-v0.1.7-alpha.2` tag 重拉，13 文件**零差异**，仅头部归档字段更新）。**兼容声明**：`dshReleases` 补
+> `0.1.7-alpha.2: compatible`（peer 范围 `>=0.1.7-alpha.1 <0.1.8` 天然覆盖，无新 tuple）。**观察项（非阻塞）**：
+> ① `dsh-tool-jobs` 的 `maxConsecutiveWakes` 由 `default(3)` 改为**无默认（不限）**，唤醒走 `owner.status === 'idle' && owner.followup(message)`，
+> 而 P0-1 `agentBusy` 只认 `status === 'running'`——链式后台命令/一次性子代理完成场景下「守卫见 idle、下一拍被唤醒开新轮」的窗口概率上升
+> （官方无「待唤醒」状态可读，本轮不改码，留实弹观察：先起后台任务再撤回，看原会话是否被唤醒继续跑）；
+> ② I12 探针（`settings.plugin.item`）自 0.1.6 线起为**静默 skip**（`ui-settings-plugins` 不再发布该 slot 契约，alpha.1 亦然），
+> 建议退休或改锚 `plugins.*` 侧，避免「死探针绿灯」。评估实证见 upgrade-assessments/dsh-0.1.7-alpha.2.md。
+>
 > **0.1.7-alpha.1 核验与适配（2026-09-22）——破坏性版本，两处接缝已双分支适配**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
 > 全局实装。**包布局变化**：官方包从全局扁平位收进 `dsh/node_modules/@deepseek-ai/*`；插件工作区 junction 已随之指向

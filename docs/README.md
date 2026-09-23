@@ -51,7 +51,8 @@ docs/
 │   ├── dsh-0.1.5-rc.1.md       # 0.1.5-rc.1 影响评估（2026-09-10，纯发布层推进 / 零破坏零回归）
 │   ├── dsh-0.1.5-rc.2.md       # 0.1.5-rc.2 影响评估（2026-09-11，消费面唯一命中为 ui-chat CSS / 零破坏）
 │   ├── dsh-0.1.6-alpha.1.md    # 0.1.6-alpha.1 影响评估（2026-09-15，接口零破坏 / fork 切点根治 I35）
-│   └── dsh-0.1.7-alpha.1.md    # 0.1.7-alpha.1 影响评估（2026-09-22，破坏性：shell 接缝换 execute / settings 换 SettingsForms）
+│   ├── dsh-0.1.7-alpha.1.md    # 0.1.7-alpha.1 影响评估（2026-09-22，破坏性：shell 接缝换 execute / settings 换 SettingsForms）
+│   └── dsh-0.1.7-alpha.2.md    # 0.1.7-alpha.2 影响评估（2026-09-23，零破坏：全树 342 文件 diff 核验 / 消费面契约字节级一致）
 └── screenshots/           # README 与文档引用的截图素材（只增不删；必删时同步 README 双语与全部文档引用）
 ```
 

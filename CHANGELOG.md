@@ -8,6 +8,10 @@
 
 - **CI 单测缺 `@deepseek-ai/schemastery` 致 4 个测试文件收集失败**：`src/host/config.ts` 在运行时裸导入 `@deepseek-ai/schemastery`（Config schema 本体），但它此前只是 peerDependency——本机靠工作区 junction 解析所以本地全绿，CI `npm ci --legacy-peer-deps` 不装 peer 即 `ERR_MODULE_NOT_FOUND`。M2 起 manage-list/manage-list-stale/manage-usage/settings-bridge 四个单测文件经 routes-manage/config 链传递依赖 config.ts，而 0.1.7 适配批次（M1 起）当天才首次推送过 CI，问题首次暴露。修复＝schemastery 入 devDependencies（`^3.18.3`，与 `.volatile()` feature-detect 的下限对齐；peer 声明 `^3.18.1` 不动）。**对 2.4.1 已发布包零影响**：生产环境 schemastery 由宿主 dsh 提供，此缺包只影响 CI/裸克隆环境的单测。AGENTS.md junction 约定同步更新（schemastery 不再需要 junction；npm install 会修剪 dsh-settings junction，已记录重建方法）。
 
+### 变更
+
+- **兼容声明同步 dsh 0.1.7-alpha.2（零破坏核验，无代码改动）**：本版为体验/稳健性版本，插件消费面经全树内容级 diff 实证零破坏——`updateQueue`/`readAttachment`/`QueueAction`（含 `{kind:'remove'}`）签名行逐字一致，`conversation.chat.node` 与 `ConversationNode`/`records` 槽位契约字节未变，`__ModuleLoader__.load({id, factory})` 注册形态与 `plugins.bundle.config` 在位，fork 实现与切点校验未动；`dsh-session`/`dsh-shell`/`dsh-pwsh-local`/`dsh-sandbox-policy`/`dsh-host-webserver`/`dsh-client-connection`/`dsh-agent{,-loop}` 与整个 cordis vendor 栈（含 `cordis-plugin-loader`）字节级未变，改动全部落在官方 UI/工具层（滚动跟随、历史分页 Turn 对齐、本地回声记账、队列消息重编辑、持久 pwsh 等待修复、工具结果 token 预算）。门禁：`test:probe` 46/46、`npm test` 430/430、`verify:host` 装配断言全过、`typecheck` 通过。同步项：`dshReleases` 补 `0.1.7-alpha.2: compatible`（peer 范围 `>=0.1.7-alpha.1 <0.1.8` 天然覆盖）、`docs/reference/` 镜像按 `dsh-v0.1.7-alpha.2` tag 重拉（13 文件零差异）、`docs/dsh-contract.md` 与 compat-audit 头部版本字段同步，评估实证见 `docs/upgrade-assessments/dsh-0.1.7-alpha.2.md`。已知观察项（不阻塞）：`dsh-tool-jobs` 唤醒次数上限默认放开（`maxConsecutiveWakes` 无默认值）使 P0-1 `agentBusy` 守卫的 idle 窗口概率上升，留实弹观察。
+
 ## [2.4.1] - 2026-09-23
 
 ### 修复

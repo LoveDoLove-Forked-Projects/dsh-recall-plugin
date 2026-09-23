@@ -5,7 +5,7 @@
 [![npm version](https://img.shields.io/npm/v/dsh-recall-plugin?style=flat-square&label=npm&color=3178C6)](https://www.npmjs.com/package/dsh-recall-plugin)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-recall-plugin?style=flat-square&label=downloads&color=1F883D)](https://www.npmjs.com/package/dsh-recall-plugin)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-[![DSH](https://img.shields.io/badge/DSH-0.1.7--alpha.1-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-alpha.1)
+[![DSH](https://img.shields.io/badge/DSH-0.1.7--alpha.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-alpha.2)
 ---
 在任意一条你发过的消息下方点「↶ 撤回」——**工作区文件和对话历史一起回到那条消息发出之前的状态**。
 ---
@@ -67,7 +67,7 @@
 
 ## 安装
 
-前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.2-alpha.1` 至 `0.1.7-alpha.1`（peerDependencies 为按 minor 版本线开窗 `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未核验的新 minor 线仍被拦截）。**0.1.7-alpha.1 是破坏性版本**（`ShellExecutor` 的 `run`/`start` 换成 `execute().result()`；settings 面换成 `SettingsForms`、按 profile 条目 id 寻址并要求字段标 `.volatile()`），插件已做**双分支共存适配**——同一次发布同时兼容 0.1.2–0.1.6 各线段与 0.1.7，老版本 DSH 上的行为不变。`0.1.1-rc.2` 及更早不再声明支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
+前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.2-alpha.1` 至 `0.1.7-alpha.2`（peerDependencies 为按 minor 版本线开窗 `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未核验的新 minor 线仍被拦截）。**0.1.7-alpha.1 是破坏性版本**（`ShellExecutor` 的 `run`/`start` 换成 `execute().result()`；settings 面换成 `SettingsForms`、按 profile 条目 id 寻址并要求字段标 `.volatile()`），插件已做**双分支共存适配**——同一次发布同时兼容 0.1.2–0.1.6 各线段与 0.1.7，老版本 DSH 上的行为不变。`0.1.1-rc.2` 及更早不再声明支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
 
 
 - DSH 官方插件命令：安装并自动挂载进 web profile
