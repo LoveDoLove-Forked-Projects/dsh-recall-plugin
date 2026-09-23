@@ -44,6 +44,11 @@
 > （`dsh-tool-jobs` 的 `maxConsecutiveWakes` 无默认值 × P0-1 `agentBusy` 守卫窗口；`snapshotEvents`/`eventAt`/`ownEvents` 仍 deprecated）；
 > ⑤ 可选增强：本版支持插件用 locale 声明多语言标题/描述与 package.json 图标供管理页展示（本包当前仅中文 description）。
 > 评估实证见 upgrade-assessments/dsh-0.1.7-rc.1.md。
+> **2.4.4 发版核验（2026-09-24）**：插件 **2.4.4 已发布**（npm `latest`＝2.4.4、GitHub Release `v2.4.4`、tag `v2.4.4` 指向
+> `64aeb3f`）。发布提交链：`dc3dad4`（fix(client)：端点路径按文档基址解析，I40）、`f72a8ce`（docs(compat)：rc.1 评估归档 +
+> 版本声明同步）、`64aeb3f`（chore(release) 2.4.4，含 lockfile 根版本同步）。发版前门禁：`build`（`lib/client.js` 112112 字节）、
+> `typecheck`、单测 **435/435**、`check:upgrade` 三层全绿（探针 **52/52**）。registry 直连 `/2.4.4` 与 `dist-tags.latest` 双确认
+> （传播约 1 分钟）；GitHub Release 为 Latest、非 draft/prerelease。
 >
 > **0.1.7-alpha.2 核验（2026-09-23）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `0010283`），
 > `npm install -g @deepseek-ai/dsh@alpha` 全局实装（0.1.7-alpha.1 → alpha.2；cordis 4.0.3→4.0.4、schemastery 3.18.3→3.18.4；
