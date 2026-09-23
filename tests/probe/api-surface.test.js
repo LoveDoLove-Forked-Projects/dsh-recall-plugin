@@ -575,4 +575,29 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       expect(read(ws, navFile)).toMatch(/openSession\(target: SessionTarget\): void/)
     })
   })
+
+  describe('子路径部署的服务端路径基址（I40：官方注入 <base href="./"> + 客户端按文档基址解析）', () => {
+    // 0.1.7-rc.1 起官方支持「Web 挂在反向代理子路径」：index 注入 <base href="./">、
+    // 前端资源改相对引用、客户端把服务端路径按 document.baseURI 解析。插件端点路径
+    // 同样按基址解析（src/client/util.ts recallApiUrl），故依赖这三条官方事实；任一
+    // 条漂移都要重估（官方改回根绝对路径时插件应同步改回；`<base>` 消失则插件子路径
+    // 行为不变、官方自身会坏——探针红了先读 I40 的复查动作再动手）。
+    const staticPkg = 'dsh-host-frontend-static'
+    probeIf(() => has(staticPkg, '/lib/index.js'))('index 响应注入 <base href="./">（插件解析基址的来源）', () => {
+      expect(read(staticPkg, '/lib/index.js')).toMatch(/<base href="\.\/">/)
+    })
+
+    const frontend = 'dsh-web-frontend'
+    probeIf(() => has(frontend, '/dist/index.html'))('前端资源引用为相对路径（子路径下可加载）', () => {
+      const html = read(frontend, '/dist/index.html')
+      expect(html).toMatch(/(?:src|href)="\.\/assets\//)
+      // 出现根绝对资源引用即子路径不可用（本轮修复前的形态）
+      expect(html).not.toMatch(/(?:src|href)="\/assets\//)
+    })
+
+    const gateway = 'dsh-api-gateway'
+    probeIf(() => has(gateway, '/lib/client.js'))('官方客户端以 document.baseURI 为基址（同构对照）', () => {
+      expect(read(gateway, '/lib/client.js')).toMatch(/streamBaseUrl \?\? document\.baseURI/)
+    })
+  })
 })

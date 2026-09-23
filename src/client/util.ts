@@ -81,6 +81,29 @@ export function buildTree(list: ManageListItem[] | null | undefined): TreeWorksp
   return wsList
 }
 
+// 端点 URL 的基址解析。为什么不用根绝对路径 '/api/recall/x'：dsh 0.1.7-rc.1 起官方
+// 支持「Web 挂在反向代理子路径」——index.html 由 dsh-host-frontend-static 注入
+// <base href="./">，官方客户端一律以 document.baseURI 为基址解析服务端路径
+// （见 dsh-api-gateway 的 remoteStreamUrl），前端资源也全部改成相对路径。根绝对
+// 路径在根部署下等价，但在子路径部署下会越过前缀打到代理未映射的根（实测经
+// 子路径代理 404，而带前缀的同一路径 200）。故与官方同构：按当前文档基址解析。
+// base 显式入参只为单测注入（浏览器内省略即取 document.baseURI）；解析失败
+// （非浏览器环境、异常 baseURI）回落到原根绝对路径，保持旧行为不倒退。
+export function recallApiUrl(name: string, base?: string): string {
+  const root = base ?? (typeof document === 'undefined' ? '' : document.baseURI)
+  if (!root) return '/api/recall/' + name
+  try {
+    const baseUrl = new URL(root)
+    // 基址不以 / 结尾时按目录补斜杠：用户直接敲 /dsh（漏尾斜杠）时 baseURI 是
+    // '.../dsh'，不补的话相对解析会把 dsh 当文件名、把子路径前缀整个吞掉。
+    // 官方客户端直接用 document.baseURI 会有同样的坑，这里只做无损加固。
+    if (!baseUrl.pathname.endsWith('/')) baseUrl.pathname += '/'
+    return new URL('api/recall/' + name, baseUrl).href
+  } catch (e) {
+    return '/api/recall/' + name
+  }
+}
+
 // 设置卡片三处共用的状态形状（busy 进行中 / message 反馈 / error 是否错误）
 export interface CardStatusState {
   busy: boolean
@@ -127,9 +150,10 @@ export interface UtilApi {
 }
 
 export function buildUtil(): UtilApi {
-  // Host HTTP API（动态插件的 harness RPC 在此换成 fetch 调用）
+  // Host HTTP API（动态插件的 harness RPC 在此换成 fetch 调用）；路径经
+  // recallApiUrl 按文档基址解析，子路径部署（官方 rc.1 支持）才可达
   function api<T = unknown>(name: string, args?: unknown): Promise<T> {
-    return fetch('/api/recall/' + name, {
+    return fetch(recallApiUrl(name), {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(args || {})

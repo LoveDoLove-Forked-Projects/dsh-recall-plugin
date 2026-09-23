@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { buildTree, clockText, sizeText, bytesToMb } from '../../src/client/util.js'
+import { buildTree, clockText, sizeText, bytesToMb, recallApiUrl, buildUtil } from '../../src/client/util.js'
 import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName, fileCardInfo } from '../../src/client/recall-node.js'
 import { groupByLineage } from '../../src/client/snapshot-manager.js'
 import { nextShadowPriority } from '../../src/client/app.js'
@@ -226,5 +226,45 @@ describe('用户消息里的文件块渲染信息（fileCardInfo）', () => {
     expect(fileCardInfo({ type: 'image', attachment: {} })).toBe(null)
     expect(fileCardInfo(null)).toBe(null)
     expect(fileCardInfo({ type: 'file' })).toEqual({ name: '未命名文件', ext: 'FILE', size: '' })
+  })
+})
+
+describe('端点路径的基址解析（子路径部署，dsh 0.1.7-rc.1）', () => {
+  it('根部署：与旧根绝对路径等价', () => {
+    expect(recallApiUrl('status', 'http://127.0.0.1:3080/')).toBe('http://127.0.0.1:3080/api/recall/status')
+  })
+
+  it('子路径部署：前缀保留（官方 <base href="./"> 让 document.baseURI 落在子路径目录）', () => {
+    expect(recallApiUrl('preview', 'https://example.com/dsh/')).toBe('https://example.com/dsh/api/recall/preview')
+    expect(recallApiUrl('execute', 'https://example.com/a/b/dsh/')).toBe('https://example.com/a/b/dsh/api/recall/execute')
+  })
+
+  it('基址缺尾斜杠按目录补齐：/dsh 不被当成文件名吞掉前缀', () => {
+    expect(recallApiUrl('status', 'http://127.0.0.1:3081/dsh')).toBe('http://127.0.0.1:3081/dsh/api/recall/status')
+  })
+
+  it('非浏览器环境 / 非法基址：回落到原根绝对路径，不倒退', () => {
+    expect(recallApiUrl('status', '')).toBe('/api/recall/status')
+    expect(recallApiUrl('status', 'not-a-url')).toBe('/api/recall/status')
+    expect(recallApiUrl('status')).toBe('/api/recall/status') // node 下无 document
+  })
+
+  it('api() 实际请求走解析后的 URL（fetch 桩钉住调用点）', async () => {
+    const beforeDocument = globalThis.document
+    const beforeFetch = globalThis.fetch
+    const calls = []
+    globalThis.document = { baseURI: 'http://127.0.0.1:3081/dsh/' }
+    globalThis.fetch = (url) => {
+      calls.push(url)
+      return Promise.resolve({ json: () => Promise.resolve({ ok: true }) })
+    }
+    try {
+      const util = buildUtil()
+      await util.api('status', {})
+      expect(calls).toEqual(['http://127.0.0.1:3081/dsh/api/recall/status'])
+    } finally {
+      globalThis.document = beforeDocument
+      globalThis.fetch = beforeFetch
+    }
   })
 })
