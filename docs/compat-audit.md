@@ -35,6 +35,10 @@
 > registry 直连 `/latest` 与 `/2.4.2` 双确认，初查有约 1 分钟传播延迟，与 2.4.1 一致）。发布提交：`de007d7`（docs/compat——
 > 评估归档 + `dshReleases`/镜像/契约文档/README 徽章同步）与 `e1f494c`（chore(release) 2.4.2，含 lockfile 根版本同步）。
 > 发版前门禁：`npm run build` 产物零漂移（`lib/` 无变更）、`typecheck` 通过、`npm test` 430/430、`check:upgrade` 三层全绿。
+> **本机 profile 验证**：web profile（npm 模式，依赖 `^2.4.1`）经 `pnpm update dsh-recall-plugin@2.4.2` 实装 2.4.2。
+> 注意（pnpm 12 的 `minimumReleaseAge` 策略）：刚发布的版本用不带版本号的 `pnpm update <pkg>` 会被跳过并提示
+> `Already up to date`（旧版仍在允许年龄内），需**显式带版本号**更新；pnpm 会把该版本写入 profile 的
+> `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`（默认自动豁免，`minimumReleaseAgeStrict` 才改为提示）。
 >
 > **0.1.7-alpha.1 核验与适配（2026-09-22）——破坏性版本，两处接缝已双分支适配**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
