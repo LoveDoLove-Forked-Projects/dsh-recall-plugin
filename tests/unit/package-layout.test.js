@@ -2,7 +2,7 @@
  * 发布包内容布局断言（P1-1；P2-4 收口补齐）
  *
  * npm pack --dry-run --json 输出包里实际会安装的文件，据此钉住 files 白名单：
- * - 运行时文件必须进包（lib/、cordis.patch.yml、README、LICENSE、package.json）；
+ * - 运行时文件必须进包（lib/、assets/icon.svg 等发布资源、cordis.patch.yml、README、LICENSE、package.json）；
  * - 仓库开发文件绝不进包（AGENTS.md / docs/（含 docs/reference 镜像）/ tests/ / scripts/——
  *   AGENTS.md 已在 .gitignore 中确认不进 npm，这里从 pack 输出侧再兜一道；
  *   scripts/ 是 P2-5 起的发布前巡检脚本，同样不是运行时产物）。
@@ -52,9 +52,28 @@ describe('npm 发布包内容', () => {
       'lib/index.js', 'lib/client.js', 'lib/config.js', 'lib/store.js',
       'lib/snapshots.js', 'lib/maintenance.js', 'lib/scripts.pwsh.js',
       'lib/scripts.posix.js', 'cordis.patch.yml', 'README.md', 'LICENSE',
-      'package.json',
+      'package.json', 'assets/icon.svg',
     ]
     for (const rel of required) expect(files, 'pack 缺少 ' + rel).toContain(rel)
+  })
+
+  // 图标读的是包导出解析出来的 package.json 旁文件（dsh-app-boot 的 readPluginMeta →
+  // iconOf），任一条判据不满足时宿主只留 metadata error、图标静默不显示——漏配要到
+  // 线上才看得出来。这里把官方判据逐条钉住（相对路径 / 四格式 / ≤256 KiB / realpath
+  // 后仍在包目录内 / 常规文件），并借 pack 输出确认 files 白名单覆盖了图标文件。
+  it('icon 声明满足宿主读取判据且随包发布', () => {
+    const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '../..')
+    const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+    const icon = manifest.icon
+    expect(typeof icon, 'package.json 缺 icon 字段').toBe('string')
+    expect(path.isAbsolute(icon) || /^[A-Za-z][A-Za-z\d+.-]*:/u.test(icon), 'icon 必须是相对路径').toBe(false)
+    expect(['.svg', '.png', '.jpg', '.jpeg', '.webp']).toContain(path.extname(icon).toLowerCase())
+    const file = fs.realpathSync(path.join(root, icon))
+    const local = path.relative(fs.realpathSync(root), file)
+    expect(local === '..' || local.startsWith('..' + path.sep) || path.isAbsolute(local), 'icon 必须留在包目录内').toBe(false)
+    expect(fs.statSync(file).isFile(), 'icon 必须是常规文件').toBe(true)
+    expect(fs.statSync(file).size, 'icon 不得超过 256 KiB').toBeLessThanOrEqual(256 * 1024)
+    expect(files, 'pack 缺少 ' + icon).toContain(icon)
   })
 
   it('仓库开发文件不进包（AGENTS.md / docs / tests / scripts）', () => {

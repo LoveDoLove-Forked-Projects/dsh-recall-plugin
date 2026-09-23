@@ -146,10 +146,17 @@ export function buildRecallNode(
     )
   }
 
+  // 撤回按钮图标。形状与插件图标文件（assets/icon.svg，插件管理页展示）保持一致：
+  // 两条侧翼从箭尖算起缩到 70%、尾端水平线延到与侧翼端点同列（x=6.3）、整组上移
+  // 1.1 让几何中心落在画布中心；两处是同一套坐标，改动要同步（图标文件另有写死
+  // 颜色与 20 声明尺寸两项差异——图片不继承 currentColor，颜色只能写死）。
+  // 这里保持内联渲染的既有规格：16 声明尺寸、stroke 1.4、currentColor 随按钮文字色。
   function UndoIcon() {
     return React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
-      React.createElement('path', { d: 'M7.5 3.5 3.5 7.5l4 4' }),
-      React.createElement('path', { d: 'M4.5 7.5h5a3 3 0 0 1 0 6H8' })
+      React.createElement('g', { transform: 'translate(0 -1.1)' },
+        React.createElement('path', { d: 'M6.3 4.7 3.5 7.5l2.8 2.8' }),
+        React.createElement('path', { d: 'M4.5 7.5h5a3 3 0 0 1 0 6H6.3' })
+      )
     )
   }
 

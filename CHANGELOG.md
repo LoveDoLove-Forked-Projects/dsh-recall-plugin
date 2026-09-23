@@ -2,6 +2,16 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 新增
+
+- **插件管理页图标（package.json 顶层 `icon`）**：新增 `assets/icon.svg`——形状沿用撤回按钮的 `UndoIcon`，画布 20×20、单色 `#658EFF`（官方品牌渐变的蓝端）。三处版面调整：① 两条侧翼从箭尖算起缩短 30%（对角分量 4 → 2.8，箭尖与尾部回环保持原位，不用整体缩放以免尾部一起变小）；② 尾端水平线向左延长到 x=6.3，与侧翼端点在竖直方向对齐；③ 整组上移 1.1（组 `transform`，路径坐标不动），使几何 bbox 中心落在画布中心 (8, 8)，上下留白对称。颜色必须写死：宿主把图标转成 base64 data URL 后以 `<img>` 隔离渲染，`currentColor` 不继承会退化成黑色；该色在浅底（对比 ≈3.1:1）与深底（≈5.5:1）都清晰，无需主题分支。宿主 `dsh-app-boot` 的 `readPluginMeta` 读**包导出的 `package.json` 顶层 `icon` 字段**（判据：相对路径、SVG/PNG/JPEG/WebP、≤256 KiB、realpath 后仍在包目录内、常规文件），读取失败只留 metadata error 且标题/描述照常；渲染位置是**插件管理页**的 bundle 卡片与详情页头部（36px），不是设置对话框的插件 tab（后者只解析 `meta.title/description` 多语言文本）。`files` 白名单加 `assets`，`package-layout` 单测补声明合法性 + 随包发布断言——否则图标文件不进发布包、宿主只报 metadata error，线上静默无图标。
+
+### 变更
+
+- **撤回按钮图标同步新版形状**：`src/client/recall-node.ts` 的 `UndoIcon` 与 `assets/icon.svg` 取同一套坐标——两翼从箭尖算起缩短 30%、尾端水平线延到与侧翼端点同列（x=6.3）、整组上移 1.1 居中；内联规格刻意不变（16 声明尺寸、`stroke` 1.4、`currentColor` 随按钮文字色，即保持原有大小/粗细/颜色）。两处形状自此需同步改（`UndoIcon` 上方有同步注释）。`lib/client.js` 重建（112222 字节）。
+
 ## [2.4.4] - 2026-09-24
 
 ### 修复

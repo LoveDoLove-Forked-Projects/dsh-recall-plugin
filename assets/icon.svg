@@ -1,0 +1,24 @@
+<!--
+  插件图标（package.json 顶层 icon 字段引用，宿主 dsh-app-boot 的 readPluginMeta
+  读取后转 base64 data URL，在插件管理页的 bundle 卡片/详情页以 <img> 渲染）。
+
+  形状＝撤回按钮的 UndoIcon（src/client/recall-node.ts），画布 20×20，四处改动：
+  - 颜色写死 #658EFF（官方品牌渐变的蓝端），不能用 stroke="currentColor"——
+    图标以 <img src="data:..."> 隔离渲染，不继承页面 currentColor，会退化成黑色；
+    该色在浅色底（对比 ≈3.1:1）与深色底（≈5.5:1）都清晰，故无需主题分支。
+  - 箭头两条侧翼从箭尖算起缩短 30%（对角分量 4 → 2.8，端点 (7.5,3.5)/(7.5,11.5)
+    → (6.3,4.7)/(6.3,10.3)）：只让箭尖更紧凑，箭尖 (3.5,7.5) 与线宽 1.4 保持原样。
+  - 尾端水平线向左延长到 x=6.3（长 1.5 → 3.2）：让尾端与侧翼端点在竖直方向对齐
+    （上翼端、下翼端同在 x=6.3），版面收束。
+  - 整组上移 1.1 做视觉居中：改完的路径几何 bbox 是 x[3.5,12.5] / y[4.7,13.5]，
+    中心 (8, 9.1) 而画布中心是 (8, 8)——平移后上下留白对称（各 3.6），左右本就对称。
+    居中用组上的 transform 而不重算路径坐标，路径仍与按钮内联版逐点对应、便于比对。
+  保留 viewBox 0 0 16 16，width/height 声明 20 即命中「图标大小 20×20」；
+  卡片里由官方按 36px 缩放显示。
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16" fill="none">
+  <g transform="translate(0 -1.1)" stroke="#658EFF" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M6.3 4.7 3.5 7.5l2.8 2.8" />
+    <path d="M4.5 7.5h5a3 3 0 0 1 0 6H6.3" />
+  </g>
+</svg>
