@@ -398,7 +398,7 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
     })
   })
 
-  describe('archiveSession 契约（I7：归档 = 分组表面隐藏、日志保留）', () => {
+  describe('archiveSession 契约（I7：归档 = 分组表面隐藏、日志保留；忙碌会话需 stopActivity）', () => {
     // F1 用 Host 记录 fork lineage 绕过「归档会话不可列举」的限制；方法删除或
     // 改路由（不再经 workspaceRegistry）即红。
     const p = 'dsh-api-workspace-controller'
@@ -409,6 +409,20 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       const src = read(p, f)
       expect(src).toMatch(/name: "archiveSession"/)
       expect(src).toMatch(/workspaceRegistry\.archiveSession/)
+    })
+
+    // 第二锚点钉「插件现在要传的选项」：官方归档前经 workspace/session-activity
+    // 瀑布问「这会话还有什么在跑」（agent 回合 / jobs 后台作业 / subagent / schedule），
+    // 命中即拒（workspace/session-active）；只有 stopActivity 才改成「先停后归档」。
+    // 插件据此传 { stopActivity: true }——有后台作业在跑时撤回，旧写法归档静默失败、
+    // 作业结算再把原会话唤醒继续干活（文件已回滚）。选项或拒绝语义漂移即红。
+    const cf = '/lib/types/client/service.d.ts'
+    const clientGuard = () => has(p, cf)
+    probeIf(clientGuard)('客户端 archiveSession 接受 { stopActivity }（忙碌会话先停后归档）', () => {
+      const src = read(p, cf)
+      expect(src).toMatch(/archiveSession\(sessionId: SessionId, options\?: \{/)
+      expect(src).toMatch(/readonly stopActivity\?: boolean;/)
+      expect(src).toMatch(/workspace\/session-active/)
     })
   })
 
@@ -426,15 +440,31 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
     })
   })
 
-  describe('settings.plugin.item keyed-by-namespace（I12：卡片 key 与 Host namespace 一致）', () => {
-    // 卡片按 settings namespace 分发（entryKey）；key 与 namespace（dsh-recall）
-    // 不一致时卡片静默不渲染——类型面仍是 keyed + root 即视为语义未变。
-    const p = 'dsh-client-ui-settings-plugins'
-    const f = '/lib/types/client/slot-contract.d.ts'
-    const guard = () => has(p, f)
+  describe('设置卡片 slot 锚点（I12：≤0.1.5 settings.plugin.item → 0.1.6+ plugins.bundle.config）', () => {
+    // 插件双键并注册两个 slot（旧版吃 settings.plugin.item、0.1.6+ 吃插件管理页 bundle
+    // 页的 plugins.bundle.config），key 写错或官方 slot 消失时渲染器静默 return
+    // （specDynamic undefined），卡片凭空不出现且零报错。
+    // 旧键的契约文件自 0.1.6 线起不再发布（该包只剩 index/PluginsSection/locales），
+    // 原先的单路径探针因此长期静默 skip——绿灯但零覆盖。故这里保留一条刻意
+    // fail-loud 的断言：只要本机装了 dsh，两代面至少一条 slot 契约必须在位。
+    const modern = { p: 'dsh-client-ui-plugin-manager', f: '/lib/types/client/slot-contract.d.ts' }
+    const legacy = { p: 'dsh-client-ui-settings-plugins', f: '/lib/types/client/slot-contract.d.ts' }
+    const hasModern = () => has(modern.p, modern.f)
+    const hasLegacy = () => has(legacy.p, legacy.f)
 
-    probeIf(guard)('slot 仍是 keyed + root scope（namespace 分发语义的类型面）', () => {
-      const src = read(p, f)
+    probeIf(() => true)('两代面至少一条 slot 契约在位（都缺席即红：卡片挂载点消失）', () => {
+      expect(hasModern() || hasLegacy(), '设置卡片两代 slot 契约都找不到').toBe(true)
+    })
+
+    probeIf(hasModern)('新面 plugins.bundle.config 为 keyed + root scope（按 bundle 包名分发）', () => {
+      const src = read(modern.p, modern.f)
+      expect(src).toMatch(/'plugins\.bundle\.config'/)
+      expect(src).toMatch(/kind: 'keyed'/)
+      expect(src).toMatch(/scope: 'root'/)
+    })
+
+    probeIf(hasLegacy)('旧面 settings.plugin.item 为 keyed + root scope（按 namespace 分发，≤0.1.5）', () => {
+      const src = read(legacy.p, legacy.f)
       expect(src).toMatch(/'settings\.plugin\.item'/)
       expect(src).toMatch(/kind: 'keyed'/)
       expect(src).toMatch(/scope: 'root'/)

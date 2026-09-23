@@ -39,6 +39,13 @@
 > 注意（pnpm 12 的 `minimumReleaseAge` 策略）：刚发布的版本用不带版本号的 `pnpm update <pkg>` 会被跳过并提示
 > `Already up to date`（旧版仍在允许年龄内），需**显式带版本号**更新；pnpm 会把该版本写入 profile 的
 > `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`（默认自动豁免，`minimumReleaseAgeStrict` 才改为提示）。
+> **观察项结项（2026-09-23 同日）**：① 唤醒窗口根因查明并修复——官方归档对「有活动在跑」的会话默认拒
+> （`workspace/session-activity` 命中即 `workspace/session-active`），插件旧写法不传 `stopActivity` 又把
+> reject 吞掉，于是「有后台作业在跑时撤回」原会话静默不归档、作业续跑，而作业结算 `cause: 'kill'` 不属
+> 被抑制的 `teardown`，完成通知会把已回滚的原会话唤醒开新一轮；现改传 `{ stopActivity: true }` 并让失败
+> 留痕（详见 I7；`src/client/recall-node.ts` + `src/types/client-contract.ts`）。② 死探针已处置：I12 改为
+> 双代面探针 + 一条 fail-loud「两代面至少一条在位」断言（新面 `plugins.bundle.config` 首次纳入断言），
+> 探针 46 → 49；I7 另补客户端 `stopActivity` 选项锚点。
 >
 > **0.1.7-alpha.1 核验与适配（2026-09-22）——破坏性版本，两处接缝已双分支适配**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
@@ -406,16 +413,29 @@
   位于运行中的回合内（无已闭合 turn/end）——官方拒绝 fork 而非裁剪，P0-1
   agentBusy 拦截已挡运行中撤回，实际触发面小。签名与探针零变化，无需改码。
 
-### I7 archiveSession 语义：归档 = 从分组表面隐藏（F1 lineage 链断裂根因）
-- **依赖的官方行为**：`archiveSession(sessionId)` 把会话移入 registry-global set，
-  **hidden from grouping surfaces**（日志与记账槽保留）。
-- **出处**：`dsh-api-workspace-controller/lib/types/client/contract/`（0.1.2-alpha.1 由
-  `dsh-client-runtime` 迁入该新包）。
-- **探针/单测**：`tests/probe/api-surface.test.js`（archiveSession Remote 方法存在 + workspaceRegistry 路由）；F1 用 Host 记录 fork lineage 绕过该限制。
-- **失效症状**：纯 client 侧从 sessions.list 读不到已归档中间版本的 parentId。
-- **复查动作**：读 `dsh-api-workspace-controller/lib/index.js` L279-282——`archiveSession`
-  方法仍存在且路由到 `workspaceRegistry.archiveSession`（归档 = 从分组表面隐藏、日志与
-  记账槽保留）；若官方改为可列举或删除该方法，F1 的 lineage 链记录可相应简化。
+### I7 archiveSession 语义：归档 = 从分组表面隐藏（F1 lineage 链断裂根因）；忙碌会话须 stopActivity
+- **依赖的官方行为**：`archiveSession(sessionId, options?)` 把会话移入 registry-global set，
+  **hidden from grouping surfaces**（日志与记账槽保留）。**`options.stopActivity !== true` 时先经
+  `workspace/session-activity` 瀑布问「这会话还有什么在跑」**（provider：`dsh-agent` 回合 /
+  `dsh-jobs` 运行中作业 / `dsh-subagent` 子代理 / `dsh-schedule`），命中即抛
+  `workspace/session-active` 拒绝归档；传 `stopActivity: true` 才改成「先停后归档」
+  （`workspace/session-stop` → `dsh-jobs` 以 `registry.kill(id, owner, "session archived")` 杀作业，
+  结算 `settleCause = 'kill'`，**不属** `dsh-tool-jobs` 抑制通知的 `teardown`）。
+- **出处**：`dsh-api-workspace-controller/lib/types/client/{service.d.ts,model.d.ts,contract/}`
+  （0.1.2-alpha.1 由 `dsh-client-runtime` 迁入该新包）；归档准入与先停后归档实现于
+  `dsh-workspace/lib/index.js`（`archiveSession(sessionId, options = {})`）、
+  `dsh-jobs/lib/index.js`（`installJobArchiveAdmission`）、`dsh-jobs-local/lib/index.js`（`killJob`）。
+- **探针/单测**：`tests/probe/api-surface.test.js`（archiveSession Remote 方法存在 + workspaceRegistry
+  路由 + 客户端 `options?: { stopActivity?: boolean }` 与 `workspace/session-active` 拒绝语义）；
+  F1 用 Host 记录 fork lineage 绕过该限制。
+- **失效症状（2026-09-23 插件侧实证）**：撤回时源会话有后台作业在跑 → 插件旧写法
+  `archiveSession(sessionId)` 被官方拒且 `.catch()` 把错误吞掉 → **原会话静默不归档（仍留在列表）**、
+  作业继续跑；作业结算 `cause: 'kill'` 不被抑制 → `dsh-tool-jobs` 在 idle 的源 agent 上
+  `followup(...)` → **文件已回滚的原会话被唤醒开新一轮**（幽灵执行）。
+  （纯 client 侧读不到已归档中间版本的 parentId 是另一类既有症状。）
+- **复查动作**：读 `dsh-workspace/lib/index.js` 的 `archiveSession`（`stopActivity !== true` 时经
+  waterfall 拒、`=== true` 时 `stopSessionActivity`）与 `dsh-jobs/lib/index.js` 的
+  `installJobArchiveAdmission`；任一漂移即复核插件的归档调用（现传 `{ stopActivity: true }` 并留痕）。
 
 ### I8 sessionQuery.listSessions：会话 id 在 header.id
 - **依赖的官方行为**：listSessions 记录形如 `{header, live, persisted}`，会话 id 在

@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 修复
+
+- **有后台任务在跑时撤回，原会话归档静默失败、还会被完成通知唤醒继续跑（幽灵执行）**：`dsh-workspace` 的归档对「有活动在跑」的会话**默认拒绝**——先经 `workspace/session-activity` 瀑布问 agent 回合 / `dsh-jobs` 后台作业 / `dsh-subagent` 子代理 / `dsh-schedule`，命中即抛 `workspace/session-active`；只有 `archiveSession(sessionId, { stopActivity: true })` 才改成「先停后归档」（`workspace/session-stop` → jobs 以 `kill(id, owner, "session archived")` 收尾，结算 `cause: 'kill'`）。插件旧写法既不传该选项、又用 `.catch(() => {})` 把拒绝吞掉，于是「模型起了后台作业 → 用户撤回」这条路下：原会话静默不归档（仍留在列表）、作业继续跑，且 `cause: 'kill'` **不在** `dsh-tool-jobs` 抑制通知的 `teardown` 之列 → 完成通知投递给处于 idle 的源 agent → `followup(...)` 在**文件已回滚**的原会话里开新一轮。修复＝归档改传 `{ stopActivity: true }`（官方 UI「停止并归档」同款语义：撤回即这一版作废），并把失败从静默吞掉改为 `console.warn` 留痕——归档失败意味着原会话留在列表且可能继续跑，属用户可见降级。旧版 dsh 客户端面只有 `sessionId` 一个参数，多传实参在 JS 侧无害。配套：探针新增客户端 `options?: { stopActivity?: boolean }` 与 `workspace/session-active` 拒绝语义断言（I7）；I12 探针由「已消失的旧路径静默 skip」改为双代面 + fail-loud（两代 slot 契约至少一条在位，新面 `plugins.bundle.config` 首次纳入断言），探针 46 → 49。
+
 ## [2.4.2] - 2026-09-23
 
 ### 修复

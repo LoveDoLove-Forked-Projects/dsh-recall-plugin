@@ -10,7 +10,7 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 
 1. **影子仓库**：每个工作区在 `~/.dsh/dsh-recall-snapshots/<工作区路径SHA256>/git/` 有独立 git 仓库，`--work-tree` 指向项目目录——项目零污染（无 .git、无快照落地）。home 不可写时降级到项目内 `.dsh-recall-snapshots/`。无 tag 可达的残骸仓库（快照在 `add` 与打 tag 之间失败留下的形态）由 gc 前的条件清理回收：`for-each-ref` 空且 `ls-files` 非空时先 `read-tree --empty` 再 gc——否则 index 条目让这批 blob 对 prune 伪可达（`fsck --unreachable` 也报 0），gc 一个对象都回收不掉（issue #18，实测 78.4MB 不減 → 归零）。收尾还有空仓目录回收：「立即 gc」在逐仓 gc 之后，把 `index.json` 明确为空数组、无 `snap-*` tag、内存无对应快照三条件全中的 store 目录整棵删掉（entries 为 null 即索引缺失/损坏的隔离现场一律保留）。
 2. **tag 即快照**：每条用户消息触发一次 `write-tree + commit-tree + tag snap-<消息ID>`。不建分支、不动工作区；消息 ID 即快照主键，索引丢失可从 tag 名反推重建（`rebuildOrphans`，时间从 tag creatordate 恢复）。index.json/lineage.json 走 tmp+rename 原子写；index 损坏时 fail-loud——改名 `.corrupt-<ts>` 隔离并告警，不静默当空。**工作区根自身命中基础排除表的目录形态项**（`…/target/debug`、`dist`）时不建快照：排除模式相对 root，永远匹配不到 root 自己，而这类目录没有回退价值（issue #18；`captureSnapshot` 在 `resolveStore` 前早退，init/snapshot-info 下同一条提示，逃生口＝删掉排除表对应项）。
-3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。execute 支持 `scope` 二选一（缺省/非法回落 both）：both 为下述全链；`session-only` 走零 git 短路径——不进串行队列、不打安全快照、不 reset，仅保留 NO_SNAPSHOT/AGENT_BUSY 护栏后取切点返回 `count: 0`（确认面板 radio 二选一，cutSeq 为 null 不出选项）。原会话归档（可恢复，`archiveOriginal` 可关），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。both 的 execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息（子会话被驱动时它还会被当作真实一轮消费），故 execute 顺带下发 `staleQueueItemIds`（窗口内入队项的 message id），Client 在子会话上按 id 直调官方 `updateQueue(itemId, { kind: 'remove' })` 清掉（G1）；不做队列快照匹配——快照走 control 帧、到达时机不定，命中式等待会整段落空。
+3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。execute 支持 `scope` 二选一（缺省/非法回落 both）：both 为下述全链；`session-only` 走零 git 短路径——不进串行队列、不打安全快照、不 reset，仅保留 NO_SNAPSHOT/AGENT_BUSY 护栏后取切点返回 `count: 0`（确认面板 radio 二选一，cutSeq 为 null 不出选项）。原会话归档（可恢复，`archiveOriginal` 可关；**归档必须带 `stopActivity`**——官方对「有活动在跑」的会话默认拒归档，而 jobs 作业结算不受抑制、会把已回滚的原会话唤醒开新一轮），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。both 的 execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息（子会话被驱动时它还会被当作真实一轮消费），故 execute 顺带下发 `staleQueueItemIds`（窗口内入队项的 message id），Client 在子会话上按 id 直调官方 `updateQueue(itemId, { kind: 'remove' })` 清掉（G1）；不做队列快照匹配——快照走 control 帧、到达时机不定，命中式等待会整段落空。
 
 ## 项目架构与文件地图（改动先看这里）
 
@@ -120,7 +120,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
   → execute（scope 缺省/非法回落 both；session-only 走零 git 短路径：不进队列、无安全快照/STALE 校验/rollback/rescue，护栏检查后直接取切点返回 count:0；
     both：agentBusy 复查 + 树指纹比对安全快照（不一致 STALE；无指纹退回 previewTotal 校验）→ 安全快照 snap-pre-rollback-<ts>
     → reset 到 tag；失败自动 rescue 回安全快照，救援失败给可复制的手动命令）
-  → resolveCutSeq（最近 turn/end）→ client sessions.fork → 原会话归档（archiveOriginal 可关）
+  → resolveCutSeq（最近 turn/end）→ client sessions.fork → 原会话归档（archiveOriginal 可关；带 stopActivity 先停作业再归档）
   → lineage-record 持久化 fork 关系 → 回填输入框（refillDraft 可关）
 快照失败 → runShell 兜底（分级清扫：另一实例心跳/5min 内新锁让路，否则杀孤儿 + 清陈旧锁）
   → recordError（环境错误分类 git/space/permission/lock/mkdir + 可行动提示）+ prune + 熔断
@@ -206,7 +206,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I6 fork 不传 `increaseTitle`（标题「xxx 2」递增回归钉）。
 
-* I7 archiveSession = 从分组表面隐藏（F1 lineage 链断裂根因，Host 记录 fork 关系绕过）。
+* I7 archiveSession = 从分组表面隐藏（F1 lineage 链断裂根因，Host 记录 fork 关系绕过）；忙碌会话须传 `stopActivity` 才归档（否则官方拒且被吞 → 原会话静默不归档、还可能被完成通知唤醒继续跑）。
 
 * I8 sessionQuery.listSessions 记录 id 在 `header.id`。
 

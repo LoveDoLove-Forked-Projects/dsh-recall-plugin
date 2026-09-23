@@ -142,7 +142,11 @@ export interface ClientWorkspacesService {
   // 返回类型按调用方既有假设建模为 Promise（迁移前 JS 直接对其结果 .catch）：
   // 真实服务恒返 thenable；若某版本返非 thenable，旧行为是当场 TypeError，
   // 不做 Promise.resolve 静默兜底（避免掩盖官方契约漂移）
-  archiveSession(sessionId: string): Promise<unknown>
+  // options.stopActivity：官方对「有活动在跑」的会话默认拒归档（`workspace/session-activity`
+  // 瀑布问 agent 回合 / jobs 后台作业 / subagent / schedule，命中即 workspace/session-active），
+  // 传该选项才改成「先停后归档」。撤回必须传——否则有后台作业在跑时归档静默失败，
+  // 作业结算还会把原会话唤醒继续干活（文件已回滚）。旧版客户端面只有 sessionId 一个参数。
+  archiveSession(sessionId: string, options?: { stopActivity?: boolean }): Promise<unknown>
   // 归档会话集合（快照管理「切换」闸门用）：0.1.6-alpha.2 起 sessions.list 含
   // 归档会话，而归档会话不是合法的主视图选择——官方导航会对归档选择 clearMain
   // 落空态，故判据必须另从这里排除

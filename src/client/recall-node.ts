@@ -613,9 +613,19 @@ export function buildRecallNode(
               api<unknown>('lineage-record', { childId, parentId: sessionId }).catch(() => {})
               // 回退前的原会话归档（可关）：只是从列表隐藏、可恢复
               if (pluginConfig.archiveOriginal && workspacesSvc && typeof workspacesSvc.archiveSession === 'function') {
-                // 归档失败不阻断撤回主流程（reject 吞掉）；与迁移前一致直接
-                // .catch——非 thenable 返回是官方契约漂移，当场暴露而非静默
-                workspacesSvc.archiveSession(sessionId as string).catch(() => {})
+                // stopActivity：官方归档前经 `workspace/session-activity` 瀑布问「这会话还有
+                // 什么在跑」（agent 回合 / jobs 后台作业 / subagent / schedule），有就抛
+                // workspace/session-active 拒归档。之前不传该选项、又把 reject 吞掉，于是
+                // 「有后台作业在跑时撤回」的原会话静默不归档、作业继续跑，作业结算
+                // （cause:'kill'，不属被抑制的 teardown）还会被 jobs 工具当完成通知投递，
+                // 把原会话唤醒开新一轮——文件已回滚，等于幽灵执行。撤回语义是这一版作废，
+                // 故显式要求先停掉原会话活动再归档（官方 UI「停止并归档」同款选项；
+                // 旧版服务无此参数时多传一个实参在 JS 侧无害）。
+                workspacesSvc.archiveSession(sessionId as string, { stopActivity: true }).catch((error) => {
+                  // 仍不阻断撤回主流程（fork 与回填已完成），但不再静默：归档失败意味着
+                  // 原会话留在列表且可能继续跑，属用户可见降级，console 留痕便于排查
+                  console.warn('[dsh-recall-plugin] archive original session failed:', error)
+                })
               }
             } else {
               chatError = '未返回新会话'
