@@ -2,6 +2,16 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 修复
+
+- **反向代理子路径部署下插件全部调用失效（端点路径写成了根绝对路径）**：dsh 0.1.7-rc.1 起官方支持「Web 挂在反向代理子路径」，口径是客户端把服务端路径按**文档基址**解析——index 由 `dsh-host-frontend-static` 注入 `<base href="./">`、前端资源改相对引用、`dsh-api-gateway` 用 `streamBaseUrl ?? document.baseURI`、connection RPC 直接 POST 去前导斜杠的相对路由。插件客户端原先硬编码根绝对 `fetch('/api/recall/<name>')`：子路径部署下浏览器会越过前缀打到代理未映射的根，预览/撤回/快照管理/设置卡片全部失效。实弹（真宿主 + 只映射 `/dsh/*` 的反向代理）：带前缀 `POST /dsh/api/recall/status` → 200、根绝对 `POST /api/recall/status` → 404。修复＝新增 `src/client/util.ts` 的 `recallApiUrl(name, base?)` 统一解析端点 URL（基址缺尾斜杠按目录补齐，避免直接访问 `/dsh` 时前缀被当作文件名吞掉；无 `document`／基址非法回落原根绝对路径，旧环境行为不变），`api()` 唯一调用点改走它。Host 端零改动——代理剥前缀后宿主见到的仍是 `/api/recall/*`，exact 路由照常命中。配套 5 条单测（根/子路径/多级/缺尾斜杠/回落 + fetch 桩钉调用点 URL）与 3 条探针（I40：`<base href="./">` 注入、前端资源相对引用、官方 `document.baseURI` 对照），台账见 compat-audit I40。
+
+### 变更
+
+- **兼容声明同步 dsh 0.1.7-rc.1（零破坏核验，无代码改动）**：全局实装 `@deepseek-ai/dsh@0.1.7-rc.1`（npm dist-tag `next`）后以**全树内容级 diff** 核验——升级前对 alpha.2 整包做快照，升级后比对得 915 条变更（853 改 / 49 增 / 9 删 / 4 重命名）、647 个非 package.json 文件有真实内容差异（其中 320 个为随包 LibreOffice 运行时）。插件消费面**零破坏**：`dsh-session`/`dsh-session-query`/`dsh-shell`/`dsh-pwsh-local`/`dsh-sandbox-policy`/`dsh-host-webserver`/`dsh-client-connection`/`dsh-client-modules`/`dsh-settings`/`dsh-agent{,-loop}`/`dsh-attachment{,-local}`/`dsh-workspace` 等 24 个包与整个 cordis vendor 栈内容字节级一致（仅版本号），三个关键契约文件（`ui-chat`/`ui-conversation` 的 `contract/slots.d.ts`、`api-session-controller` 的 `contract/session.d.ts`）**SHA256 相同**；真改动集中在 `ui-chat`（工具调用准备态/本地图片预览）、`ui-conversation`（`RunningToolCall` 拆 preparing/start 两阶段、瞬态 start 语义）、`api-session-controller`（assistant 流退休记账）与 `ui-plugin-manager`（host 侧安装/失败类型），均不在插件消费面（插件不定义 ConversationNode、不消费工具调用类型）。**本版新增机制**：启动期插件/runtime 兼容性门禁——按 `peerDependencies` 中 `@deepseek-ai/dsh[-*]` 条目用 `semver.satisfies(runtime, range, { includePrerelease: true })` 判定，不兼容的行启动期整行禁用（可由 profile `compatibility.json` 或 `dsh plugin allow-version` 豁免），安装命令在 pnpm 前预检；本插件 6 条 peer 实测放行 0.1.7-rc.1、无需豁免（`dsh.compatibility.dshReleases` 仍是市场台账声明，非安装门禁）。门禁：`test:probe` 49/49、`npm test` 430/430、`verify:host` 装配断言全过、`typecheck` 通过、`build` 产物零漂移。同步项：`dshReleases` 补 `0.1.7-rc.1: compatible`（peer 范围 `>=0.1.7-alpha.1 <0.1.8` 天然覆盖，无需新 tuple）、`docs/reference/` 镜像按 `dsh-v0.1.7-rc.1` tag 重拉（13 源中仅 11 号对话节点文档有实质差异 +182 字符）、`docs/dsh-contract.md` 与 compat-audit 头部版本字段同步、README 双语徽章与兼容范围同步，评估实证见 `docs/upgrade-assessments/dsh-0.1.7-rc.1.md`。观察项（不阻塞、均非回归）：peer 区间升级为启动硬门槛（新 minor 线需先核验再开窗）；子路径部署与 SSH 远端工作区两个新场景下插件未验证（插件 API 走绝对路径、影子仓库假定本机文件系统）。
+
 ## [2.4.3] - 2026-09-23
 
 ### 修复

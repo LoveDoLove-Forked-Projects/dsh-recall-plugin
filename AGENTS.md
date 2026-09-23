@@ -272,3 +272,5 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I39 0.1.7-alpha.1 换 settings 面：`ctx.settings` 变 `SettingsForms`，**ns = profile entry id**（官方按 `entry.options.id` 寻址，本机实测为 profile 行的 `recall`），且只有 schema 标 `.volatile()` 的字段可被 `describe()` 收录/写入（`.volatile()` 需 schemastery ≥3.18.3 → 必须 feature-detect）。热更经 loader 提交 ref 后**只对目标 fiber** 派发的 `loader/volatile-update`（故只能在自己 ctx 监听），取值需解一层 Volatile ref。详见 compat-audit I39。
 
+* I40 0.1.7-rc.1 官方支持「Web 挂在反向代理子路径」：index 注入 `<base href="./">`、前端资源改相对引用、客户端把服务端路径按 `document.baseURI` 解析（`dsh-api-gateway` 与 connection RPC 均如此）。插件端点路径原为根绝对 `/api/recall/*`——子路径部署下会打到代理未映射的根（实弹 404），故改为同款基址解析（`src/client/util.ts recallApiUrl`，缺尾斜杠按目录补齐、无 document 回落原路径）。详见 compat-audit I40。
+

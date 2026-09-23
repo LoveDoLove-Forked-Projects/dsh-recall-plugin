@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.1.7-alpha.2**（tag `dsh-v0.1.7-alpha.2` commit `0010283`，2026-09-22 发布；npm dist-tag `alpha` 指向本版、`latest` 仍 0.1.5-rc.2、`next` 为 0.1.5-rc.3；`npm install -g @deepseek-ai/dsh@alpha` 全局实装；**alpha.2 对插件零破坏**——本轮以全树内容级 diff 实证（277 包版本号变化、342 个非 package.json 文件改动，消费面契约字节级一致或仅注释变动；详见 compat-audit 头部 0.1.7-alpha.2 段与 [upgrade-assessments/dsh-0.1.7-alpha.2.md](upgrade-assessments/dsh-0.1.7-alpha.2.md)）；前序基线 0.1.7-alpha.1 `c36a83f`、0.1.6-alpha.2 `ddefc45`、0.1.6-alpha.1 `0a15e36`、0.1.5-rc.2 `fb2c4b9` 等均已并入；Session format 为 **V4**）。**alpha.1 起两处接缝换代（已双分支适配，alpha.2 无新增破坏面）**：① **shell 执行接缝**——`ShellExecutor` 删 `run`/`start`，改 `resolve` + `execute(spec): Promise<ShellExecution>`（结果走 `result()`），详见 §1.1 shell；② **settings 面**——`dsh-settings` 导出面只剩 `SettingsForms`，ns 变成 profile entry id、可写字段需 schema 标 `.volatile()`，详见 §1.1 settings。另：包布局收进 `dsh/node_modules/@deepseek-ai/*`（I11 无破坏）、fork 实现重写（边界语义等价，I35 保持）、事件集 54→59（§四）、Session 日志升级 V4 并附批量迁移工具（保留原始 message id，插件以 id 为主键、以真实 `e.seq` 推 cutSeq，免疫）。**核验与实施记录见 compat-audit 头部 0.1.7 段与 I38/I39**）
+> * 对应版本：**dsh 0.1.7-rc.1**（tag `dsh-v0.1.7-rc.1`，2026-09-23 发布，0.1.7 系列首个候选版本、汇总自 v0.1.5-rc.3；npm dist-tag `next` 指向本版、`latest` 仍 0.1.5-rc.3、`alpha` 仍 0.1.7-alpha.2；`npm install -g @deepseek-ai/dsh@0.1.7-rc.1` 全局实装；**rc.1 对插件零破坏**——本轮以全树内容级 diff 实证（915 条变更、647 个非 package.json 文件改动，消费面真改动集中在官方 UI/工具层、三个消费契约文件字节级一致；详见 compat-audit 头部 0.1.7-rc.1 段与 [upgrade-assessments/dsh-0.1.7-rc.1.md](upgrade-assessments/dsh-0.1.7-rc.1.md)）。**本版新增启动期插件/runtime 兼容性门禁（peer 范围驱动；本插件 6 条 `dsh-*` peer 实测放行、无需豁免）**；前序基线 0.1.7-alpha.2 `0010283`、0.1.7-alpha.1 `c36a83f`、0.1.6-alpha.2 `ddefc45`、0.1.6-alpha.1 `0a15e36`、0.1.5-rc.2 `fb2c4b9` 等均已并入；Session format 为 **V4**）。**alpha.1 起两处接缝换代（已双分支适配，alpha.2 无新增破坏面）**：① **shell 执行接缝**——`ShellExecutor` 删 `run`/`start`，改 `resolve` + `execute(spec): Promise<ShellExecution>`（结果走 `result()`），详见 §1.1 shell；② **settings 面**——`dsh-settings` 导出面只剩 `SettingsForms`，ns 变成 profile entry id、可写字段需 schema 标 `.volatile()`，详见 §1.1 settings。另：包布局收进 `dsh/node_modules/@deepseek-ai/*`（I11 无破坏）、fork 实现重写（边界语义等价，I35 保持）、事件集 54→59（§四）、Session 日志升级 V4 并附批量迁移工具（保留原始 message id，插件以 id 为主键、以真实 `e.seq` 推 cutSeq，免疫）。**核验与实施记录见 compat-audit 头部 0.1.7 段与 I38/I39**）
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -357,7 +357,7 @@ interface PluginConfigViewProps { readonly view: 'summary' | 'page' }
 
 ## 四、会话事件类型全集（59 种）
 
-已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.7-alpha.2；`dsh-session/lib/types/known-event-types.js`，由官方 `gen-persistence-catalog` 生成）：
+已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.1.7-rc.1；`dsh-session/lib/types/known-event-types.js`，由官方 `gen-persistence-catalog` 生成）：
 
 ```
 agent-preset/selected   agent/inbox/spliced    approval/asked      approval/decided

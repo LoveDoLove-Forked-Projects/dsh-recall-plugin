@@ -7,6 +7,44 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.1.7-rc.1 核验（2026-09-24）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，tag `dsh-v0.1.7-rc.1`，
+> 2026-09-23 发布，0.1.7 系列首个候选版本、汇总自 v0.1.5-rc.3；`latest` 仍 0.1.5-rc.3、`alpha` 仍 0.1.7-alpha.2），
+> `npm install -g @deepseek-ai/dsh@0.1.7-rc.1` 全局实装（0.1.7-alpha.2 → 0.1.7-rc.1；cordis / schemastery 等 vendor 栈版本与内容均未变，
+> 包布局不变、子包数 276→276，junction 无需重建）。**核验方式为全树内容级 diff**：升级前对 alpha.2 整包做快照，
+> 升级后 `git diff --no-index` 全文件比对——**915 条变更（853 改 / 49 增 / 9 删 / 4 重命名）、647 个非 package.json 文件有真实内容差异**，
+> 其中 320 个是随包 LibreOffice 运行时负载、14 个是 dsh 主包 lib 产物与 README。**零改动集合（仅 package.json 版本号，内容字节级一致）**：
+> `dsh-session`、`dsh-session-query`、`dsh-shell`、`dsh-pwsh-local`、`dsh-sandbox-policy`、`dsh-host-webserver`、`dsh-client-connection`、
+> `dsh-client-modules`、`dsh-shell-env`、`dsh-agent`、`dsh-agent-loop`、`dsh-attachment`、`dsh-attachment-local`、`dsh-api-workspace-controller`、
+> `dsh-client-ui-{slots,renderer,session,settings-plugins}`、`dsh-settings`、`dsh-config-editor`、`dsh-workspace`、`dsh-subprocess-local`、
+> `dsh-tool-jobs`、`dsh-host-plugin-inventory`，以及整个 cordis vendor 栈——即
+> **I9/I10/I11/I13/I14/I20/I28/I30/I31/I32/I34/I36/I38/I39 的出处包在本版未变动**，alpha.1/alpha.2 的核验结论与探针锚点原样成立。
+> **消费面真改动只有四个包 + 一处文案**：`dsh-client-ui-chat`（15 文件：工具调用 preparing 阶段、聊天设置、本地图片预览；
+> `lib/types/client/contract/slots.d.ts` **SHA256 相同**）、`dsh-client-ui-conversation`（9：`contract/records.d.ts` 把 `RunningToolCall`
+> 拆为 `PreparingToolCall | StartedToolCall`、`contract/conversation.d.ts` 放宽 `ConversationStartMatch` 到 `SessionEventLike` 并改
+> start/update 语义——`contract/slots.d.ts` **SHA256 相同**）、`dsh-api-session-controller`（8：assistant 流退休记账 `settleAssistant` +
+> 工具流阶段类型；`contract/session.d.ts` **SHA256 相同**，host 侧 fork 实现 `lib/index.js` 不在变更清单）、
+> `dsh-client-ui-plugin-manager`（7：host 侧安装/运行树/失败类型，客户端 slot 契约未变），以及 `dsh-client-ui-workspace` 一条中文文案
+> （「子代理」→「子智能体」）。**契约与符号级复核**：`conversation.chat.node`(32)、`renderMessageImages`(19)、
+> `readAttachment`/`updateQueue`/`binding`/`fork(`、`archiveSession`(34)/`unarchiveSession`(19)/`openSession`(4)/`stopActivity`(1)/
+> `archivedSessionIds`(24)、`createDrafts`/`releaseDraftAttachments`/`addAttachments`/`setDraft`、`plugins.bundle.config`(4) 在新旧树**计数逐项相等**；
+> 插件消费的 20 个 `--dsw-alias-*` 设计令牌全部存在。**本版唯一新增机制——启动期插件/runtime 兼容性门禁**：`dsh-app-boot` 新增
+> `plugin-compatibility` / `profile-compatibility` / `compatibility-preflight` 三块，逐条取 `peerDependencies` 中名字为 `@deepseek-ai/dsh`
+> 或 `@deepseek-ai/dsh-*` 的条目用 `semver.satisfies(runtime, range, { includePrerelease: true })` 判定；不兼容的行在启动期**整行禁用**
+> （`disabled`，原生 Include 整棵拒绝），可经 profile 的 `compatibility.json`（精确 `包名@版本` → DSH 版本列表）或
+> `dsh plugin allow-version --accept-risk` 豁免；安装命令在 pnpm 执行前预检（拒绝码 `incompatible-version`）。
+> **本插件实测放行**：以官方自带 semver 7.8.5 实跑，6 条 peer 的复合区间对 `0.1.7-rc.1` 全部 `true` → 不需要豁免；
+> 全树（新旧两树）均无 `dshReleases` 字面量，`dsh.compatibility.dshReleases` 仍是市场台账声明、非安装门禁（与 2.3.11 结论一致）。
+> **门禁**：`test:probe` **49/49**、`verify:host` 装配断言全过（方言探针回归 `pwsh`）、`typecheck` 通过、`npm test` **430/430**、
+> `npm run build` 产物零漂移；`check:dsh` 初跑仅两处文档漂移，本轮同步（reference 镜像按 `dsh-v0.1.7-rc.1` tag 重拉，13 源中仅
+> 11 号对话节点文档有实质差异 +182 字符）。**兼容声明**：`dshReleases` 补 `0.1.7-rc.1: compatible`（peer 范围 `>=0.1.7-alpha.1 <0.1.8`
+> 天然覆盖，无新 tuple）；README 双语徽章与兼容范围字段同步。**观察项（非阻塞）**：① 新门禁使 peer 区间从元数据变为**启动硬门槛**
+> ——未开窗的新 minor 线会被直接禁用（显式优于静默失败），后续 0.1.8 线需先核验再开窗；② 本版新增「反向代理子路径部署」支持，
+> 插件客户端用绝对路径 `/api/recall/*` 且 Host 端按 exact path 注册路由，不感知子路径前缀（普通部署不受影响，子路径场景未验证）；
+> ③ 本版新增 SSH 远端工作区能力，影子仓库 / `--work-tree` 假定工作区在本机文件系统，远端场景未验证；④ 既有观察项延续
+> （`dsh-tool-jobs` 的 `maxConsecutiveWakes` 无默认值 × P0-1 `agentBusy` 守卫窗口；`snapshotEvents`/`eventAt`/`ownEvents` 仍 deprecated）；
+> ⑤ 可选增强：本版支持插件用 locale 声明多语言标题/描述与 package.json 图标供管理页展示（本包当前仅中文 description）。
+> 评估实证见 upgrade-assessments/dsh-0.1.7-rc.1.md。
+>
 > **0.1.7-alpha.2 核验（2026-09-23）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `0010283`），
 > `npm install -g @deepseek-ai/dsh@alpha` 全局实装（0.1.7-alpha.1 → alpha.2；cordis 4.0.3→4.0.4、schemastery 3.18.3→3.18.4；
 > 包布局不变，junction 无需重建）。**核验方式为全树内容级 diff**：以 npm 残留的 alpha.1 整包副本为基线做 SHA256 全文件比对——
@@ -1115,6 +1153,35 @@
   这些漂移在运行期都是静默失效，正是本轮被自建桩掩盖的同类面）；实弹＝0.1.7 上设置页保存若干字段
   → 立即生效（volatile 热更，无重载日志）→ 恢复默认 → 重启复查持久化；旧版回归＝0.1.6-alpha.2 上
   卡片照常可写（双分支旧路径未破坏）。
+
+
+### I40 子路径部署：服务端路径必须按 `document.baseURI` 解析（0.1.7-rc.1 官方支持）
+- **依赖的官方行为**：0.1.7-rc.1 起官方支持「Web 挂在反向代理子路径」，做法是三件事同时成立——
+  ① `dsh-host-frontend-static` 在每次 index 响应上注入 `<base href="./">`；② 前端产物资源改**相对引用**
+  （`./assets/…`，此前是根绝对）；③ 客户端把服务端路径按**文档基址**解析：`dsh-api-gateway` 的
+  `new URL(REMOTE_STREAM_MUX_PATH.slice(1), globals.__DSH_TRANSPORT__?.streamBaseUrl ?? document.baseURI)`，
+  连接 RPC 则直接以**去前导斜杠**的相对路由 POST（`` `${channel}/${endpoint}`.slice(1) ``，契约注释
+  「Receives the document-relative route so a carrier resolves it against its own base」）。因此根绝对
+  路径 `/api/…` 会越过子路径前缀打到代理未映射的根——这是插件端点路径必须跟进的硬理由。
+- **出处**：`dsh-host-frontend-static/lib/index.js`（`<base href="./">` 注入，0.1.7-alpha.2 即存在、rc.1 未变）；
+  `dsh-web-frontend/dist/index.html`（`./assets/…` 相对引用，rc.1 相对 alpha.2 的唯一实质差异即此）；
+  `dsh-api-gateway/lib/client.js`（`streamBaseUrl ?? document.baseURI`）；`dsh-client-connection/lib/client.js`
+  （相对路由 POST）。
+- **插件对策**：`src/client/util.ts` 的 `recallApiUrl(name, base?)`——以 `document.baseURI` 为基址解析
+  `api/recall/<name>`；基址缺尾斜杠时按目录补齐（用户直接敲 `/dsh` 时 `dsh` 不会被当成文件名吞掉前缀）；
+  无 `document`（非浏览器）或基址非法时回落原根绝对路径，旧行为不倒退。`api()` 是唯一调用点，已改走它。
+  **Host 端零改动**：代理剥前缀后宿主见到的仍是 `/api/recall/*`，exact 路由照常命中（实弹 200）。
+- **探针/单测**：`tests/probe/api-surface.test.js`「子路径部署的服务端路径基址」3 例（`<base href="./">` 注入、
+  前端资源相对引用且无根绝对引用、官方客户端 `document.baseURI` 解析）；`tests/unit/client-pure.test.js`
+  「端点路径的基址解析」5 例（根/子路径/多级子路径/缺尾斜杠/非法与无 document 回落 + fetch 桩钉住调用点 URL）。
+- **失效症状**：子路径部署下插件 UI 正常渲染（按钮在），但每次调用失败——`/api/recall/*` 落到代理根
+  返回 404（页面表现为提示「网络/请求失败」类文案），预览、撤回、快照管理、设置卡片全部受影响；
+  根部署（代理前缀为空）下两种解析等价，无感知。
+- **复查动作**：dsh 升级后跑上述探针（`<base>` 注入消失、前端资源改回根绝对、官方改回 document 相对之外的
+  基址口径，任一漂移即红→读本条重估）；实弹＝把 web 前端挂在 `/dsh/` 前缀反向代理后（仅映射该前缀），
+  插件端点请求须落到 `/dsh/api/recall/*`。**2026-09-24 实弹记录**（0.1.7-rc.1，`node` 子路径代理 +
+  `--trusted-host`）：带前缀 `POST /dsh/api/recall/status` → 200（`{"ok":true,…}`）、根绝对
+  `POST /api/recall/status` → 404（代理未映射），修复后源码产出的 URL 经代理实测 200。
 
 
 ## 与 E1 verify-host 的对应关系
