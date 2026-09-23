@@ -31,6 +31,10 @@
 > （官方无「待唤醒」状态可读，本轮不改码，留实弹观察：先起后台任务再撤回，看原会话是否被唤醒继续跑）；
 > ② I12 探针（`settings.plugin.item`）自 0.1.6 线起为**静默 skip**（`ui-settings-plugins` 不再发布该 slot 契约，alpha.1 亦然），
 > 建议退休或改锚 `plugins.*` 侧，避免「死探针绿灯」。评估实证见 upgrade-assessments/dsh-0.1.7-alpha.2.md。
+> **发版核验（2026-09-23）**：插件 **2.4.2 已发布**（npm `latest`＝2.4.2、GitHub Release `v2.4.2`、tag commit `e1f494c`；
+> registry 直连 `/latest` 与 `/2.4.2` 双确认，初查有约 1 分钟传播延迟，与 2.4.1 一致）。发布提交：`de007d7`（docs/compat——
+> 评估归档 + `dshReleases`/镜像/契约文档/README 徽章同步）与 `e1f494c`（chore(release) 2.4.2，含 lockfile 根版本同步）。
+> 发版前门禁：`npm run build` 产物零漂移（`lib/` 无变更）、`typecheck` 通过、`npm test` 430/430、`check:upgrade` 三层全绿。
 >
 > **0.1.7-alpha.1 核验与适配（2026-09-22）——破坏性版本，两处接缝已双分支适配**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
