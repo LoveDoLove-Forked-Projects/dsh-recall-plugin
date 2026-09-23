@@ -46,6 +46,11 @@
 > 留痕（详见 I7；`src/client/recall-node.ts` + `src/types/client-contract.ts`）。② 死探针已处置：I12 改为
 > 双代面探针 + 一条 fail-loud「两代面至少一条在位」断言（新面 `plugins.bundle.config` 首次纳入断言），
 > 探针 46 → 49；I7 另补客户端 `stopActivity` 选项锚点。
+> **2.4.3 发版核验（2026-09-23）**：插件 **2.4.3 已发布**（npm `latest`＝2.4.3、GitHub Release `v2.4.3`、
+> tag commit `1478ca0`）。发布提交链：`6c723c2`（I7 归档改 `stopActivity` + 失败留痕、I12 探针改造）、
+> `1759fbe`（I7 实弹验证记录）、`1478ca0`（chore(release) 2.4.3，含 lockfile 根版本同步）。发版前门禁：
+> `build` 产物零漂移、`typecheck` 通过、`npm test` 430/430、`check:upgrade` 三层全绿（probe **49/49**）。
+> registry 直连 `/2.4.3` 与 `/latest` 双确认（传播约 2 分钟，略慢于 2.4.2 的约 1 分钟）。
 >
 > **0.1.7-alpha.1 核验与适配（2026-09-22）——破坏性版本，两处接缝已双分支适配**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag commit `c36a83f`；`latest` 已推进到 0.1.5-rc.2、`next` 为 0.1.5-rc.3），`npm install -g @deepseek-ai/dsh@alpha`
