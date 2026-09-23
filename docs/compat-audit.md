@@ -436,6 +436,13 @@
 - **复查动作**：读 `dsh-workspace/lib/index.js` 的 `archiveSession`（`stopActivity !== true` 时经
   waterfall 拒、`=== true` 时 `stopSessionActivity`）与 `dsh-jobs/lib/index.js` 的
   `installJobArchiveAdmission`；任一漂移即复核插件的归档调用（现传 `{ stopActivity: true }` 并留痕）。
+- **实弹验证（2026-09-23，win32 本机 web profile，真模型 + 真后台作业，`D:\tmp\recall-h0` 隔离工作区）**：
+  预修复版（npm 2.4.2）—— 会话跑起两个后台作业后撤回第二条消息：原会话**未归档**（`~/.dsh/storages/workspace.json`
+  归档集合 32 条不变、仍留在会话列表并被打上「已完成」标记），且随后被**两次唤醒**（13:35「pwsh-1 已结束」、
+  13:37「pwsh-2 已结束」两轮落在已回滚的原会话里；该两次未改写工作区文件，伤害落在会话层）。修复版
+  （profile 临时切 `link:` 本仓库）—— 同流程：归档集合 **32 → 33**（原会话 `session-185df8ae` 入集合、
+  从列表消失），作业在撤回时刻被停（原定 13:45:20 结算；13:46 复查无自然完成轮、原会话投影无任何作业通知内容），
+  **无幽灵轮**；fork 子会话仅含被撤回消息之前的对话（逐项与设计一致）。
 
 ### I8 sessionQuery.listSessions：会话 id 在 header.id
 - **依赖的官方行为**：listSessions 记录形如 `{header, live, persisted}`，会话 id 在
