@@ -4,13 +4,17 @@
 
 ## 一句话理解
 
-DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**项目文件**（独立影子 git 仓库快照）与**对话历史**（官方 sessions.fork）一并回退到该消息发送之前。当前版本 2.1.1（npm 包 `dsh-recall-plugin`，Node ≥ 20，ESM）。
+DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**项目文件**（独立影子 git 仓库快照）与**对话历史**（官方 sessions.fork）一并回退到该消息发送之前。当前版本 2.4.5（npm 包 `dsh-recall-plugin`，Node ≥ 20，ESM）。
 
 ## 核心机制（三个关键词）
 
-1. **影子仓库**：每个工作区在 `~/.dsh/dsh-recall-snapshots/<工作区路径SHA256>/git/` 有独立 git 仓库，`--work-tree` 指向项目目录——项目零污染（无 .git、无快照落地）。home 不可写时降级到项目内 `.dsh-recall-snapshots/`。无 tag 可达的残骸仓库（快照在 `add` 与打 tag 之间失败留下的形态）由 gc 前的条件清理回收：`for-each-ref` 空且 `ls-files` 非空时先 `read-tree --empty` 再 gc——否则 index 条目让这批 blob 对 prune 伪可达（`fsck --unreachable` 也报 0），gc 一个对象都回收不掉（issue #18，实测 78.4MB 不減 → 归零）。收尾还有空仓目录回收：「立即 gc」在逐仓 gc 之后，把 `index.json` 明确为空数组、无 `snap-*` tag、内存无对应快照三条件全中的 store 目录整棵删掉（entries 为 null 即索引缺失/损坏的隔离现场一律保留）。
+1. **影子仓库**：每个工作区在 `~/.dsh/dsh-recall-snapshots/<工作区路径SHA256>/git/` 有独立 git 仓库，`--work-tree` 指向项目目录——项目零污染（无 .git、无快照落地）。home 不可写时降级到项目内 `.dsh-recall-snapshots/`。无 tag 可达的残骸仓库（快照在 `add` 与打 tag 之间失败留下的形态）由 gc 前的条件清理回收：`for-each-ref` 空且 `ls-files` 非空时先 `read-tree --empty` 再 gc——否则 index 条目让这批 blob 对 prune 伪可达（`fsck --unreachable` 也报 0），gc 一个对象都回收不掉（issue #18，实测 78.4MB 不减 → 归零）。收尾还有空仓目录回收：「立即 gc」在逐仓 gc 之后，把 `index.json` 明确为空数组、无 `snap-*` tag、内存无对应快照三条件全中的 store 目录整棵删掉（entries 为 null 即索引缺失/损坏的隔离现场一律保留）。
 2. **tag 即快照**：每条用户消息触发一次 `write-tree + commit-tree + tag snap-<消息ID>`。不建分支、不动工作区；消息 ID 即快照主键，索引丢失可从 tag 名反推重建（`rebuildOrphans`，时间从 tag creatordate 恢复）。index.json/lineage.json 走 tmp+rename 原子写；index 损坏时 fail-loud——改名 `.corrupt-<ts>` 隔离并告警，不静默当空。**工作区根自身命中基础排除表的目录形态项**（`…/target/debug`、`dist`）时不建快照：排除模式相对 root，永远匹配不到 root 自己，而这类目录没有回退价值（issue #18；`captureSnapshot` 在 `resolveStore` 前早退，init/snapshot-info 下同一条提示，逃生口＝删掉排除表对应项）。
-3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。execute 支持 `scope` 二选一（缺省/非法回落 both）：both 为下述全链；`session-only` 走零 git 短路径——不进串行队列、不打安全快照、不 reset，仅保留 NO_SNAPSHOT/AGENT_BUSY 护栏后取切点返回 `count: 0`（确认面板 radio 二选一，cutSeq 为 null 不出选项）。原会话归档（可恢复，`archiveOriginal` 可关；**归档必须带 `stopActivity`**——官方对「有活动在跑」的会话默认拒归档，而 jobs 作业结算不受抑制、会把已回滚的原会话唤醒开新一轮），新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。both 的 execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息（子会话被驱动时它还会被当作真实一轮消费），故 execute 顺带下发 `staleQueueItemIds`（窗口内入队项的 message id），Client 在子会话上按 id 直调官方 `updateQueue(itemId, { kind: 'remove' })` 清掉（G1）；不做队列快照匹配——快照走 control 帧、到达时机不定，命中式等待会整段落空。
+3. **双轨回退**：文件走影子仓库 reset 到 tag；对话走官方 `sessions.fork({ atSeq: cutSeq })`——cutSeq 是该消息之前最近一次 `turn/end` 的 seq。
+   - **scope 二选一**（缺省/非法回落 both）：both 为下述全链；`session-only` 走零 git 短路径——不进串行队列、不打安全快照、不 reset，仅保留 NO_SNAPSHOT/AGENT_BUSY 护栏后取切点返回 `count: 0`（确认面板 radio 二选一，cutSeq 为 null 不出选项）。
+   - **归档与标题**：原会话归档（可恢复，`archiveOriginal` 可关；**归档必须带 `stopActivity`**——官方对「有活动在跑」的会话默认拒归档，而 jobs 作业结算不受抑制、会把已回滚的原会话唤醒开新一轮）；新会话继承原标题（不传 `increaseTitle`，避免「xxx 2」递增）。
+   - **安全快照与 lineage**：both 的 execute 先打安全快照 `snap-pre-rollback-<ts>`，回退失败自动 reset 救援（H1）；fork 关系经 `lineage-record` 持久化进 lineage.json，快照管理按「版本家族」聚族（F1）。
+   - **队列清理（G1）**：fork 的切点从 `turn/end` 推进到下一个 `turn/start`，会把被撤回消息的 inbox 入队事件一并带进子会话 seed——表现为输入框上方凭空多一条排队消息（子会话被驱动时还会被当作真实一轮消费），故 execute 顺带下发 `staleQueueItemIds`（窗口内入队项的 message id），Client 在子会话上按 id 直调官方 `updateQueue(itemId, { kind: 'remove' })` 清掉；不做队列快照匹配——快照走 control 帧、到达时机不定，命中式等待会整段落空。
 
 ## 项目架构与文件地图（改动先看这里）
 
@@ -32,11 +36,14 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 | `src/host/maintenance.ts`       | 定期 `git gc`（50 拍或 24h）、会话删除联动清 tag、条数上限（`maxSnapshotsPerWorkspace`）与按时间保留（`retentionDays`）清理；「立即 gc」另按磁盘枚举（注入 `dumpStores`）覆盖内存里没有的仓库并回收空仓目录（M3）                                                                                                                                                                              | 改磁盘治理            |
 | `src/host/scripts.pwsh.ts`      | PowerShell 命令模板（win32），与 posix 版**同名导出**；契约由 `src/types/scripts.ts` + tests/types 编译期断言锁死                                                                                                                                                                                                                                        | 改 Windows 命令     |
 | `src/host/scripts.posix.ts`     | bash 命令模板（linux/darwin），与 pwsh 版共享同一契约                                                                                                                                                                                                                                                                                           | 改 POSIX 命令       |
-| `src/types/`                    | 跨域共享类型库（仅类型导出，`import type` 消费、转译后零运行时引用）：`dsh-contract.ts`（Host 依赖面 + schemastery/dsh-settings ambient）、`client-contract.ts`（Client slot/`__ModuleLoader__` 全局）、`scripts.ts`（双模板契约 + 哨兵字面量）、`payloads.ts`（index/lineage/exclude/root 结构）、`state.ts`（共享 state）、`api.ts`（/api/recall 端点类型）、`config.ts`（Config 类型镜像）               | 改跨域契约/类型         |
+| `src/types/`                    | 跨域共享类型库（仅类型导出，`import type` 消费、转译后零运行时引用）：`dsh-contract.ts`（Host 依赖面）、`ambient-modules.d.ts`（私有 peer 包 ambient 声明，全局脚本上下文）、`client-contract.ts`（Client slot/`__ModuleLoader__` 全局）、`scripts.ts`（双模板契约 + 哨兵字面量）、`payloads.ts`（index/lineage/exclude/root 结构）、`state.ts`（共享 state）、`api.ts`（/api/recall 端点类型）、`config.ts`（Config 类型镜像）               | 改跨域契约/类型         |
 | `src/client/entry.ts`           | client 构建入口：esbuild entry，`__ModuleLoader__.load({id, factory})` 注册，react external                                                                                                                                                                                                                                               | 基本不动             |
-| `src/client/app.ts`             | client 装配：注入 CSS、组装子模块、注册 `conversation.chat.node`（key 覆盖 user+steering，priority -1 冲突递减重试到 -3）与 `settings.plugin.item`（key=namespace `dsh-recall`）                                                                                                                                                                              | 改注册/装配           |
+| `src/client/app.ts`             | client 装配：注入 CSS、组装子模块、注册 `conversation.chat.node`（key 覆盖 user+steering，priority -1 冲突递减重试到 -3）与设置卡片双 slot 并注册（`settings.plugin.item` key=namespace `dsh-recall`；`plugins.bundle.config` key=包名 `dsh-recall-plugin`，各吃一代设置面）                                                                                                                                                                              | 改注册/装配           |
 | `src/client/recall-node.ts`     | 撤回节点：撤回按钮/确认面板/toast、preview→execute→fork→归档→回填链（`refillDraft` 可关）、用户消息重绘（图片走官方 `renderMessageImages`）                                                                                                                                                                                                                           | 改撤回 UI、改 fork 行为 |
-| `src/client/settings-cards.ts`  | 设置卡片：插件配置表单（9 字段 + 恢复默认）/ exclude 编辑 / 快照树管理（版本家族聚族、搜索、分级删除）                                                                                                                                                                                                                                                                     | 改设置页 UI          |
+| `src/client/settings-cards.ts`  | 设置卡片装配层：`RecallSettingsCard` 外壳 + `SectionToggle` 折叠头原子，组装配置 / 排除 / 快照管理三张卡片                                                                                                                                                                                                                                                                     | 改卡片装配           |
+| `src/client/config-card.ts`     | 插件配置表单卡片（9 字段 + 恢复默认）                                                                                                                                                                                                                                                                                                                                                                                               | 改配置表单           |
+| `src/client/exclude-card.ts`    | 排除配置卡片（exclude 列表拉取 + 编辑 + 常用模式快捷追加）                                                                                                                                                                                                                                                                                                                                                                          | 改排除编辑 UI        |
+| `src/client/snapshot-manager.ts` | 快照树管理卡片（版本家族聚族、搜索、分级删除、磁盘占用、立即 gc、最近错误）                                                                                                                                                                                                                                                                                                                                                       | 改快照管理 UI        |
 | `src/client/util.ts`            | client 纯函数（clockText/sizeText/buildTree…，模块级导出供单测）+ 有状态工厂（api/toast/ensureInit）                                                                                                                                                                                                                                                  | 改 client 工具      |
 | `src/client/css.ts`             | client CSS 常量（styles 服务注入，缺失降级 `<style>`）                                                                                                                                                                                                                                                                                        | 改样式              |
 | `lib/*.js`                      | **构建产物**（`npm run build` 生成：esbuild 逐文件转译 `src/host/` 15 产物 + 打包 `src/client/` → client.js；随源码提交，CI 钉新鲜度）——勿直接编辑，改源码后 `npm run build`                                                                                                                                                                                            | 不手改              |
@@ -47,7 +54,7 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 | `scripts/verify-host.mjs`       | 装配门禁：真实 cordis `new Context()` + 服务桩 apply 插件（复刻生产 inject 门禁路径）                                                                                                                                                                                                                                                                  | 改装配断言            |
 | `scripts/check-dsh-version.mjs` | dsh 版本巡检（镜像漂移/reference + 契约文档漂移/dsh-contract、peer 越界、新版提示四层比对，纯函数有单测）                                                                                                                                                                                                                                                           | 改巡检              |
 
-**重要约束**：两套脚本模板必须同名导出——调用方统一走 `rt.scripts.*` / `S.*`，按 `process.platform` 单选；契约事实源已升级为 `src/types/scripts.ts` + tests/types 编译期断言（scripts-contract.test.js 运行时断言保留为双保险）。
+**重要约束**：两套脚本模板必须同名导出——调用方统一走 `rt.scripts.*` / `S.*`，按 `process.platform` 单选；契约事实源是 `src/types/scripts.ts` + tests/types 编译期断言，scripts-contract.test.js 运行时断言作双保险。
 
 **文档**：计划/规范类文档放 `docs/`，归类、命名与生命周期规范见 `docs/README.md`（新增文档前先读）。行为变更同步 CHANGELOG.md（Keep a Changelog 格式）。
 
@@ -55,17 +62,17 @@ DSH 消息撤回插件：在用户消息气泡旁加「撤回」按钮，把**�
 
 | 命令                      | 作用                                                                                                                      | 何时跑                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `npm test`              | vitest 纯逻辑单测（tests/unit，34 文件 430 例，无 DSH 依赖，CI 同跑）                                                                     | 改任何逻辑后                             |
-| `npm run typecheck`     | `tsc --noEmit` 全量类型检查（src/**/\* + tests/types/**/\* 编译期契约断言；tests/unit 与 scripts/\*.mjs 退出范围）                           | 改任何 src/ 后；发版前（CI 类型门禁置于单测前）       |
+| `npm test`              | vitest 纯逻辑单测（tests/unit，34 文件 436 例，无 DSH 依赖，CI 同跑）                                                                     | 改任何逻辑后                             |
+| `npm run typecheck`     | `tsc --noEmit` 全量类型检查（src/**/\* + tests/types/**/\* 编译期契约断言；tests/unit 与 scripts/\*.mjs 不在 include 范围）                           | 改任何 src/ 后；发版前（CI 类型门禁置于单测前）       |
 | `npm run test:probe`    | 官方 API 字段探针（tests/probe，依赖本机 dsh 安装，无 dsh 自动 skip）                                                                      | **dsh 升级后本地必跑**；新增官方 API 调用点先加探针条目 |
 | `npm run verify:host`   | 装配门禁（inject 声明/端点注册/Config schema/settings 接入/卸载清零）                                                                     | 改 inject/端点/装配后；发版前                |
-| `npm run build`         | host+client 全量打包：build-host.mjs 逐文件转译 src/host/ 14 产物 → lib/ + build-client.mjs 打包 src/client/ → lib/client.js（含产物格式断言） | 改任何 src/ 后必跑（CI 新鲜度门禁拦漏跑）          |
+| `npm run build`         | host+client 全量打包：build-host.mjs 逐文件转译 src/host/ 15 产物 → lib/ + build-client.mjs 打包 src/client/ → lib/client.js（含产物格式断言） | 改任何 src/ 后必跑（CI 新鲜度门禁拦漏跑）          |
 | `npm run check:dsh`     | dsh 版本巡检（本地 dsh vs docs/reference 镜像 + dsh-contract 契约文档、npm 最新 vs peer 范围）                                                  | 发布前；dsh 升级后                        |
 | `npm run check:upgrade` | dsh 升级一键核验门禁：串联 check:dsh + test:probe + verify:host，输出后提示在 compat-audit.md 头部追加核验记录                                    | **dsh 升级后必跑**（替代手动三步）              |
 
 CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck）+ 单测 + 产物新鲜度统一门禁（`npm run build && git diff --exit-code lib/`）；探针与 verify:host 依赖本机 dsh，不进 CI。
 
-## 官方文档合规清单（改代码前对照，2026-08-30 核对）
+## 官方文档合规清单（改代码前对照）
 
 > 官方文档本地镜像在 `docs/reference/`（索引与更新见 `docs/reference/README.md`）；发布前过一遍本表。
 
@@ -82,7 +89,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 特注：
 
-* `inject` 当前声明 `['shell', 'sessions', 'agents']`——`agents` 是 P0-1 运行中 agent 拦截所需；cordis 4 漏声明即抛「cannot get property without inject」并被访问点守卫吞掉、静默 fail-open（I10，verify-host 有行为级断言盯防）。**webServer 刻意不在 inject**：桌面端 composition 禁用它，硬依赖会让 fiber 永久 pending（I32）；API 路由走 connection 的载体无关 fetch 路由，`ctx.inject` 可选注入、服务缺席仅 Client API 降级。
+* `inject` 声明 `['shell', 'sessions', 'agents']`——`agents` 是 P0-1 运行中 agent 拦截所需；cordis 4 漏声明即抛「cannot get property without inject」并被访问点守卫吞掉、静默 fail-open（I10，verify-host 有行为级断言盯防）。**webServer 刻意不在 inject**：桌面端 composition 禁用它，硬依赖会让 fiber 永久 pending（I32）；API 路由走 connection 的载体无关 fetch 路由，`ctx.inject` 可选注入、服务缺席仅 Client API 降级。
 
 * `DSH_RECALL_GC_SNAPS/HOURS` env 绕过 schema 仅作 Config 覆盖，与 #3 有张力——新参数一律走 Config 字段。
 
@@ -90,25 +97,25 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * 发布前重点复核：#3 无新硬编码、#4 patch 默认值语义、#5 HMR 假设、#8 新增官方 API 调用点的字段已核验。
 
-漂移控制：每 release 周期按 `docs/reference/README.md` 重拉镜像（重拉后同步更新该文件「归档日期」与「归档 dsh 版本」字段），变化同步进本清单、[docs/compat-audit.md](docs/compat-audit.md) 台账与「已知坑」；发布前跑 `npm run check:dsh`（P2-5）做版本巡检——本地 dsh 与镜像漂移、peer 范围越界都会输出提醒。**dsh 升级后跑** **`npm run check:upgrade`（串联三层门禁）并按 compat-audit 台账 I1-I36 定点复查**，替代全文重读「已知坑」。
+漂移控制：每 release 周期按 `docs/reference/README.md` 重拉镜像（重拉后同步更新该文件「归档日期」与「归档 dsh 版本」字段），变化同步进本清单、[docs/compat-audit.md](docs/compat-audit.md) 台账与「已知坑」；发布前跑 `npm run check:dsh` 做版本巡检——本地 dsh 与镜像漂移、peer 范围越界都会输出提醒。**dsh 升级后跑 `npm run check:upgrade`（串联三层门禁）并按 compat-audit 台账 I1-I40 定点复查**，替代全文重读「已知坑」。
 
 ## 关键设计决策（为什么这样写）
 
 * **shell 以宿主身份执行**（`sandboxPolicy: { mode: 'danger-full-access' }`）：受限会话（workspace-write/read-only）写不了 home，回退必败。安全靠「命令全为固定模板，唯一变量是插件自推导路径，模型无法注入」。
 
-* **串行队列** **`state.queue`**：一条消息一次快照，preview/execute/gc/清理同队——互斥无 git 锁竞态。
+* **串行队列 `state.queue`**：一条消息一次快照，preview/execute/gc/清理同队——互斥无 git 锁竞态。
 
 * **幂等与节流**：`ensureGit` 去重；home 迁移失败 5min 节流；gc 失败也推进时间戳（环境性失败不堵队）。
 
 * **双实例并发治理（M3）**：store 目录心跳文件（宿主 PID + epoch 秒，每次快照/建库刷新，TTL 900s）；失败清扫三级让路——另一活实例使用中让路 → 5min 内新锁让路 → 照常清扫（issue #11 双实例互踩根治）。
 
-* **win32/POSIX 文本写统一 stdin 单进程**（PF-2）：`fileWriteStdinCmd` 两平台同名——pwsh 用 `OpenStandardInput()` 字节流读（`Console.In` 在 PS 5.1 按输入代码页 GBK 解码 UTF-8 stdin 必挂，I27 探针钉）；POSIX 是 `cat > tmp`。base64 分块实现已移除（回退 = git revert，无运行时双路径）。
+* **win32/POSIX 文本写统一 stdin 单进程**（PF-2）：`fileWriteStdinCmd` 两平台同名——pwsh 用 `OpenStandardInput()` 字节流读（`Console.In` 在 PS 5.1 按输入代码页 GBK 解码 UTF-8 stdin 必挂，I27 探针钉）；POSIX 是 `cat > tmp`。
 
-* **diff 不用** **`-z`**（PowerShell 丢 NUL 行）：`core.quotePath=false` + 逐行 TAB 解析。
+* **diff 不用 `-z`**（PowerShell 丢 NUL 行）：`core.quotePath=false` + 逐行 TAB 解析。
 
-* **pwsh 哈希用** **`SHA256::Create()`**：兼容 Windows PowerShell 5.1。
+* **pwsh 哈希用 `SHA256::Create()`**：兼容 Windows PowerShell 5.1。
 
-* **运行时形态（TS 迁移后全量构建）**：源码全部在 `src/`（host 14 + client 6 + types 类型库），`npm run build` 经 esbuild 打包——build-host.mjs 逐文件转译 `src/host/` → `lib/`（14 产物文件名与 npm 包现状逐一相同），build-client.mjs 打包 `src/client/` → 单文件 `lib/client.js`（CJS factory 包裹：loader 契约 classic script 禁顶层 import、react external 由 loader 运行时 `require("react")` 提供、注册 id `dsh-recall-plugin`）。产物随源码提交入库（git 安装免 prepare），CI 统一新鲜度门禁。**改任何** **`src/`** **必须重跑 build，否则发布的是旧产物**。
+* **构建形态**：源码全部在 `src/`（host 15 + client 9 + types 类型库），`npm run build` 经 esbuild 打包——build-host.mjs 逐文件转译 `src/host/` → `lib/`（15 个产物文件名与 npm 发布包逐一相同），build-client.mjs 打包 `src/client/` → 单文件 `lib/client.js`（CJS factory 包裹：loader 契约 classic script 禁顶层 import、react external 由 loader 运行时 `require("react")` 提供、注册 id `dsh-recall-plugin`）。产物随源码提交入库（git 安装免 prepare），CI 统一新鲜度门禁。**改任何 `src/` 必须重跑 build，否则发布的是旧产物**。
 
 ## 数据流速查
 
@@ -141,7 +148,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 └── <工作区路径SHA256>/
     ├── git/                       # 影子仓库工作目录（空，仅持有 .git）
     │   └── .git/                  # 真实 git-dir（config/info/objects…）
-    │       ├── info/attributes    # 固化字节保真语义（关闭 EOL/clean filter 等，2.1.1）
+    │       ├── info/attributes    # 固化字节保真语义（关闭 EOL/clean filter 等）
     │       ├── gc.stamp           # 上次 gc 时间戳（跨重启节流凭据）
     │       └── attrs-v1.stamp     # 存量索引 renormalize 一次性迁移标记
     ├── index.json                 # [{id,time,root,sessionId}] 快照索引（tmp+rename 原子写；损坏改名 index.json.corrupt-<ts>）
@@ -154,22 +161,14 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 ## 协作流程（改动 → 合并 → 发布）
 
-1. **Host 逻辑改动**（src/host/，不含 client）：改代码 → `npm run typecheck` → `npm run build`（host 产物进 lib/）→ `npm test`（新增可纯化逻辑对应补单测）→ 涉及官方 API 字段时补探针条目并跑 `npm run test:probe` → 涉及 inject/端点/装配时跑 `npm run verify:host` → 冒烟验证。**本地工作流约定：改** **`src/`** **后先** **`npm run build`** **再** **`npm test`**——package-layout 断言基于 lib/ 产物，忘 build 会基于陈旧产物假绿/假红。
+1. **Host 逻辑改动**（src/host/，不含 client）：改代码 → `npm run typecheck` → `npm run build`（host 产物进 lib/）→ `npm test`（新增可纯化逻辑对应补单测）→ 涉及官方 API 字段时补探针条目并跑 `npm run test:probe` → 涉及 inject/端点/装配时跑 `npm run verify:host` → 冒烟验证。**本地工作流约定：改 `src/` 后先 `npm run build` 再 `npm test`**——package-layout 断言基于 lib/ 产物，忘 build 会基于陈旧产物假绿/假红。
 2. **Client 改动**（src/client/）：改源码 → `npm run build`（产物 lib/client.js 随源码一起提交，CI 新鲜度门禁拦漏跑）→ `npm test` → 冒烟验证。
 3. **脚本模板改动**（src/host/scripts.pwsh/posix.ts）：两平台过心智检查（路径引号、编码、命令长度上限差异），契约事实源在 `src/types/scripts.ts` + tests/types 编译期断言，`scripts-contract` 单测钉同名导出与 `g=`/`RECALL_CLEANUP` 约定；改动尽量双平台实弹复验。
-4. **提交规范**：Conventional Commits 中文摘要（feat:/fix:/docs\:/test:/ci:/chore:）；修复 bump patch、新功能 bump minor；metadata-only 可不发 GitHub Release。
+4. **提交规范**：Conventional Commits 中文摘要（feat:/fix:/docs:/test:/ci:/chore:）；修复 bump patch、新功能 bump minor；metadata-only 可不发 GitHub Release。
 5. **文档同步**：行为变更同步 README.md（+README.en.md）与 CHANGELOG.md；计划/规范文档归口 `docs/`（先读 docs/README.md）；官方 API 假设变化同步 compat-audit 台账。
 6. **代码规范**：函数级注释解释「为什么」（动机与权衡），不复述「做什么」；单文件有效代码 ≤800 行，预估超 700 行即拆分；优先复用现有模块，新写模块前先查可复用的函数/类/工具。
 7. **发布流程**：bump version → git commit/push → npm publish → GitHub Release；发布后本机验证新版：npm 模式跑 `pnpm update dsh-recall-plugin`（profile 目录），或临时切 link 模式。
 
-   * **网络/代理**：本机直连 GitHub 不通（Connection reset）。全局 git 配置已设
-     `http.proxy`/`https.proxy = http://127.0.0.1:48046`（`git config --global`）。
-     **2026-09-14 实测**：该代理走 HTTP CONNECT 时 git 的 TLS 握手会被断
-     （`TLS connect error: unexpected eof`；`http.sslBackend=schannel` 同样失败，
-     而 curl/gh 同代理正常）——git push/pull 请用 socks5 通道单次注入：
-     `git -c http.proxy=socks5h://127.0.0.1:48046 -c https.proxy=socks5h://127.0.0.1:48046 push origin <branch|tag>`
-     （实测可用）。若代理整体不可用，可用
-     `git config --global --unset http.proxy`/`--unset https.proxy` 撤销全局配置。
 
 ## 开发与验证
 
@@ -187,13 +186,13 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * **冒烟路径**：中文路径工作区 → 发消息（出快照）→ 改文件 → 撤回（清单正确、文件恢复、对话回退、标题不变）→ 设置页快照管理（树形展开/折叠、叶子消息内容、三级/批量删除、立即 gc）。完整待办清单（各批次实弹验收项）见 [docs/plans/completed/smoke-checklist.md](docs/plans/completed/smoke-checklist.md)（2026-08-29 七节全部通过；新批次验收项追加新节）；执行记录（环境/结果/发现/发版判定）见同目录 [smoke-checklist-records.md](docs/plans/completed/smoke-checklist-records.md)。
 
-* **测试分层**：单测（纯逻辑，CI 同跑）→ 探针（官方 API 字段断言，把合规清单 #8 机器化）→ verify-host（装配层门禁）→ 活体冒烟（不替代关系，逐层补盲）。dsh 升级后本地跑 `npm run check:upgrade`（串联 check:dsh + test:probe + verify:host），并按 compat-audit 台账 I1-I36 定点复查。
+* **测试分层**：单测（纯逻辑，CI 同跑）→ 探针（官方 API 字段断言，把合规清单 #8 机器化）→ verify-host（装配层门禁）→ 活体冒烟（不替代关系，逐层补盲）。dsh 升级后本地跑 `npm run check:upgrade`（串联 check:dsh + test:probe + verify:host），并按 compat-audit 台账 I1-I40 定点复查。
 
 ## 已知坑（踩过的，别再踩）
 
 > 细节（依赖的官方行为 / 出处 / 探针·单测 / 失效症状 / 复查动作）全部住在
 > [docs/compat-audit.md](docs/compat-audit.md) 的「子系统 × 不变量 × 探针」矩阵
-> （I1-I36），这里只留一行一条索引；**dsh 升级后按台账 I1-I36 定点复查，不全文重读本节**。
+> （I1-I40），这里只留一行一条索引；**dsh 升级后按台账 I1-I40 定点复查，不全文重读本节**。
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 

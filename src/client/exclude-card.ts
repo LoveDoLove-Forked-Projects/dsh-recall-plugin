@@ -78,7 +78,7 @@ export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFile
           : 'home 目录不可写时此工作区降级存储，排除配置独立生效。'
       ),
       React.createElement('div', { className: 'dsh-recall-ex-path' }, '存储位置：' + file.path),
-      React.createElement('div', { className: 'dsh-recall-ex-note' }, 'gitignore 语法，一行一条，支持 # 注释；命中排除的文件与目录不进入快照，也不会被回退触碰。'),
+      React.createElement('div', { className: 'dsh-recall-ex-note' }, 'gitignore 语法，一行一条，支持 # 注释；命中项不进快照、不被回退触碰。'),
       React.createElement('textarea', {
         className: 'dsh-recall-ex-area',
         'aria-label': '快照排除模式列表（gitignore 语法，一行一条）',

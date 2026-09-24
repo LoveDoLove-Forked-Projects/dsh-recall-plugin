@@ -13,7 +13,7 @@
 Under any message you've sent, click "↶ Recall" — **your workspace files and the conversation history roll back to just before that message was sent**.
 ---
 
-Files and conversation roll back together: the workspace is first snapshotted into an independent shadow git repository, and a recall uses it to restore files to their state before that message; the conversation is rewound through DSH's official `sessions.fork` to the turn boundary before it, with the original session archived and recoverable. After a recall, the message's text and attachments are placed back into the input box, ready to edit and resend. Snapshots never touch your project's own git and live under `$DSH_HOME` by default. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
+Files and conversation roll back together: as each message is sent, the workspace is first snapshotted into an independent shadow git repository, and a recall uses it to restore files to their state before that message; the conversation is rewound through DSH's official `sessions.fork` to the turn boundary before it, with the original session archived and recoverable. After a recall, the message's text and attachments are placed back into the input box, ready to edit and resend. Snapshots never touch your project's own git and live under `$DSH_HOME` by default. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
 
 [Changelog](CHANGELOG.md)
 
@@ -36,7 +36,6 @@ Files and conversation roll back together: the workspace is first snapshotted in
 | --- | --- |
 | ![Recall button appears on hover](docs/screenshots/recall-button.png) | ![Confirmation panel · file change list](docs/screenshots/confirm-panel-1.png) |
 
-- After a recall, the message's text and attachments are placed back into the input box for quick editing and resending (can be disabled in the settings card)
 - Settings · plugin config card (config form / exclusions / snapshot manager, saved changes apply live)
 
 ![Settings](docs/screenshots/settings-exclude-2.png)
@@ -46,7 +45,7 @@ Files and conversation roll back together: the workspace is first snapshotted in
 Abilities with a version in parentheses require that version or later; the rest have no special version requirement.
 
 - **Files + conversation, rolled back together**: recalling isn't just about chat history — files the agent modified go back to their original state too; immune to your project's `.gitattributes` conversion, with byte-level fidelity for line endings and binary content (2.1.1+).
-- **Just want a fresh conversation? Leave the files alone** (2.3.24+): the confirmation panel offers a recall-scope choice — the default "Roll back files & conversation" behaves as before; picking "Conversation only" keeps your project files byte-for-byte untouched (no safety snapshot either) and rewinds only the conversation, ideal when you dislike the reply but want to keep the file changes.
+- **Just want a fresh conversation? Leave the files alone** (2.3.24+): the confirmation panel offers a recall-scope choice — the default "Roll back files & conversation" is the full rollback; picking "Conversation only" keeps your project files byte-for-byte untouched (no safety snapshot either) and rewinds only the conversation, ideal when you dislike the reply but the file changes are exactly what you want.
 - **Never touches your project's own git, and keeps it clean**: snapshots live in an independent shadow git repository — branches, staging area, and uncommitted changes are untouched; storage stays under `$DSH_HOME` regardless of the session's sandbox permission (workspace-write / read-only sessions work as usual), falling back to an in-project `.dsh-recall-snapshots` only when home itself is unwritable.
 - **See the list before you act — and change your mind as often as you like**: recall first shows the list of files that will change (modified / restored / deleted); nothing runs until you confirm. After a recall you can recall again to an even earlier point, and files overwritten during a recall always remain recoverable (up to 500 snapshots per workspace by default).
 - **Resend right after a recall** (2.3.15+): a recall places the message's text and attachments back into the input box — images and files return as well, so you can edit and send again without picking the attachments over.
@@ -69,7 +68,15 @@ Boundaries accepted by design and edge cases not yet covered — worth checking 
 
 ## Installation
 
-Prerequisites: git CLI (without it the recall button won't appear and a notice shows at the top of the page — DSH itself keeps running); PowerShell 5.1 / 7 on Windows, bash + git on Linux/macOS; DSH `0.1.2-alpha.1` through `0.1.7-rc.1` (peerDependencies open a window per minor line: `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`, consistent with the `dsh.compatibility.dshReleases` declaration; each line is anchored at its first verified version with an exclusive upper bound at the next minor, so later prereleases/releases within a verified line are admitted without touching the peer declaration, while unverified new minor lines remain blocked). **0.1.7-alpha.1 is a breaking release** (`ShellExecutor.run`/`start` became `execute().result()`, and the settings surface became `SettingsForms`, addressed by profile entry id with `.volatile()` marked fields), and the plugin ships **both seams side by side**: the same release keeps working on every 0.1.2–0.1.6 line and on 0.1.7, with unchanged behaviour on older DSH versions. `0.1.1-rc.2` and earlier are no longer declared supported: their client runtime lacks the `sessions`/`workspaces`/`uiWorkspace` services, so the plugin UI silently fails to render.
+Prerequisites:
+
+- git CLI: without it the recall button won't appear (a notice shows at the top of the page); DSH itself keeps running.
+- Shell: PowerShell 5.1 / 7 on Windows; bash on Linux/macOS.
+- DSH version: `0.1.2-alpha.1` through `0.1.7-rc.1`. peerDependencies open a window per minor line (`>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`, consistent with the `dsh.compatibility.dshReleases` declaration): each line is anchored at its first verified version with an upper bound at the next minor, so later prereleases/releases within a verified line are admitted without touching the peer declaration, while unverified new minor lines remain blocked.
+- **0.1.7-alpha.1 is a breaking release** (`ShellExecutor.run`/`start` became `execute().result()`, and the settings surface became `SettingsForms`, addressed by profile entry id with `.volatile()` marked fields); the plugin ships **both seams side by side** — the same release works on every 0.1.2–0.1.6 line and on 0.1.7, with unchanged behaviour on older DSH versions.
+- `0.1.1-rc.2` and earlier are not supported: their client runtime lacks the `sessions`/`workspaces`/`uiWorkspace` services, so the plugin UI silently fails to render.
+
+Install & verify:
 
 - Official DSH plugin command: install and auto-mount into the web profile
 ```powershell
@@ -122,7 +129,7 @@ The plugin manages disk usage automatically — no manual housekeeping needed:
 - **Periodic gc**: every 50 snapshots or 24 hours since the last gc (whichever comes first, thresholds configurable), `git gc` runs in the background to pack loose objects. This is lossless — every snapshot remains recallable. The throttle token lives in `gc.stamp` inside the shadow repository, so restarting DSH does not reset the cycle.
 - **Cap & retention**: up to 500 snapshots per workspace by default (oldest pruned beyond the cap); optionally set `retentionDays` for age-based retention. The two triggers work independently and can both be adjusted or disabled in the config card.
 - **Session-deletion cleanup**: once a session is permanently deleted (its log gone from disk), the next maintenance pass automatically removes all of its snapshots and frees the space. **Archiving is not deletion** — logs of sessions archived by the recall feature itself still exist, so their snapshots are kept and recoverable from the archive. The check is conservative: a session that is merely cold (not in memory) is never cleaned, and when the log's state cannot be verified, it is left alone.
-- **User-defined exclusions**: open the "**Settings → Plugin Config → Recall Plugin**" card (collapsed by default; click the header to expand) to edit snapshot exclusions visually — type a path or pattern and press Enter to add it, one-click append for common patterns (`dist/`, `*.log`, `.env`, …), and saved changes take effect on the very next snapshot/recall, no restart needed. Alternatively, edit `dsh-recall-snapshots/exclude.txt` under home directly (i.e. `$DSH_HOME/dsh-recall-snapshots/exclude.txt`, or `~/.dsh/dsh-recall-snapshots/exclude.txt` when unset; UTF-8; one gitignore-style pattern per line; lines starting with `#` are comments) — both paths edit the same configuration, for example:
+- **User-defined exclusions**: open the "**Settings → Plugin Config → Recall Plugin**" card (collapsed by default; click the header to expand) to edit snapshot exclusions visually — type a path or pattern and press Enter to add it, one-click append for common patterns (`dist/`, `*.log`, `.env`, …), and saved changes take effect on the very next snapshot/recall, no restart needed. Alternatively, edit `$DSH_HOME/dsh-recall-snapshots/exclude.txt` directly (or `~/.dsh/dsh-recall-snapshots/exclude.txt` when unset; UTF-8): one gitignore-style pattern per line, lines starting with `#` are comments — both paths edit the same configuration. For example:
 
   ```gitignore
   # keep build artifacts out of snapshots
@@ -165,7 +172,7 @@ Note: all source lives in `src/` (host in `src/host/`, browser side in `src/clie
 
 ### Tests
 
-- `npm test`: pure-logic unit tests (vitest, 34 files / 425 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
+- `npm test`: pure-logic unit tests (vitest, 34 files / 436 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
 - `npm run test:probe`: official-API field probes (requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` and the fork-cut anchors of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, the shell execution seam (`execute`/`ShellExecution.result`), the settings surface (`SettingsForms`/profile entry id/volatile gate) plus `loader/volatile-update` and the `Fiber.entry` shape, and goes red on violation;
 - `npm run verify:host`: assembly gate (requires a local dsh installation) — boots the plugin with a real cordis context in two passes (legacy settings stub and a modern-face-only stub), asserting inject declarations, endpoint registration, Config schema, teardown cleanliness and settings-face dispatch, catching assembly regressions before release;
 - `npm run build`: full host+client build (mandatory after any `src/` change); `npm run check:dsh`: dsh version inspection (pre-release).

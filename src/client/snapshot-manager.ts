@@ -69,6 +69,40 @@ export function groupByLineage(ids: Array<string | null | undefined>, lineage: L
 export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService, workspacesSvc?: ClientWorkspacesService, uiWorkspaceSvc?: ClientUiWorkspaceService): { ManageCard: () => import('react').ReactNode } {
   const { api, clockText, sizeText, buildTree } = util
 
+  // 树行内的删除按钮：垃圾桶图标 + 稳定命中区，紧贴会话/快照名渲染（不再排到
+  // 行尾——文本 chip 逐行右对齐成一列，用户实测反馈容易点错行）。颜色随主题：
+  // 静息 label-tertiary、hover 转 error + 危险底色，靠「悬停才显红」压住多行
+  // 红色噪音（安全语义由确认条承担）。stroke 用 currentColor，不写死图标源
+  // 里的 #d0021b
+  function DeleteButton(props: { title: string; onClick: () => void }): import('react').ReactNode {
+    return React.createElement('button', {
+      type: 'button',
+      className: 'dsh-recall-icon-btn dsh-recall-icon-btn-danger',
+      title: props.title,
+      'aria-label': props.title,
+      // 阻止冒泡：行本身可点（展开/收起），删除按钮不该顺带折叠该行
+      onClick: (e: import('react').MouseEvent) => { e.stopPropagation(); props.onClick() },
+    }, React.createElement('svg', { width: 14, height: 14, viewBox: '0 0 48 48', fill: 'none', 'aria-hidden': true },
+      React.createElement('path', { d: 'M9 10V44H39V10H9Z', stroke: 'currentColor', strokeWidth: 4, strokeLinejoin: 'round' }),
+      React.createElement('path', { d: 'M20 20V33', stroke: 'currentColor', strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      React.createElement('path', { d: 'M28 20V33', stroke: 'currentColor', strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      React.createElement('path', { d: 'M4 10H44', stroke: 'currentColor', strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+      React.createElement('path', { d: 'M16 10L19.289 4H28.7771L32 10H16Z', stroke: 'currentColor', strokeWidth: 4, strokeLinejoin: 'round' })
+    ))
+  }
+
+  // 树折叠钮的 chevron 图标：与 SectionToggle/卡片头同一枚 SVG（字符 ▸/▾ 跨
+  // 平台字形粗细不一），收起 = 向下字形 rotate(-90deg) 朝右，展开 = 不旋转；
+  // 过渡挂在 svg 上（.16s，同官方 chevron 动效档），按钮自身保持无 transform
+  function chevronIcon(open: boolean): import('react').ReactNode {
+    return React.createElement('svg', {
+      width: 12, height: 12, viewBox: '0 0 16 16',
+      style: { transition: 'transform .16s', transform: open ? 'none' : 'rotate(-90deg)' }
+    }, React.createElement('path', {
+      d: 'M4 6l4 4 4-4', fill: 'none', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round'
+    }))
+  }
+
   // 快照管理卡片：列表（时间倒序）/ 磁盘占用 / 单条删除 / 手动 gc / 最近错误。
   // 全部操作走 Host 的 manage/status 端点（串行队列在 Host 侧保证）。
   function ManageCard() {
@@ -276,7 +310,7 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         onCancel: () => setConfirming(null)
       })
     }
-    // 叶子节点：展开箭头占位 + 时间 + 消息内容摘要 + 截断 ID。
+    // 叶子节点：展开箭头占位 + 时间 + 消息内容摘要（截断 ID）+ 删除图标。
     function renderLeaf(it: ManageListItem): import('react').ReactNode {
       const key = 'snap-' + it.id
       const text = it.messageText
@@ -288,19 +322,19 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         React.createElement('div', { className: 'dsh-recall-tree-row', title: title },
           React.createElement('span', { className: 'dsh-recall-tree-toggle-placeholder' }),
           React.createElement('span', { className: 'dsh-recall-tree-label' },
-            React.createElement('span', { className: 'dsh-recall-tree-title' }, label)
-          ),
-          React.createElement('button', {
-            type: 'button',
-            className: 'dsh-recall-ex-chip',
-            title: '删除该快照（tag 与索引条目）',
-            onClick: () => confirmDelete('snapshot', key, { messageId: it.id, root: it.root || null }, '确认删除该快照？此操作不可恢复。')
-          }, '删除')
+            React.createElement('span', { className: 'dsh-recall-tree-title' }, label),
+            // 删除紧贴本条消息摘要（而非行尾）：按行扫读时动作落在「看的那一行」，
+            // 不必横跳到右侧同列按钮再回读行号
+            React.createElement(DeleteButton, {
+              title: '删除该快照（tag 与索引条目）',
+              onClick: () => confirmDelete('snapshot', key, { messageId: it.id, root: it.root || null }, '确认删除该快照？此操作不可恢复。')
+            })
+          )
         ),
         renderConfirm('snapshot', key, { messageId: it.id, root: it.root || null }, '确认删除该快照？此操作不可恢复。')
       )
     }
-    // 会话节点：折叠按钮 + 标题 + 快照数 + 删除按钮；子节点为叶子。
+    // 会话节点：折叠按钮 + 标题 + 版本/快照数 + 删除图标（贴行内），切换 chip 居尾；子节点为叶子。
     function renderSession(s: TreeSession): import('react').ReactNode {
       const key = 'session-' + (s.root || '') + '-' + s.sessionId
       const open = expanded.has(key)
@@ -308,7 +342,10 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
       const version = s.sessionId ? versionMap.get(String(s.sessionId)) : null
       const switchable = Boolean(s.sessionId && listById && listById[s.sessionId] && !(archivedIds && archivedIds.has(String(s.sessionId))))
       return React.createElement('div', { className: 'dsh-recall-tree-node', key: key },
-        React.createElement('div', { className: 'dsh-recall-tree-row' },
+        // 整行可点即展开/收起（用户实测反馈：只能精确命中箭头才展开）；行内的
+        // 图标/芯片按钮各自 stopPropagation，避免连带折叠。折叠钮仍是键盘与
+        // 读屏的可达入口（aria-expanded 播报），行点击只是给鼠标补命中区
+        React.createElement('div', { className: 'dsh-recall-tree-row dsh-recall-tree-row-toggle', onClick: () => toggle(key) },
           // V2：折叠钮 span→button——Tab/Enter/Space 可达，读屏经 aria-expanded
           // 与 aria-label 播报展开语义与节点名；CSS 已做 button 重置防视觉回归。
           React.createElement('button', {
@@ -316,61 +353,60 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             className: 'dsh-recall-tree-toggle',
             'aria-expanded': open,
             'aria-label': (open ? '收起' : '展开') + '：' + label,
-            onClick: () => toggle(key)
-          }, open ? '▾' : '▸'),
+            onClick: (e: import('react').MouseEvent) => { e.stopPropagation(); toggle(key) }
+          }, chevronIcon(open)),
           React.createElement('span', { className: 'dsh-recall-tree-label', title: s.sessionId || '' },
             React.createElement('span', { className: 'dsh-recall-tree-title' }, label),
             version ? React.createElement('span', { className: 'dsh-recall-tree-meta', title: '版本家族：' + version.family.join(' → ') }, 'v' + version.index + '/' + version.family.length) : null,
-            React.createElement('span', { className: 'dsh-recall-tree-meta' }, s.items.length + ' 条')
+            React.createElement('span', { className: 'dsh-recall-tree-meta' }, s.items.length + ' 条'),
+            s.sessionId ? React.createElement(DeleteButton, {
+              title: '删除该会话全部快照',
+              onClick: () => confirmDelete('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, '确认删除该会话全部快照？此操作不可恢复。')
+            }) : null
           ),
+          // 「切换」留在行尾单占右侧：它是导航动作（离开当前视图），与行内
+          // 删除的危险动作分开摆放，避免两类语义在同一个位置上误点
           switchable ? React.createElement('button', {
             type: 'button',
             className: 'dsh-recall-ex-chip',
             title: '切换到该版本会话',
-            onClick: () => { try {
+            onClick: (ev: import('react').MouseEvent) => { ev.stopPropagation(); try {
               // 打开会话：0.1.6-alpha.2 起 ISessions 移除 open（导航归视图所有
               // 者），优先 ui-workspace 的 openSession；旧版回退 sessions.open
               if (uiWorkspaceSvc && typeof uiWorkspaceSvc.openSession === 'function') uiWorkspaceSvc.openSession(s.sessionId as string)
               else if (typeof sessionsSvc.open === 'function') sessionsSvc.open(s.sessionId as string)
             } catch (e) { /* 会话已不可切换则静默 */ } }
-          }, '切换') : null,
-          s.sessionId ? React.createElement('button', {
-            type: 'button',
-            className: 'dsh-recall-ex-chip',
-            title: '删除该会话全部快照',
-            onClick: () => confirmDelete('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, '确认删除该会话全部快照？此操作不可恢复。')
-          }, '删除') : null
+          }, '切换') : null
         ),
         open ? React.createElement('div', { className: 'dsh-recall-tree-children' }, ...s.items.map(renderLeaf)) : null,
         s.sessionId ? renderConfirm('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, '确认删除该会话全部快照？此操作不可恢复。') : null
       )
     }
-    // 工作区节点：折叠按钮 + 文件夹名 + 会话数/快照数 + 删除按钮。
+    // 工作区节点：折叠按钮 + 文件夹名 + 会话数/快照数 + 删除图标（贴行内）。
     function renderWorkspace(ws: TreeWorkspace): import('react').ReactNode {
       const key = 'ws-' + ws.root
       const open = expanded.has(key)
       const sessionCount = ws.sessions.length
       const snapCount = ws.sessions.reduce((n, s) => n + s.items.length, 0)
       return React.createElement('div', { className: 'dsh-recall-tree-node', key: key },
-        React.createElement('div', { className: 'dsh-recall-tree-row' },
+        // 整行可点即展开/收起，语义与 renderSession 一致
+        React.createElement('div', { className: 'dsh-recall-tree-row dsh-recall-tree-row-toggle', onClick: () => toggle(key) },
           // V2：工作区折叠钮同 renderSession——span→button 键盘化，aria 语义并列播报
           React.createElement('button', {
             type: 'button',
             className: 'dsh-recall-tree-toggle',
             'aria-expanded': open,
             'aria-label': (open ? '收起' : '展开') + '：' + ws.name,
-            onClick: () => toggle(key)
-          }, open ? '▾' : '▸'),
+            onClick: (e: import('react').MouseEvent) => { e.stopPropagation(); toggle(key) }
+          }, chevronIcon(open)),
           React.createElement('span', { className: 'dsh-recall-tree-label', title: ws.root || '' },
             React.createElement('span', { className: 'dsh-recall-tree-name' }, ws.name),
-            React.createElement('span', { className: 'dsh-recall-tree-meta' }, sessionCount + ' 会话 / ' + snapCount + ' 快照')
-          ),
-          ws.root ? React.createElement('button', {
-            type: 'button',
-            className: 'dsh-recall-ex-chip',
-            title: '删除该工作区全部快照',
-            onClick: () => confirmDelete('workspace', key, { scope: 'workspace', root: ws.root }, '确认删除该工作区全部快照？此操作不可恢复。')
-          }, '删除') : null
+            React.createElement('span', { className: 'dsh-recall-tree-meta' }, sessionCount + ' 会话 / ' + snapCount + ' 快照'),
+            ws.root ? React.createElement(DeleteButton, {
+              title: '删除该工作区全部快照',
+              onClick: () => confirmDelete('workspace', key, { scope: 'workspace', root: ws.root }, '确认删除该工作区全部快照？此操作不可恢复。')
+            }) : null
+          )
         ),
         open ? React.createElement('div', { className: 'dsh-recall-tree-children' }, ...ws.sessions.map(renderSession)) : null,
         ws.root ? renderConfirm('workspace', key, { scope: 'workspace', root: ws.root }, '确认删除该工作区全部快照？此操作不可恢复。') : null
@@ -410,14 +446,27 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         }, health.gitAvailable ? 'git 可用' : 'git 不可用（快照引擎依赖 git）'),
         ' · 快照存储：home ' + health.homeStores + ' 个工作区' + (health.fallbackStores ? '，降级 ' + health.fallbackStores + ' 个' : '')
       ) : null,
-      React.createElement('input', {
-        className: 'dsh-recall-ex-input',
-        placeholder: '搜索工作区 / 会话标题 / 消息内容 / ID',
-        'aria-label': '搜索快照',
-        value: query,
-        spellCheck: false,
-        onChange: (e) => setQuery(e.target.value),
-      }),
+      // 搜索行：图标绝对定位在框内左侧（pointer-events:none 不挡点击），输入框
+      // 靠 padding-left 让出图标位；高度由 CSS 的 .dsh-recall-search 覆写加高 20%
+      React.createElement('div', { className: 'dsh-recall-search' },
+        React.createElement('svg', {
+          className: 'dsh-recall-search-icon', width: 16, height: 16, viewBox: '0 0 48 48',
+          fill: 'none', stroke: 'currentColor', strokeWidth: 4, strokeLinecap: 'round', strokeLinejoin: 'round',
+          'aria-hidden': true
+        },
+          React.createElement('path', { d: 'M21 38C30.3888 38 38 30.3888 38 21C38 11.6112 30.3888 4 21 4C11.6112 4 4 11.6112 4 21C4 30.3888 11.6112 38 21 38Z' }),
+          React.createElement('path', { d: 'M26.657 14.3431C25.2093 12.8954 23.2093 12 21.0001 12C18.791 12 16.791 12.8954 15.3433 14.3431' }),
+          React.createElement('path', { d: 'M33.2216 33.2217L41.7069 41.707' })
+        ),
+        React.createElement('input', {
+          className: 'dsh-recall-ex-input',
+          placeholder: '搜索工作区 / 会话标题 / 消息内容 / ID',
+          'aria-label': '搜索快照',
+          value: query,
+          spellCheck: false,
+          onChange: (e) => setQuery(e.target.value),
+        })
+      ),
       // V3 加载骨架：items===null 表示首查未回——用 5 条 pulse 灰条占位替代
       // 打开快照管理时的一段空白；aria-hidden 纯装饰不打扰读屏
       items === null
@@ -427,10 +476,10 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         : null,
       treeNodes.length > 0 ? React.createElement('div', { className: 'dsh-recall-tree' }, ...treeNodes) : null,
       items && items.length === 0 && !q
-        ? React.createElement('div', { className: 'dsh-recall-ex-note', key: 'empty' }, '在任意工作区发送一条消息后，这里会出现快照。')
+        ? React.createElement('div', { className: 'dsh-recall-empty', key: 'empty' }, '在任意工作区发送一条消息后，这里会出现快照。')
         : null,
       q && filteredItems && filteredItems.length === 0
-        ? React.createElement('div', { className: 'dsh-recall-ex-note', key: 'no-match' }, '无匹配快照')
+        ? React.createElement('div', { className: 'dsh-recall-empty', key: 'no-match' }, '无匹配快照')
         : null,
       renderDeleteAllConfirm(),
       // V6：错误区从卡片最底上移到操作区上方（fail-loud 可见性）；标题
@@ -462,11 +511,12 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           onClick: () => run('gc', {}, 'gc 完成')
         }, '立即 gc'),
         // V5：全部删除固定为操作区最后一个按钮（排在立即 gc 之后）——即使
-        // 「加载更多」出现/消失也不漂移；danger 与普通按钮间由 panel-actions
-        // 统一 gap:8px 形成视觉分组
+        // 「加载更多」出现/消失也不漂移；danger 与普通按钮间在 panel-actions
+        // 统一 gap:8px 之上再加 btn-gap 的 8px 物理间隔，危险按钮与常规按钮
+        // 拉开距离防误点
         React.createElement('button', {
           type: 'button',
-          className: 'dsh-recall-btn dsh-recall-btn-danger',
+          className: 'dsh-recall-btn dsh-recall-btn-danger dsh-recall-btn-gap',
           disabled: state.busy,
           title: '删除全部工作区的所有快照；会直接核对并删除 git tag（即使列表为空也可清理残留）',
           onClick: () => setConfirming({ kind: 'all' })

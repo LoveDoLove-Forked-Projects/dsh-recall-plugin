@@ -2,15 +2,31 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
-## [Unreleased]
+## [2.4.5] - 2026-09-24
 
 ### 新增
 
 - **插件管理页图标（package.json 顶层 `icon`）**：新增 `assets/icon.svg`——形状沿用撤回按钮的 `UndoIcon`，画布 20×20、单色 `#658EFF`（官方品牌渐变的蓝端）。三处版面调整：① 两条侧翼从箭尖算起缩短 30%（对角分量 4 → 2.8，箭尖与尾部回环保持原位，不用整体缩放以免尾部一起变小）；② 尾端水平线向左延长到 x=6.3，与侧翼端点在竖直方向对齐；③ 整组上移 1.1（组 `transform`，路径坐标不动），使几何 bbox 中心落在画布中心 (8, 8)，上下留白对称。颜色必须写死：宿主把图标转成 base64 data URL 后以 `<img>` 隔离渲染，`currentColor` 不继承会退化成黑色；该色在浅底（对比 ≈3.1:1）与深底（≈5.5:1）都清晰，无需主题分支。宿主 `dsh-app-boot` 的 `readPluginMeta` 读**包导出的 `package.json` 顶层 `icon` 字段**（判据：相对路径、SVG/PNG/JPEG/WebP、≤256 KiB、realpath 后仍在包目录内、常规文件），读取失败只留 metadata error 且标题/描述照常；渲染位置是**插件管理页**的 bundle 卡片与详情页头部（36px），不是设置对话框的插件 tab（后者只解析 `meta.title/description` 多语言文本）。`files` 白名单加 `assets`，`package-layout` 单测补声明合法性 + 随包发布断言——否则图标文件不进发布包、宿主只报 metadata error，线上静默无图标。
 
+- **设置页快照管理：搜索框与树节点整行展开**：搜索框加高 20%（34 → 41px）并在框内左侧内嵌搜索图标（绝对定位 + `pointer-events:none`，输入框以 `padding-left` 让位；高度覆写只 scope 到搜索行，排除配置的快速添加框维持原高）；快照树的工作区/会话行整行可点即展开/收起（原先只有 18px 折叠箭头可命中，用户实测反馈难点），行内删除与「切换」按钮各自 `stopPropagation` 不连带折叠，折叠箭头仍是键盘与读屏入口（`aria-expanded` 不变）。
+
 ### 变更
 
-- **撤回按钮图标同步新版形状**：`src/client/recall-node.ts` 的 `UndoIcon` 与 `assets/icon.svg` 取同一套坐标——两翼从箭尖算起缩短 30%、尾端水平线延到与侧翼端点同列（x=6.3）、整组上移 1.1 居中；内联规格刻意不变（16 声明尺寸、`stroke` 1.4、`currentColor` 随按钮文字色，即保持原有大小/粗细/颜色）。两处形状自此需同步改（`UndoIcon` 上方有同步注释）。`lib/client.js` 重建（112222 字节）。
+- **快照树删除按钮图标化并移到名称之后**：文本 chip「删除」改为垃圾桶图标（48 viewBox 路径、`stroke:currentColor` 随主题，20px 命中区、静息 `label-tertiary`、hover 转 error 色 + 危险底色），位置从行尾移到工作区/会话/快照名之后——原先删除 chip 逐行右对齐成一列、与行内容分离易点错行；「切换」留在行尾（导航动作与危险动作分开摆放）。`title` 与 `aria-label` 保留完整语义，图标 `aria-hidden`。
+
+- **设置页整体重做，与 dsh 设计语言对齐**：去掉外层「撤回插件」可折叠卡与卡片外框，设置项直接平铺（两轮收敛：先去折叠头、再去外框，用户实测反馈两层包裹皆属冗余）。配置表单改三列网格（标签 | 控件 | 说明）：说明文字原先按流跟在宽度不一的单位 tag 之后，起笔位置逐行参差（实测「gc 触发条数」与「gc 触发小时」对不齐），改由列宽统一给定，并以 `padding-top` 与 34px 控件行共用中轴；开关行右缘对齐数字行输入框的右边框（关系由 `--dsh-recall-input-w` / `--dsh-recall-switch-w` 两个令牌承载），开关行的状态 tag 因此与数字行的单位 tag 同起点；字段标签与控件行垂直居中（label 用 34px 行高对齐控件行中轴）。折叠分区（高级：基础排除表 / 排除配置 / 快照管理）标题升为与分组标题同款 14px/700，chevron 收到行尾使标题与分组标题共享同一左缘，首项折叠头加分割线（用绝对定位伪元素绘制——`border-top` 会沿 cardbtn 的 12px 圆角走、两端上翘）；表单分组标题加粗放大（14px/700 + label-primary）。交互侧补齐：输入类 hover 中间态（rest `l4` → hover `l3` → focus `brand`）、按钮按下态、卡片与分区展开 `unfold` 入场（`prefers-reduced-motion` 同步豁免）、开关 hover 提亮、空状态居中留白；图标语言统一为 SVG（字符 `▸/▾` 跨平台字形不一，退役）。
+
+- **设置项文案精简与标签改名**：九条字段说明改为短句（「填写 0 表示不限制 / 不启用」等语义与输入框右侧单位 tag 全部保留），「撤回后回填输入框 / 撤回后归档原会话」简化为「回填输入框 / 归档原会话」；顺带删掉基础排除表说明里遗留的计划代号。
+
+- **撤回按钮图标同步新版形状**：`src/client/recall-node.ts` 的 `UndoIcon` 与 `assets/icon.svg` 取同一套坐标——两翼从箭尖算起缩短 30%、尾端水平线延到与侧翼端点同列（x=6.3）、整组上移 1.1 居中；内联规格刻意不变（16 声明尺寸、`stroke` 1.4、`currentColor` 随按钮文字色，即保持原有大小/粗细/颜色）。两处形状自此需同步改（`UndoIcon` 上方有同步注释）。本版 `lib/client.js` 重建为 120644 字节（含设置页 UI 重做）。
+
+### 修复
+
+- **新版 Edge/Chromium 下开关与其它圆形元素被全局超椭圆圆角接管（观感「更方」）**：`dsh-client-ui-theme` 在 `@supports (corner-shape:superellipse(1.5))` 内给 `*,:before,:after` 下发 `corner-shape:var(--dsw-corner-shape)`——支持该属性的内核把**所有**元素渲染成超椭圆（squircle），旧内核（如 IDE 内置浏览器，不认该属性）则维持普通圆角，同一份 UI 因此在不同浏览器观感不同（用户实测反馈）。官方为此在 104 处圆形/胶囊元素上显式写回 `corner-shape:round`（含 `Switch.module.css` 的轨道与拇指、Tag 胶囊、StateDot、spinner），本插件漏写。修复＝开关轨道、开关拇指、`ex-chip`、`health-pill`、消息 hover 圆形按钮五处补 `corner-shape:round`；矩形元素沿用全局 squircle（与官方同策略）。注意此类差异**量不出数值**：DevTools 里两侧的 `getBoundingClientRect` / `border-radius` / `padding` 完全一致，差异只在角部形状。
+
+- **点击设置项标签会直接触发右侧控件**：`label[for]` 与控件建立关联后，点击标签等同点击控件——开关（`button` 属 labelable 元素）被误切换、数字输入框被抢焦点（用户实测反馈）。修复＝标签改 `span`、控件改挂 `aria-labelledby` 指向标签 id（可访问名保留、读屏不弱化），numRow / boolRow / 基础排除表 textarea 三处同改；撤回确认面板的 scope 单选组保持 label 包裹写法（选项组的有意设计）。
+
+- **字段标签与自己的输入框错开一行**：label / 控件行 / 说明文字各自为 grid item 时，说明占掉控件行的下一行会把后续 label 的自动放置顶到前一字段的说明行上（实测「gc 触发条数」标签偏上）。修复＝三列网格下每字段恰好「标签 / 控件 / 说明」三个 item，label 与控件同排。
 
 ## [2.4.4] - 2026-09-24
 

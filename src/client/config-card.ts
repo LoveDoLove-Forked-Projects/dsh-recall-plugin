@@ -18,6 +18,7 @@ export interface SectionToggleProps {
   open: boolean
   onToggle: () => void
   meta?: string
+  divider?: boolean
 }
 
 export function buildConfigForm(
@@ -145,13 +146,18 @@ export function buildConfigForm(
       const locked = Boolean(envLocks && envLocks[key])
       const changed = Boolean(draft && baseline && draft[key] !== baseline[key])
       return React.createElement('div', { className: 'dsh-recall-cfg-row', key: key },
-        // V4：label 上提为 cfg-row 直接子元素——grid 第一列（max-content）跨行
-        // 对齐最长标签，消灭 130px 定宽魔法数与 hint 138px 缩进耦合；
-        // htmlFor-id 关联不变（V2）
-        React.createElement('label', { className: 'dsh-recall-cfg-label', htmlFor: 'dsh-recall-cfg-' + key }, label),
+        // V4：标签上提为 cfg-row 直接子元素——grid 第一列（max-content）跨行
+        // 对齐最长标签，消灭 130px 定宽魔法数与 hint 138px 缩进耦合。
+        // 标签用 span + aria-labelledby 而非 label[for]：label 关联会让点击左侧
+        // 标签直接触发右侧控件（输入框被聚焦），用户实测反馈为误触
+        React.createElement('span', { className: 'dsh-recall-cfg-label', id: 'dsh-recall-cfg-label-' + key }, label),
+        // 控件行（grid 第二列）与说明文字（第三列）分别为独立 grid item：三列
+        // 各自成像，说明列起点由该列列宽统一决定——说明若跟在控件后面按流排，
+        // 起笔位置会随行内 tag（条/小时/MB/天）的宽度逐行漂移（实测逐行参差）
         React.createElement('div', { className: 'dsh-recall-cfg-line' },
           React.createElement('input', {
             id: 'dsh-recall-cfg-' + key,
+            'aria-labelledby': 'dsh-recall-cfg-label-' + key,
             className: 'dsh-recall-cfg-input',
             type: 'number',
             value: draft ? draft[key] : '',
@@ -171,20 +177,25 @@ export function buildConfigForm(
 
     // 布尔行：官方设置表单的布尔字段是 role=switch 滑钮（dsh-client-ui-settings-
     // plugins 实测），而非原生 checkbox——滑钮形态是 DSH 设置页的强视觉特征。
-    // label htmlFor 关联保留（button 是可标签元素，点标签等效点开关），读屏经
-    // role=switch + aria-checked 播报开关语义与状态，不弱于原生 checkbox。
+    // 名称经 aria-labelledby 关联标签文本（button 属 labelable 元素，用 label[for]
+    // 关联会让点击标签直接切换开关——误触代价是配置被改），读屏经 role=switch +
+    // aria-checked 播报开关语义与状态，不弱于原生 checkbox。
     function boolRow(key: string, label: string, hint: string): import('react').ReactNode {
       const changed = Boolean(draft && baseline && draft[key] !== baseline[key])
       const on = Boolean(draft && draft[key])
       return React.createElement('div', { className: 'dsh-recall-cfg-row', key: key },
-        // label 上提为 cfg-row 直接子元素（与 numRow 同法，V4 跨行对齐契约）
-        React.createElement('label', { className: 'dsh-recall-cfg-label', htmlFor: 'dsh-recall-cfg-' + key }, label),
-        React.createElement('div', { className: 'dsh-recall-cfg-line' },
+        // 标签上提为 cfg-row 直接子元素（与 numRow 同法，V4 跨行对齐契约）
+        React.createElement('span', { className: 'dsh-recall-cfg-label', id: 'dsh-recall-cfg-label-' + key }, label),
+        // 与 numRow 同法：控件行（第二列）+ 说明（第三列）各自为 grid item。
+        // -line-switch 修饰类把滑钮右缘推到数字行输入框的右边框上（滑钮只 36px
+        // 宽，左对齐会在右侧留空档、与相邻数字行参差，用户实测反馈）
+        React.createElement('div', { className: 'dsh-recall-cfg-line dsh-recall-cfg-line-switch' },
           React.createElement('button', {
             id: 'dsh-recall-cfg-' + key,
             type: 'button',
             role: 'switch',
             'aria-checked': on,
+            'aria-labelledby': 'dsh-recall-cfg-label-' + key,
             className: 'dsh-recall-cfg-switch',
             disabled: !writable,
             onClick: () => edit(key, !on),
@@ -217,23 +228,23 @@ export function buildConfigForm(
 
     return React.createElement('div', { className: 'dsh-recall-ex-card' },
       // 全部行包进单一 cfg-grid：cfg-row 是 display:contents 透明层（css.ts），
-      // label/控件行/hint 直接成为同一 grid 的 item，第一列 max-content 由全表单
-      // 最长 label 决定——checkbox 与数字输入框的控件列自此跨行对齐（此前每行
-      // 是独立 grid 容器，max-content 各算各的，跨行对齐从未成立，实测参差）。
+      // 每字段留下标签／控件行／说明三个 grid item，分占第一/二/三列——第一列
+      // max-content 由全表单最长标签决定（跨行对齐），第二列同理（说明列起点
+      // 逐行齐平）。此前每行是独立 grid 容器，max-content 各算各的，实测参差。
       React.createElement('div', { className: 'dsh-recall-cfg-grid' },
       // V5 表单分组：9 字段平铺 → 「快照行为 / 自动治理」两组语义分组小标题，
       // 降低认知负担；「高级：基础排除表」沿用 SectionToggle 折叠，不重复加标题。
       React.createElement('div', { className: 'dsh-recall-cfg-group' }, '快照行为'),
-      boolRow('snapshotEnabled', '启用快照', '关闭后不再新建快照（已有快照仍可撤回），适合临时禁用快照的场合'),
-      boolRow('refillDraft', '撤回后回填输入框', '撤回成功后把被撤回的消息文本回填到输入框，方便修改后重新发送'),
-      boolRow('archiveOriginal', '撤回后归档原会话', '撤回后原会话从列表归档隐藏（可从归档找回）；关闭则保留在列表中，方便对照回退前后的上下文'),
+      boolRow('snapshotEnabled', '启用快照', '关闭后不再新建快照；已有快照仍可撤回'),
+      boolRow('refillDraft', '回填输入框', '撤回后把消息文本回填输入框，便于改完重发'),
+      boolRow('archiveOriginal', '归档原会话', '原会话归档隐藏，可从归档找回；关闭则留在列表便于对照'),
       React.createElement('div', { className: 'dsh-recall-cfg-group' }, '自动治理'),
       // 单位后缀统一挂输入框右侧（与状态标签同基线），不再只藏在说明文字里
-      numRow('gcSnaps', 'gc 触发条数', '每积累多少条快照触发一次 git gc', { suffix: '条', min: 1, step: 1 }),
-      numRow('gcHours', 'gc 触发小时', '距上次 gc 超过多少小时触发（与条数先到先触发）', { suffix: '小时', min: 1, step: 1 }),
-      numRow('maxFileBytes', '文件大小上限', '超过该大小的文件不进快照、不被回退触碰（单位 MB，支持小数）', { suffix: 'MB', min: 0.01, step: 0.5 }),
-      numRow('maxSnapshotsPerWorkspace', '快照总量上限', '每个工作区保留的最大快照数，超限自动删除最旧的；填 0 表示不限制', { suffix: '条', min: 0, step: 1 }),
-      numRow('retentionDays', '快照保留天数', '按天数保留快照，超期自动删除最旧的；填 0 表示不启用（与快照总数上限各自生效）', { suffix: '天', min: 0, step: 1 }),
+      numRow('gcSnaps', 'gc 触发条数', '每积累多少条快照触发一次 gc', { suffix: '条', min: 1, step: 1 }),
+      numRow('gcHours', 'gc 触发小时', '距上次 gc 超过多少小时触发，与条数先到先触发', { suffix: '小时', min: 1, step: 1 }),
+      numRow('maxFileBytes', '文件大小上限', '超过该大小的文件不进快照、不被回退触碰', { suffix: 'MB', min: 0.01, step: 0.5 }),
+      numRow('maxSnapshotsPerWorkspace', '快照总量上限', '每工作区保留的最大快照数，超限删除最旧的；0 表示不限制', { suffix: '条', min: 0, step: 1 }),
+      numRow('retentionDays', '快照保留天数', '超期快照自动删除最旧的；0 表示不启用', { suffix: '天', min: 0, step: 1 }),
       // 操作区在「基础排除表」折叠头之前：按钮服务整个表单（含折叠区之外的字段），
       // 排在折叠头之后会被误读为折叠区内容、折叠时像漏收起（用户实测反馈）；
       // 因此也不把按钮藏进折叠分支——否则折叠基础排除表后将无法保存。
@@ -252,26 +263,30 @@ export function buildConfigForm(
         React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-primary', disabled: state.busy || !writable, onClick: save }, '保存'),
         !writable ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, '只读设置源') : null
       ),
-      React.createElement(SectionToggle, { title: '高级：基础排除表', open: showAdvanced, onToggle: () => setShowAdvanced((v) => !v) }),
+      // divider：本条是折叠分区列表的首项，上方分界线把「字段表单」与「折叠
+      // 分区」分开（否则保存按钮行紧贴折叠头，读起来像同一组字段）
+      React.createElement(SectionToggle, { title: '高级：基础排除表', open: showAdvanced, onToggle: () => setShowAdvanced((v) => !v), divider: true }),
       showAdvanced ? React.createElement('div', { className: 'dsh-recall-cfg-row', key: 'baseExcludes' },
-        // V4：label 上提（与 numRow 同法）；cfg-line 只剩 tags，textarea/hint 各自归第二列
-        React.createElement('label', { className: 'dsh-recall-cfg-label', htmlFor: 'dsh-recall-cfg-baseExcludes' }, '基础排除表'),
+        // V4：标签上提（与 numRow 同法）；cfg-line 只剩 tags，textarea/hint 通栏
+        React.createElement('span', { className: 'dsh-recall-cfg-label', id: 'dsh-recall-cfg-label-baseExcludes' }, '基础排除表'),
         React.createElement('div', { className: 'dsh-recall-cfg-line' },
           draft.baseExcludes !== baseline.baseExcludes ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, '已修改') : null,
           overridden && overridden.baseExcludes !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, '已覆盖') : null
         ),
         // textarea/hint 加 cfg-span 通栏：折叠区在共享 grid 内展开时，内容若只占
-        // 第二列，左侧长 label 列会成为竖直死区（实测 textarea 被挤窄）；通栏后
-        // 与 label/tags 行左缘对齐。label 保持原位不动——htmlFor 关联是 a11y 契约。
+        // 第二列，左侧标签列会成为竖直死区（实测 textarea 被挤窄）；通栏后与
+        // 标签/tags 行左缘对齐。名称经 aria-labelledby 给出（与 numRow 同法，
+        // 不建立 label 关联）
         React.createElement('textarea', {
           id: 'dsh-recall-cfg-baseExcludes',
+          'aria-labelledby': 'dsh-recall-cfg-label-baseExcludes',
           className: 'dsh-recall-cfg-area dsh-recall-cfg-span',
           rows: 4,
           value: draft.baseExcludes,
           disabled: !writable,
           onChange: (e: import('react').ChangeEvent<HTMLTextAreaElement>) => edit('baseExcludes', e.target.value),
         }),
-        React.createElement('div', { className: 'dsh-recall-cfg-hint dsh-recall-cfg-span' }, '内置规则，每个工作区共享，建议保持默认；gitignore 语法每行一条，优先级低于「排除配置」里的 exclude.txt（S3-2 折叠）')
+        React.createElement('div', { className: 'dsh-recall-cfg-hint dsh-recall-cfg-span' }, '各工作区共享的内置规则；gitignore 语法，每行一条；优先级低于「排除配置」的 exclude.txt')
       ) : null
       )
     )

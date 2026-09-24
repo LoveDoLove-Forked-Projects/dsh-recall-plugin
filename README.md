@@ -10,7 +10,7 @@
 在任意一条你发过的消息下方点「↶ 撤回」——**工作区文件和对话历史一起回到那条消息发出之前的状态**。
 ---
 
-撤回时文件与对话一起回退：工作区先被快照进一个独立的影子 git 仓库，撤回就用它把文件恢复到那条消息发出之前；对话通过 DSH 官方的 `sessions.fork` 切到该消息之前的 turn 边界，原会话归档保留、随时可找回。撤回后，这条消息的文本与附件会自动放回输入框，改完即可重发。快照全程不触碰项目自身的 git，存储默认落在 `$DSH_HOME` 下。最主要的边界：快照只在**消息发送时**创建，插件启用前的历史消息没有快照、不显示撤回按钮。
+文件与对话一起回退：每条消息发送时，工作区先被快照进一个独立的影子 git 仓库，撤回时用它把文件恢复到消息发出之前；对话通过 DSH 官方的 `sessions.fork` 切到该消息之前的 turn 边界，原会话归档保留、随时可找回。撤回后，这条消息的文本与附件自动放回输入框，改完即可重发。快照全程不触碰项目自身的 git，存储默认落在 `$DSH_HOME` 下。最主要的边界：快照只在**消息发送时**创建，插件启用前的历史消息没有快照、不显示撤回按钮。
 
 [更新日志](CHANGELOG.md)
 
@@ -31,20 +31,18 @@
 
 | 撤回按钮 | 确认面板 · 变更文件清单 |
 | --- | --- |
-| ![悬停出现撤回按钮](docs/screenshots/recall-button.png) |  ![确认面板 · 变更文件清单](docs/screenshots/confirm-panel-1.png) |
+| ![悬停出现撤回按钮](docs/screenshots/recall-button.png) | ![确认面板 · 变更文件清单](docs/screenshots/confirm-panel-1.png) |
 
-- 撤回后，这条消息的文本与附件自动放回输入框，改完即可重发（可在设置卡片关闭）
 - 设置页 · 插件配置卡片（配置表单 / 排除表 / 快照管理，保存即热生效）
 
- ![设置页](docs/screenshots/settings-exclude-2.png) 
-
+![设置页](docs/screenshots/settings-exclude-2.png)
 
 ## 功能亮点
 
 带括号版本号的能力需要该版本或更高；其余无特殊版本要求。
 
 - **文件 + 对话，整段回退**：撤回的不只是聊天记录，agent 改过的文件也一并回到原样；不受项目 `.gitattributes` 转换影响，换行与二进制内容字节级保真（2.1.1+）。
-- **只想重来对话？文件可以不动**（2.3.24+）：确认面板里可二选一撤回范围——默认「回退文件与对话」同现状；选「仅撤回对话」则项目文件一个字节都不动（也不打安全快照），只有对话回退，适合对生成结果不满意、但文件改动恰是想要的场景。
+- **只想重来对话？文件可以不动**（2.3.24+）：确认面板里可二选一撤回范围——默认「回退文件与对话」为完整回退；选「仅撤回对话」则项目文件一个字节都不动（也不打安全快照）、只回退对话，适合对生成结果不满意、但文件改动正是想要内容的场景。
 - **不碰你项目自己的 git，目录保持干净**：快照存在独立的影子 git 仓库里，分支、暂存区、未提交改动统统不受影响；存储默认落在 `$DSH_HOME` 下，与会话的沙箱权限无关（workspace-write / read-only 照常工作），仅当 home 不可写才降级到项目内 `.dsh-recall-snapshots`。
 - **先看清单再动手，可反复后悔**：撤回前展示将变更的文件清单（修改 / 恢复 / 删除），确认后才执行；撤回后还能再撤到更早，被覆盖的文件一直找得回来（默认每工作区保留 500 条）。
 - **撤回完就能重发**（2.3.15+）：撤回会把这条消息的文本与附件一起放回输入框——图片、文件原样回来，改完直接发送，不必重新挑一遍附件。
@@ -67,8 +65,15 @@
 
 ## 安装
 
-前置：git CLI（未装时撤回按钮不出现，页面顶部会提示安装 git，不影响 DSH 运行）；Windows 上 PowerShell 5.1 / 7 均可，Linux/macOS 需 bash + git；DSH `0.1.2-alpha.1` 至 `0.1.7-rc.1`（peerDependencies 为按 minor 版本线开窗 `>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`，与 `dsh.compatibility.dshReleases` 声明一致；每条线以首个核验版本为下限、开一条上界到下一 minor 的区间，同线内后续 prerelease/正式版自动放行、无需改 peer 声明，未核验的新 minor 线仍被拦截）。**0.1.7-alpha.1 是破坏性版本**（`ShellExecutor` 的 `run`/`start` 换成 `execute().result()`；settings 面换成 `SettingsForms`、按 profile 条目 id 寻址并要求字段标 `.volatile()`），插件已做**双分支共存适配**——同一次发布同时兼容 0.1.2–0.1.6 各线段与 0.1.7，老版本 DSH 上的行为不变。`0.1.1-rc.2` 及更早不再声明支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
+前置：
 
+- git CLI：未安装时撤回按钮不出现（页面顶部会提示安装 git），不影响 DSH 运行。
+- shell：Windows 上 PowerShell 5.1 / 7 均可；Linux/macOS 需 bash。
+- DSH 版本：`0.1.2-alpha.1` 至 `0.1.7-rc.1`。peerDependencies 按 minor 版本线开窗（`>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`，与 `dsh.compatibility.dshReleases` 声明一致）：每条线以首个核验版本为下限、上界开到下一 minor，同线内后续 prerelease/正式版自动放行、无需改 peer 声明；未核验的新 minor 线仍被拦截。
+- **0.1.7-alpha.1 是破坏性版本**（`ShellExecutor` 的 `run`/`start` 换成 `execute().result()`；settings 面换成 `SettingsForms`、按 profile 条目 id 寻址并要求字段标 `.volatile()`），插件采用**双分支共存适配**——同一次发布同时兼容 0.1.2–0.1.6 各线与 0.1.7，老版本 DSH 上行为不变。
+- `0.1.1-rc.2` 及更早不支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
+
+安装与验证：
 
 - DSH 官方插件命令：安装并自动挂载进 web profile
 ```powershell
@@ -91,8 +96,6 @@ pm2 restart <your-dsh-name>  # 由 pm2 托管
 ```powershell
 dsh plugin --profile web remove dsh-recall-plugin
 ```
-
-
 
 ## 使用
 
@@ -125,7 +128,7 @@ dsh plugin --profile web remove dsh-recall-plugin
 - **定期 gc**：每 50 条快照或距上次 gc 24 小时（先到先触发，阈值可配），后台执行 `git gc` 把 loose 对象压成 pack。无损操作——所有快照照常可回退。节流凭据写在影子仓库内的 `gc.stamp`，重启 DSH 不会重置周期。
 - **条数上限与保留天数**：每工作区快照默认上限 500 条（超限清最旧）；也可按 `retentionDays` 设保留天数，两者独立触发、都可在配置卡片调整或关闭。
 - **会话删除联动清理**：会话被彻底删除（会话日志从磁盘消失）后，下一次维护会自动删除该会话的全部快照并释放空间。**归档不算删除**——撤回功能自己归档的原会话日志仍在，快照保留、随时可从归档找回。判断很保守：会话只是冷着（不内存里）不会误清；无法核实日志状态时宁可不清。
-- **用户自定义排除**：打开「**设置 → 插件配置 → 撤回插件**」卡片（默认收起，点卡片头展开）即可可视化编辑快照排除项——输入路径或模式回车即加、常用模式（`dist/`、`*.log`、`.env` 等）一键追加、保存后下一次快照/回退立即生效，无需重启。也可以直接编辑 home 下 `dsh-recall-snapshots/exclude.txt`（即 `$DSH_HOME/dsh-recall-snapshots/exclude.txt`，未设置时为 `~/.dsh/dsh-recall-snapshots/exclude.txt`；UTF-8），一行一条 gitignore 风格 pattern（`#` 开头为注释），两种方式编辑的是同一份配置，例如：
+- **用户自定义排除**：打开「**设置 → 插件配置 → 撤回插件**」卡片（默认收起，点卡片头展开）即可可视化编辑快照排除项——输入路径或模式回车即加、常用模式（`dist/`、`*.log`、`.env` 等）一键追加、保存后下一次快照/回退立即生效，无需重启。也可以直接编辑 `$DSH_HOME/dsh-recall-snapshots/exclude.txt`（未设置时为 `~/.dsh/dsh-recall-snapshots/exclude.txt`；UTF-8）：一行一条 gitignore 风格 pattern（`#` 开头为注释），两种方式编辑的是同一份配置。例如：
 
   ```gitignore
   # 构建产物不进快照
@@ -168,7 +171,7 @@ pnpm install
 
 ### 测试
 
-- `npm test`：纯逻辑单测（vitest，34 个文件 425 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm test`：纯逻辑单测（vitest，34 个文件 436 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
 - `npm run test:probe`：官方 API 字段探针（依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
 - `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件跑两个 pass（旧面桩 + 只给新面的桩），断言 inject 声明、端点注册、Config schema、卸载清理与 settings 面分派，装配回归发版前即可拦截；
 - `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）。
