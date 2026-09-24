@@ -44,6 +44,19 @@
 > （`dsh-tool-jobs` 的 `maxConsecutiveWakes` 无默认值 × P0-1 `agentBusy` 守卫窗口；`snapshotEvents`/`eventAt`/`ownEvents` 仍 deprecated）；
 > ⑤ 可选增强：本版支持插件用 locale 声明多语言标题/描述与 package.json 图标供管理页展示（本包当前仅中文 description）。
 > 评估实证见 upgrade-assessments/dsh-0.1.7-rc.1.md。
+> **2.4.5 发版核验（2026-09-24）**：插件 **2.4.5 已发布**（npm `latest`＝2.4.5、GitHub Release `v2.4.5`、tag `v2.4.5` 指向
+> `b0e54b0`）。发布提交链：`b0e54b0`（chore(release) 2.4.5——设置页 UI 重做、插件管理页图标与快照管理交互改进，随版含
+> README/AGENTS/截图刷新）、`50b4812`（chore(release)：同步 package-lock 根版本到 2.4.5）。发版前门禁：`build`（`lib/client.js`
+> esbuild 直出 120644 字节 / 工作区 CRLF 形态 132609 字节）、`typecheck`、单测 **436/436**、`test:probe` **52/52**、
+> `verify:host` 装配断言全过（端点 12 项）、`check:dsh` 四层一致。registry 直连 `/2.4.5` 与 `dist-tags.latest` 双确认
+> （发布后约 4 分钟可见，初查 `/2.4.5` 为 404）；GitHub Release 为 Latest、非 draft/prerelease。**发布产物核验**：
+> `npm pack dsh-recall-plugin@2.4.5`（149703 字节 tarball）解包 23 文件——`assets/icon.svg` 在包内（图标功能的发布前提）、
+> 15 个 lib 产物 + `cordis.patch.yml` + 双语 README + CHANGELOG + LICENSE 齐备；包内 `lib/client.js` 与工作区文件
+> **SHA256 相同**（`0A495F37…`），即 registry 上的内容与本地构建逐字节一致。**本机 profile 说明**：web profile 当前为
+> **link 模式**（`link:D:/workspace/dsh-plugin/dsh-recall-plugin`），本机 DSH 直接加载工作区产物，故本轮以「发布 tarball ↔
+> 工作区产物哈希一致」替代 2.4.4 的 npm 模式实装验证（未改用户 profile；如需严格复刻，切 npm 模式后
+> `pnpm update dsh-recall-plugin@2.4.5` 即可）。
+>
 > **2.4.4 发版核验（2026-09-24）**：插件 **2.4.4 已发布**（npm `latest`＝2.4.4、GitHub Release `v2.4.4`、tag `v2.4.4` 指向
 > `64aeb3f`）。发布提交链：`dc3dad4`（fix(client)：端点路径按文档基址解析，I40）、`f72a8ce`（docs(compat)：rc.1 评估归档 +
 > 版本声明同步）、`64aeb3f`（chore(release) 2.4.4，含 lockfile 根版本同步）。发版前门禁：`build`（`lib/client.js` 112112 字节）、
