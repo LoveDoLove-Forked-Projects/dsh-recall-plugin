@@ -168,6 +168,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 5. **文档同步**：行为变更同步 README.md（+README.en.md）与 CHANGELOG.md；计划/规范文档归口 `docs/`（先读 docs/README.md）；官方 API 假设变化同步 compat-audit 台账。
 6. **代码规范**：函数级注释解释「为什么」（动机与权衡），不复述「做什么」；单文件有效代码 ≤800 行，预估超 700 行即拆分；优先复用现有模块，新写模块前先查可复用的函数/类/工具。
 7. **发布流程**：bump version → git commit/push → npm publish → GitHub Release；发布后本机验证新版：npm 模式跑 `pnpm update dsh-recall-plugin`（profile 目录），或临时切 link 模式。
+8. **GitHub Release 正文格式（固定）**：写精简版 CHANGELOG，不贴全文——按 `### 新增 / ### 变更 / ### 修复` 分节，每条改动 ≤100 字；正文末尾固定一行 `**Full Changelog**: [CHANGELOG.md](https://github.com/limbo947/dsh-recall-plugin/blob/main/CHANGELOG.md)`。完整细节（实证、字节数、台账引用）住在 `CHANGELOG.md`，正文只保「用户能一眼看懂改了什么」。创建/回写用 `gh release create|edit <tag> --notes-file <文件>`——多行中文正文不要内联进命令行（PowerShell 下 `Add-Content` 未带 `-Encoding` 会被拦，用文件写入工具备好正文）。
 
 
 ## 开发与验证
