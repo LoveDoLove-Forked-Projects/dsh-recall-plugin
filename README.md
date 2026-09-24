@@ -75,19 +75,19 @@
 
 安装与验证：
 
-- DSH 官方插件命令：安装并自动挂载进 web profile
-```powershell
+- DSH 官方插件命令：安装并自动挂载进profile
+
+Web UI
+```
 dsh plugin --profile web add dsh-recall-plugin
+```
+Desktop
+```
+dsh plugin --profile desktop add dsh-recall-plugin
 ```
 - 也可从 git 直接安装：
 ```powershell
 dsh plugin --profile web add github:limbo947/dsh-recall-plugin
-```
-
-- 重启 DSH 进程（按你的启动方式择一）
-```powershell
-dsh web                      # 前台运行
-pm2 restart <your-dsh-name>  # 由 pm2 托管
 ```
 
 - 验证：重启后硬刷新页面（Ctrl+Shift+R），悬停任意一条插件启用后发送的用户消息——复制按钮旁出现「↶」即生效。没有按钮？九成是没重启 DSH 进程，或 git CLI 不在 PATH 里。
