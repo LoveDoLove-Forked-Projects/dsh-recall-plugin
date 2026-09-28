@@ -199,4 +199,4 @@
 3. **[环境备忘] 模型端点不可用不妨碍本类冒烟**：profile 默认模型 `traeapi/kimi-k3` 指向本机 `127.0.0.1:7864`（未运行），两轮均以「本轮运行失败 Connection error.」结束——但 `turn/start`/`turn/end` 照常成对落日志，快照、cutSeq 切点、fork 与回退全链不受影响（撤回第二轮的 cutSeq 正好落在第一轮的 `turn/end` 上）。后续纯兼容性冒烟可沿用此低成本形态。
 4. **[观察] 自动化任务默认关闭**：0.2.0-rc.1 把 `schedule`/`time-context` 从 `dsh-web-app` patch 移除、改由可选 bundle `@deepseek-ai/dsh-experimental-schedule-bundle` 提供（插件管理页开关默认关）；与撤回插件无耦合，仅提示用户能力开关变化。
 
-**发版判定**：0.2.0-rc.1 升级实弹无阻塞项。**用户侧待决**：本轮扩范围改动建议发一个 patch 版本——npm 模式下装已发布版的用户在 0.2.0-rc.1 上会被启动兼容门禁整行跳过（`dshReleases` 只是市场台账，不参与启动判定）；在发布前 profile 需保持 link 模式。测试产物 `D:\tmp\recall-h0\smoke-020.txt`（回退后为 `v1 line`）与本次 2+1 条快照 / 1 条 lineage 留 store 供复验。
+**发版判定**：0.2.0-rc.1 升级实弹无阻塞项。本轮扩范围改动已发 **2.4.6**（2026-09-29：npm `latest` + GitHub Release `v2.4.6` 双上线，tag 指向 `484bf99`），并已切回 npm 模式复验「npm 模式 + 0.2.0-rc.1 不被启动门禁跳过」——核验记录见 compat-audit 的 2.4.6 段。测试产物 `D:\tmp\recall-h0\smoke-020.txt`（回退后为 `v1 line`）与本次 2+1 条快照 / 1 条 lineage 留 store 供复验。

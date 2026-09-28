@@ -59,6 +59,23 @@
 > ④ 既有观察项延续：`dsh-tool-jobs` 唤醒上限、`sessionQuery.snapshotEvents`/`eventAt`/`ownEvents` 仍标 `@deprecated`。
 > 评估实证见 upgrade-assessments/dsh-0.2.0-rc.1.md。
 >
+> **2.4.6 发版核验（2026-09-29）**：插件 **2.4.6 已发布**（npm `latest`＝2.4.6、GitHub Release `v2.4.6` 为 Latest、
+> 非 draft/prerelease，tag `v2.4.6` 指向 `484bf99`）；发布提交 `484bf99`（chore(release) 2.4.6——0.2.0-rc.1 兼容声明
+> （peer 新增 tuple）随版发布，含两份升级评估归档与冒烟执行记录）。**推送前 rebase 一次**：远端 `main` 上另有 `82b2344`
+> （同作者、2026-09-24 经 Web 改 README 安装步骤：新增 desktop profile 安装行、删去「重启 DSH 进程」段），本地提交已
+> rebase 其上，远端历史未被改写。发版前门禁：`typecheck`、`build`（`lib/` 零漂移，`lib/client.js` 120644 字节）、
+> 单测 **436/436**、`test:probe` **52/52**、`verify:host` 装配断言全过（端点 12 项）、`check:dsh` 四层 `✔ 全部一致`。
+> registry 直连 `/2.4.6` 与 `dist-tags.latest` 双确认（发布后约 2 分钟可见，初查仍解析到 2.4.5）；
+> `dsh-recall-plugin@2.4.6` shasum `c6f1fecc…` 与发布输出一致。**发布产物核验**：`npm pack dsh-recall-plugin@2.4.6`
+> （152022 字节 tarball）解包 23 文件——`assets/icon.svg`、15 个 lib 产物、`cordis.patch.yml`、双语 README、CHANGELOG、
+> LICENSE 齐备；包内 `lib/client.js` 与工作区文件 **SHA256 相同**（`0A495F37…`，与 2.4.5 同值——本版无 client 源码改动）。
+> **npm 模式实装验证（本版存在的理由闭环）**：profile 切回 npm 模式（`2.4.6` 精确 pin）+ `pnpm install`（pnpm 12 的
+> 发布年龄策略把 2.4.6 写入 `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`，属既有机制），实装
+> `node_modules/dsh-recall-plugin` 为**普通目录（非 junction）**、版本 2.4.6、peer 含 `|| >=0.2.0-rc.1 <0.2.1`；
+> 重启 `dsh web` 后 stderr **无本插件 skip 行**（仅 `dshmarket@1.65.1` 的既有 skip 说明）、出现插件自身
+> `recall shell dialect probe: pwsh`，`/api/recall/status` → `{ok:true, errors:[]}`、`/api/recall/init` → root 与 config 正常
+> ——即「npm 模式 + dsh 0.2.0-rc.1」下本插件不再被启动期兼容门禁跳过。
+>
 > **0.1.7-rc.2 核验（2026-09-24）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，tag `dsh-v0.1.7-rc.2`，
 > 2026-09-24 发布、rc.1 后 346 提交；`latest` 仍 0.1.5-rc.3、`alpha` 仍 0.1.7-alpha.2），`npm install -g @deepseek-ai/dsh@0.1.7-rc.2`
 > 全局实装（0.1.7-rc.1 → 0.1.7-rc.2；cordis 4.0.4 / schemastery 3.18.4 与 vendor 栈内容均未变；包布局不变、junction 无需重建）。
