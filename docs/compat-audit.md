@@ -7,6 +7,91 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.2.0-rc.1 核验（2026-09-29）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，
+> tag `dsh-v0.2.0-rc.1`，2026-09-28 发布、0.2.0 系列首个候选版本、汇总自 `v0.1.7-rc.2`；`latest` 仍 0.1.7-rc.2、
+> `alpha` 仍 0.1.7-alpha.2——**`npm i -g @deepseek-ai/dsh` 装不到本版，必须显式写版本号**），`npm install -g
+> @deepseek-ai/dsh@0.2.0-rc.1` 全局实装（0.1.7-rc.2 → 0.2.0-rc.1；cordis 4.0.4 / schemastery 3.18.4 版本与内容均未变；
+> 包布局不变、工作区 `dsh-settings` junction 随升级自动解析到新版）。**核验方式为全树逐文件哈希 diff**：npm 在
+> Windows 上清理失败留下的 `.dsh-EBhnoWNL` 残留**正好是 0.1.7-rc.2 整包副本（298MB）**，直接用作基线（比对后已删除）。
+> 规模：**528 包中 310 包仅版本号 lockstep 变更**；类型面 **65 改 / 23 增 / 0 删**，运行时 JS **71 改 / 11 增 / 2 删**。
+> **零改动集合（`.js` 与 `.d.ts` 双向字节级相同）**：`dsh-shell`、`dsh-settings`、`dsh-session-query`、`dsh-agent`、
+> `dsh-client-connection`、`dsh-host-webserver`、`dsh-sandbox-policy`、`dsh-client-ui-slots`、`dsh-client-ui-renderer`、
+> `dsh-client-ui-settings-plugins`、`dsh-pwsh-local`、`dsh-shell-env`、`dsh-subprocess`、`dsh-attachment{,-local}`、
+> `dsh-cordis-host-runner/lib/index.js`（插件加载路径，仅 typert 元数据表变）、`dsh-client-ui-settings-plugins`——
+> 即 **I9/I10/I13/I20/I27/I29/I30/I31/I32/I36/I37/I38/I39/I40 的出处包在本版未变动**，各条核验结论与探针锚点原样成立。
+> **符号级复核**：`readAttachment` 4→4、`updateQueue` 72→72、`archiveSession` 175→175、`openSession` 31→31、
+> `createDrafts`/`releaseDraftAttachments` 2→2、`setDraft` 33→33、`addAttachments` 4→4、`stopActivity` 32→32、
+> `increaseTitle` 5→5、`atSeq` 27→27——**计数逐项相等（0 差异）**。**槽位契约**：`plugins.bundle.config` 在插件管理页
+> 产物中出现 9→9，定义块（`kind:keyed` / `scope:root`）与渲染调用 `renderSlot("plugins.bundle.config", {view:"page"},
+> {entryKey: pkg.name})` **逐行一致**；`settings.plugin.item` 两版均 0 命中（0.1.6-alpha.2 起移除，与 I12 一致）；
+> client runner 守卫服务表中 `uiWorkspace`/`workspaces`/`slots`/`sessions`/`timer` 计数一致（插件 inject 的 5 个服务全在）。
+> **唯一接口增量**：`dsh-api-session-controller` 的 `ISessions.fork` 新增**可选** `onCreated?: (childId) => void`
+> （语义＝子会话已入目录后、可选标题递增重命名之前回调）+ typert 签名表同步；插件不传该参数，行为逐字不变。
+> **消费面真改动全部落在插件不消费处**：`dsh-session`（`repair.ts` 抽出 `ToolCallRecovery` 类、`openTurnClosers` 改复用它，
+> 对应官方「修复工具调度异常后对话无法继续」；`buildForkSeed` 的 `forked` cause 语义保留）、`dsh-client-ui-workspace`
+> （标题语义 `displayTitle` → `session.title?.trim() ?? ""`、新增「未命名」文案，插件不读 `displayTitle`）、
+> `dsh-client-ui-conversation`（`submit(mode, source?: 'click'|'enter')` + `InputEvent.submission` + `messageSubmitted`
+> 回调与 `send_button_click` 埋点，新参数全可选；`setDraft`/`addAttachments`/`createDrafts`/`releaseDraftAttachments`
+> 实现未动）、`dsh-client-ui-chat`（RunningStatus/RunningWhaleTail 组件与 shimmer 样式、文案；`contract/slots.d.ts` 未动）、
+> `dsh-client-ui-plugin-manager`（client.js 约 6800 行 diff，全是刷新反馈 `PluginRefreshToast`/`refreshStatus`、安装输入清洗、
+> 埋点；`slot-contract.d.ts` 未动）、`dsh-config-editor`（`configuration()` 的 inherited 改由组合层 `composeEntries` 计算，
+> 对应「改善插件配置保存等待时间」；插件设置卡片走自有 `/api/recall` → `ctx.settings` 的 describe/update/replace，
+> 而 `dsh-settings` 字节未变）、`dsh-agent-loop`（工具调度失败后改由 owning step 补保守结果）、`dsh-app-boot`
+> （`OPTIONAL_BUNDLES` 增 `dsh-experimental-schedule-bundle`——**自动化任务改由可选 bundle 提供**）、
+> `dsh-web-app` patch（移除 `schedule`/`time-context` 行、新增桌面端埋点行 disabled）、`dsh-base` patch（新增 `otel` 行
+> 与遥测配置：collector 域名更换 + `maxRequestBytes`）。**依赖面**：三方 `sharp` 0.35.5 / `ws` 8.22.0 /
+> `koffi` 3.3.1→**3.1.1**（降级，win32 ACL 原生绑定）/ `libreoffice-kit` 0.1.2 / 新增 `got` 14.6.6 等小幅变动，
+> 均不在插件路径；`cordis` / `schemastery` 未变。**门禁**：`test:probe` **52/52**、`verify:host` 装配断言全过
+> （inject=shell,sessions,agents、端点 12 项）、`npm test` **436/436**、`npm run typecheck` 通过、`check:dsh` 扩范围后
+> 6 条 peer 全绿；`dsh --version` 实测 `0.2.0-rc.1`（CLI 可启动）。**活体冒烟（2026-09-29，真宿主 + 浏览器实弹，link 模式 / `D:\tmp\recall-h0`）
+> 逐项通过**：插件经启动期兼容门禁激活（同 profile 的第三方 `dshmarket@1.65.1` 因 peer 只到 `^0.1.2-alpha.2` 被跳过，
+> 反证该门禁真实生效）；`status`/`init` 正常；两条消息各出快照 → 改文件 → 撤回：面板文案与清单正确、文件回退、
+> 安全快照 `snap-pre-rollback-1790612487546`、lineage `childId=session-478696aa… parentId=session-d278b62c…`、
+> 子会话打开且仅含被撤回消息之前一轮、标题继承无递增、文本回填、无残留排队项、原会话归档；
+> 设置页配置卡渲染完整且 `保存`/`恢复默认` 双向回读一致（I39 面读写双通）、快照管理树两级展开 + 版本家族聚族 +
+> 叶子消息文本 + `立即 gc`（51 条 / 1.4 MB「gc 完成」）、「最近错误」无错误不渲染；dsh stderr 除门禁 skip 说明外
+> 仅插件自身方言探针输出，零报错。详见 smoke-checklist-records.md 2026-09-29 节。**兼容声明**：peer 范围**必须新增 tuple**
+> `|| >=0.2.0-rc.1 <0.2.1`（npm semver 的 prerelease 门槛要求「同 tuple 且带 prerelease 的比较器」，既有
+> `>=0.1.7-alpha.1 <0.1.8` 单段放行不了 `0.2.0-rc.1`，不扩范围则启动期兼容门禁会整行跳过本 bundle）、
+> `dshReleases` 补 `0.2.0-rc.1: compatible`。**观察项（非阻塞）**：① 官方 `repair` 重构后若 cut 落在未闭合轮次内，
+> 合成 `tool/result` 的文案与 seq 分配已变——插件 `cutSeq` 恒取平衡前缀，不触发该分支；② `fork.onCreated` 可在子会话
+> 入目录时立即拿到 childId（插件当前不需要）；③ 自动化任务默认关闭，用户如需须在插件管理页开启该 bundle；
+> ④ 既有观察项延续：`dsh-tool-jobs` 唤醒上限、`sessionQuery.snapshotEvents`/`eventAt`/`ownEvents` 仍标 `@deprecated`。
+> 评估实证见 upgrade-assessments/dsh-0.2.0-rc.1.md。
+>
+> **0.1.7-rc.2 核验（2026-09-24）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，tag `dsh-v0.1.7-rc.2`，
+> 2026-09-24 发布、rc.1 后 346 提交；`latest` 仍 0.1.5-rc.3、`alpha` 仍 0.1.7-alpha.2），`npm install -g @deepseek-ai/dsh@0.1.7-rc.2`
+> 全局实装（0.1.7-rc.1 → 0.1.7-rc.2；cordis 4.0.4 / schemastery 3.18.4 与 vendor 栈内容均未变；包布局不变、junction 无需重建）。
+> **核验方式为聚焦消费面的内容级 diff**（本轮升级前未留整包基线——npm 残留 `.dsh-EBhnoWNL` 实测为本版自身解包中转目录）：
+> `npm pack` 下载 28 个包（全部 peer + 全部消费点所在包 + 官方 bundle `dsh-base`/`dsh-web-app`）的 rc.1 版本，与 rc.2 树做全文件
+> SHA256 比对 + 契约/实现文件 `git diff --no-index` 逐行核对。**零改动集合（仅 package.json 版本号 + README.i18n.yaml）**：
+> `dsh-shell`、`dsh-settings`、`dsh-sandbox-policy`、`dsh-host-webserver`、`dsh-pwsh-local`、`dsh-client-connection`、`dsh-client-modules`、
+> `dsh-client-ui-renderer`、`dsh-client-ui-session`、`dsh-client-store`、`dsh-host-plugin-inventory`、`dsh-api-gateway`——即
+> **I13/I27/I31/I32/I38/I39/I40 的出处包在本版未变动**。**契约与符号级复核**：`api-session-controller` 的 `lib/types/client/**`
+> （fork/updateQueue/readAttachment/binding/archiveSession 客户端契约）**不在变更清单**；13 包 × 23 符号（`conversation.chat.node`、
+> `renderMessageImages`、`loadImage`、`readAttachment`、`updateQueue`、`archivedSessionIds`、`unarchiveSession`、`stopActivity`、
+> `createDrafts`、`releaseDraftAttachments`、`addAttachments`、`setDraft`、`plugins.bundle.config`、`settings.plugin.item`、
+> `observeSession`、`volatile-update`、`archiveSession`、`openSession`、`fork`、`QueueAction`、`SessionQueryError`、`readSession`、
+> `increaseTitle`）在新旧树**计数逐项相等（0 差异）**。**消费面真改动全部落在插件不消费处**：`api-session-controller`（模型目录/账号模型
+> `initializeDefaultModel`/`hasProviderApiKey`、`selectModel` 默认保存异步化、`prompt` 改 `requireModel`）、`dsh-session`（纯新增
+> `ToolHistoryProjection`/`Session.toolHistory()`）、`dsh-session-query`（`read()` 投影失败新抛 `SESSION_QUERY_CORRUPT_SESSION`）、
+> `dsh-workspace` + `api-workspace-controller`（`initializeDefault(request)` → `initializeDefault(signal)`，默认标题取路径末段）、
+> `ui-workspace`（快捷键系统含 fork/archive 快捷键与 `dismissForkError`、归档筛选三态；`archivedSessionIds` 派生与
+> `openSession`/`unarchiveSession` 未变）、`ui-chat`（`shell.quota-notice` 链 + `developerMessageDefinition` → 新 node kind
+> `developer-message`）、`ui-conversation`（停机快捷键、`ConversationBinding.openTurn`、`binding()` 新增 `@throws` 文档）、
+> `ui-plugin-manager`（安装源识别）、`ui-primitives`（样式/图标/焦点环）、`app-boot`（`Profile.skippedBundles` +
+> `reportSkippedBundles`：不兼容 bundle 的跳过报告由 stderr 打印改为 launcher 单次打印，**判定逻辑未变**）、
+> `dsh-base`/`dsh-web-app` 的 patch（`llm-deepseek` 拆 api-key/account；新增 `schedule`/`time-context`/`shortcuts` 行，默认 disabled）。
+> 依赖面：主包依赖 80→81，新增 `dsh-experimental-auto-review`，无删除。**门禁**：`test:probe` **52/52**、`verify:host` 装配断言全过
+> （方言探针回归 `pwsh`）、`typecheck` 通过、`npm test` **436/436**；`check:dsh` 初跑两处文档漂移（reference/dsh-contract 仍记 rc.1），
+> 本轮同步（reference 镜像按 `dsh-v0.1.7-rc.2` tag 重拉，13 源中仅 `09-architecture.md` 有实质差异：3 处替换、净 +55 字符，
+> 含工具热更新增说明）。**兼容声明**：`dshReleases` 补 `0.1.7-rc.2: compatible`（peer 范围 `>=0.1.7-alpha.1 <0.1.8` 天然覆盖，
+> 无新 tuple）。**观察项（非阻塞）**：① `session-query.read()` 新增显式抛错（I33 降级链保持 try/catch）；
+> ② 新 node kind `developer-message` 不被插件 key `['user','steering']` 命中（行为不变）；③ 归档筛选三态不改 `archivedSessionIds`
+> 语义（I37 判据继续有效）；④ `initializeDefault(signal)` 签名破坏性变更（插件零消费）；⑤ 升级操作陷阱：Windows 上 npm 替换全局
+> bin shim 遇文件占用只留哈希名半成品（`.dsh.cmd-<hash>` 等），需手工改回标准名恢复 `dsh` 命令，且 npm 残留 `.dsh-EBhnoWNL`
+> 为本版自身解包中转副本、非历史基线。评估实证见 upgrade-assessments/dsh-0.1.7-rc.2.md。
+>
 > **0.1.7-rc.1 核验（2026-09-24）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，tag `dsh-v0.1.7-rc.1`，
 > 2026-09-23 发布，0.1.7 系列首个候选版本、汇总自 v0.1.5-rc.3；`latest` 仍 0.1.5-rc.3、`alpha` 仍 0.1.7-alpha.2），
 > `npm install -g @deepseek-ai/dsh@0.1.7-rc.1` 全局实装（0.1.7-alpha.2 → 0.1.7-rc.1；cordis / schemastery 等 vendor 栈版本与内容均未变，
@@ -925,6 +1010,10 @@
 - **复查动作**：dsh 升级后跑 `npm test`（本档单测）；真机冒烟＝在撤回产生的子会话里对非首条消息
   preview，面板应显示「对话将一并回退」而非「第一条用户消息」；官方若修 readSession 或调整
   sessionQuery 读取面，以 `dsh-session-query/lib/index.js` 源码为准同步本降级链。
+- **rc.2 增补（2026-09-24）**：`dsh-session-query/lib/index.js` 的 `SessionObservationReader.read()`
+  在投影计算失败时新增显式抛出 `SESSION_QUERY_CORRUPT_SESSION`（rc.1 → rc.2，+7/−1 行；此前走静默路径）。
+  该读取面的抛错语义因此扩大，插件既有降级链（readSession → observeSession）本就按「抛错即降级」处理、
+  无需改码；若未来新增 `read()` 消费点，须沿用同一降级惯用法（勿裸调用）。
 
 
 ### I34 撤回回填的附件重建：readAttachment + createDrafts + addAttachments（探测式消费，全链降级）

@@ -178,3 +178,25 @@
 2. **[观察·低] done 面板随视图切换卸载**：execute→fork→openSession 成功后视图切到子会话，done 面板挂在旧消息节点内随之卸载，用户几乎看不到「对话已回退到该消息之前…」文案——both 模式同理（既有行为，非本批次引入），done 文案矩阵实际只有 fork 失败（不切视图）时可见。
 
 **发版判定**：scope 功能实弹通过、无阻塞项；测试产物（scope-test.txt/count.txt/big.txt）验收后已从 recall-h0 清理，2 个归档会话与快照 tag 留在 store（复验可用，亦可通过设置页快照管理清理）。
+
+## 2026-09-29 dsh 0.2.0-rc.1 升级实弹（撤回全链 + 设置页）
+
+- **环境**：Windows 10 22H2 ｜ 全局 dsh **0.2.0-rc.1**（`npm install -g @deepseek-ai/dsh@0.2.0-rc.1`；dist-tag `next`，`latest` 仍 0.1.7-rc.2）｜ 插件 **link 模式**（profile 依赖临时改 `link:D:/workspace/dsh-plugin/dsh-recall-plugin` + `pnpm install --no-frozen-lockfile`，切换前备份 `package.json.bak-20260929` / `pnpm-lock.yaml.bak-20260929`；工作区 peer 已扩 `|| >=0.2.0-rc.1 <0.2.1`）｜ `dsh web --no-open --port 3080`（token URL）｜ 测试工作区 `D:\tmp\recall-h0`
+- **执行方式**：浏览器实弹（agent-browser：snapshot + 页内 `__reactProps.onClick` 触发 + 页内 fetch 打桩核对请求响应）+ API 直调（`/api/recall/*`，token cookie）+ Host 侧 index.json / lineage.json / git tag 磁盘对账
+- **结果**：撤回全链与设置页快照管理逐项通过；插件 Console 零报错，dsh stderr 仅两条非插件信息（`dshmarket` 兼容门禁 skip 说明 + 插件自身方言探针 `recall shell dialect probe: pwsh`）。
+
+**逐项结论**：
+
+1. **启动与 Host 半 — 通过**：插件通过 0.2.0-rc.1 新增口径下的启动期兼容门禁并正常激活（同 profile 的第三方 `dshmarket@1.65.1` 因 peer 只到 `^0.1.2-alpha.2` 被跳过，stderr 有明确说明）；`status` → `{ok:true, errors:[], storeBase: C:\Users\cc\.dsh\dsh-recall-snapshots}`；`init` → `root=D:\tmp\recall-h0`、无 notice、`config:{refillDraft:true, archiveOriginal:true}`。
+2. **撤回主链路 — 通过**：同会话两条消息各出快照（索引 `8792104e`@00:19:45、`91e66f19`@00:20:47）→ 手动把 `smoke-020.txt` 改为 `v2 line (手动改动)` → 撤回第二条：面板文案「整段回退 / 将项目恢复到 00:20 发送该消息时的状态。共 1 个文件将变更（修改 1）…」+ 范围 radio 默认 both、清单 `修改 smoke-020.txt`；确认后 **文件回退为 `v1 line`**、安全快照 tag `snap-pre-rollback-1790612487546` 落盘、lineage 追加 `childId=session-478696aa… parentId=session-d278b62c…`、视图切到子会话（「1 轮 1 步」、被撤回消息消失）、标题继承无「 2」递增、被撤回消息文本回填输入框、输入框上方无残留排队消息、原会话从侧栏消失（归档）。
+3. **设置页配置卡 — 通过**：插件管理页 `已安装` 列表中 `dsh-recall-plugin` 正常（撤回图标 + 描述），详情页卡片完整渲染（快照行为 3 开关、自动治理 5 数值项取值 50/24/100/500/0、三个折叠区、保存/恢复默认/放弃修改）；`保存`（保留天数 0→7）落库后 `config-get` 回读 `overridden.retentionDays=7`，`恢复默认` 后 `overridden={}` 且 `retentionDays=0`——I39 settings 面（SettingsForms）读写双通。
+4. **快照管理树 — 通过**：两级展开（`recall-h0 16 会话 / 29 快照`、`dsh-recall-plugin 4 会话 / 21 快照`），版本家族聚族（`创建 scope-test.txt 文件 v2/2 3 条` / `v1/2 2 条`、`回复确认 v1/2·v2/2`），叶子行渲染 `时:分 消息文本` 与单条删除钮、行尾「切换」按归档集合正确隐藏；`立即 gc` 由「执行中…」转「gc 完成」（共 51 条 / 1.4 MB）；「最近错误」无错误不渲染。
+
+**发现（按严重度）**：
+
+1. **[观察·低，既有 PF-6 设计] 快照树首次打开可能少一条最新快照**：卡片挂载时 Host 以旧 items 立即应答并标 `stale`，客户端二段再拉若仍撞上 stale 即按设计止步（防抖动），本次即停在 50/51 条（缺最后一条）；改走 React 处理器触发「刷新」后补齐为 51 条、该会话行由「1 条」变「2 条」。非本版引入（`routes-manage` 缓存逻辑与 0.1.7-rc.2 逐字一致），记录以备后续评估「stale 二段是否值得重试一次」。
+2. **[过程备忘] `DOM.click()` 不触发卡片按钮的 React 处理器**：`b.click()` 后 fetch 打桩日志为空 = 处理器没跑；改取 `Object.keys(b).find(k=>k.startsWith('__reactProps'))` 调 `onClick({stopPropagation(){}})` 才真实触发。与既往「透明覆盖层拦截原生 click」同族，后续自动化统一走该路径。
+3. **[环境备忘] 模型端点不可用不妨碍本类冒烟**：profile 默认模型 `traeapi/kimi-k3` 指向本机 `127.0.0.1:7864`（未运行），两轮均以「本轮运行失败 Connection error.」结束——但 `turn/start`/`turn/end` 照常成对落日志，快照、cutSeq 切点、fork 与回退全链不受影响（撤回第二轮的 cutSeq 正好落在第一轮的 `turn/end` 上）。后续纯兼容性冒烟可沿用此低成本形态。
+4. **[观察] 自动化任务默认关闭**：0.2.0-rc.1 把 `schedule`/`time-context` 从 `dsh-web-app` patch 移除、改由可选 bundle `@deepseek-ai/dsh-experimental-schedule-bundle` 提供（插件管理页开关默认关）；与撤回插件无耦合，仅提示用户能力开关变化。
+
+**发版判定**：0.2.0-rc.1 升级实弹无阻塞项。**用户侧待决**：本轮扩范围改动建议发一个 patch 版本——npm 模式下装已发布版的用户在 0.2.0-rc.1 上会被启动兼容门禁整行跳过（`dshReleases` 只是市场台账，不参与启动判定）；在发布前 profile 需保持 link 模式。测试产物 `D:\tmp\recall-h0\smoke-020.txt`（回退后为 `v1 line`）与本次 2+1 条快照 / 1 条 lineage 留 store 供复验。

@@ -2,9 +2,9 @@
 
 > 用途：dsh 插件开发相关官方文档的本地副本，改代码前优先查这里，避免每次联网翻文档。
 >
-> 归档日期：2026-09-24，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.1.7-rc.1` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
+> 归档日期：2026-09-29，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.0-rc.1` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
 >
-> 归档 dsh 版本：0.1.7-rc.1（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
+> 归档 dsh 版本：0.2.0-rc.1（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
 >
 > 在线站点：https://deepseek-harness.github.io/deepseek-harness/ ｜ 每份文件头部都带「来源」注释，可溯回官方原文。
 
@@ -70,3 +70,12 @@ iwr -UseBasicParsing 'https://raw.githubusercontent.com/deepseek-ai/deepseek-har
 > 2026-09-24 重拉记录：本机 `Invoke-WebRequest`（直连与官方代理两种通道）均在 TLS 握手阶段失败
 > （`The SSL connection could not be established`），改用 `curl.exe`（系统自带，`curl.exe -sS -m 60 -o <文件> <URL>`）
 > 直连即成功——个别文件需重试 1–2 次（首次 0 字节）。镜像文件统一 LF、无 BOM，比对时应先归一化 CRLF 再逐字节比较。
+>
+> 2026-09-24 二次重拉（`dsh-v0.1.7-rc.1` → `dsh-v0.1.7-rc.2`）：13 源中仅 `09-architecture.md` 有实质差异
+> （3 处替换、净 +55 字符：「循环发送不可变请求」措辞收紧；「模型可见即已记录」新增「工具变更不依赖能力；
+> [Session 工具历史](../packages/core/session/README.zh.md)提供提供方声明」；系统提示词段补「包括同时发生的
+> 受支持工具更新」——后两处对应本版新增的工具热更能力），其余 12 份逐字节相同。
+>
+> 2026-09-29 三次重拉（`dsh-v0.1.7-rc.2` → `dsh-v0.2.0-rc.1`）：13 源中同样只有 `09-architecture.md` 有实质差异
+> （新增一行「失败步骤会[记录缺失的工具结果](../packages/core/agent-loop/README.zh.md#understand-the-implementation)。」，
+> 净 +121 字节——对应本版「修复工具调度异常后对话无法继续」的 `ToolCallRecovery` 重构），其余 12 份逐字节相同。

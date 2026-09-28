@@ -7,7 +7,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)
 ![Build](https://img.shields.io/badge/pure%20JS-green)
 
-[![DSH](https://img.shields.io/badge/DSH-0.1.7--rc.1-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.1.7-rc.1)
+[![DSH](https://img.shields.io/badge/DSH-0.2.0--rc.1-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1)
 ![DSH](https://img.shields.io/badge/DSH-Desktop-blue)
 ---
 Under any message you've sent, click "↶ Recall" — **your workspace files and the conversation history roll back to just before that message was sent**.
@@ -72,7 +72,7 @@ Prerequisites:
 
 - git CLI: without it the recall button won't appear (a notice shows at the top of the page); DSH itself keeps running.
 - Shell: PowerShell 5.1 / 7 on Windows; bash on Linux/macOS.
-- DSH version: `0.1.2-alpha.1` through `0.1.7-rc.1`. peerDependencies open a window per minor line (`>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8`, consistent with the `dsh.compatibility.dshReleases` declaration): each line is anchored at its first verified version with an upper bound at the next minor, so later prereleases/releases within a verified line are admitted without touching the peer declaration, while unverified new minor lines remain blocked.
+- DSH version: `0.1.2-alpha.1` through `0.2.0-rc.1`. peerDependencies open a window per minor line (`>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8 || >=0.2.0-rc.1 <0.2.1`, consistent with the `dsh.compatibility.dshReleases` declaration): each line is anchored at its first verified version with an upper bound at the next minor, so later prereleases/releases within a verified line are admitted without touching the peer declaration, while unverified new minor lines remain blocked (the 0.2.0 line needs its own tuple — npm's prerelease gate only admits a prerelease from a comparator with the same tuple, so the existing `<0.1.8` segment cannot admit `0.2.0-rc.1`).
 - **0.1.7-alpha.1 is a breaking release** (`ShellExecutor.run`/`start` became `execute().result()`, and the settings surface became `SettingsForms`, addressed by profile entry id with `.volatile()` marked fields); the plugin ships **both seams side by side** — the same release works on every 0.1.2–0.1.6 line and on 0.1.7, with unchanged behaviour on older DSH versions.
 - `0.1.1-rc.2` and earlier are not supported: their client runtime lacks the `sessions`/`workspaces`/`uiWorkspace` services, so the plugin UI silently fails to render.
 
