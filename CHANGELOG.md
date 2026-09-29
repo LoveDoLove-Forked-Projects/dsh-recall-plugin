@@ -2,9 +2,9 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
-## [Unreleased]
+## [2.4.7] - 2026-09-30
 
-质量加固专项批次（[docs/plans/completed/plan-quality-hardening.md](docs/plans/completed/plan-quality-hardening.md) A1–A8，八项分四波：质量基建 → 数据安全 → 测试基建 → i18n）。发版时按语义化版本编号（含新功能，预期 minor）。2026-09-30 该计划连同 `plan-warmup-unhandled-rejection` 已归档到 `docs/plans/completed/`（活体冒烟第九节 R-1〜R-6 全过）。
+质量加固专项批次（[docs/plans/completed/plan-quality-hardening.md](docs/plans/completed/plan-quality-hardening.md) A1–A8，八项分四波：质量基建 → 数据安全 → 测试基建 → i18n）。2026-09-30 该计划连同 `plan-warmup-unhandled-rejection` 已归档到 `docs/plans/completed/`（活体冒烟第九节 R-1〜R-6 全过）。
 
 ### 新增
 
