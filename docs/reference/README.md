@@ -2,9 +2,9 @@
 
 > 用途：dsh 插件开发相关官方文档的本地副本，改代码前优先查这里，避免每次联网翻文档。
 >
-> 归档日期：2026-09-29，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.0-rc.1` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
+> 归档日期：2026-09-29，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.0-rc.2` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
 >
-> 归档 dsh 版本：0.2.0-rc.1（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
+> 归档 dsh 版本：0.2.0-rc.2（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
 >
 > 在线站点：https://deepseek-harness.github.io/deepseek-harness/ ｜ 每份文件头部都带「来源」注释，可溯回官方原文。
 
@@ -79,3 +79,8 @@ iwr -UseBasicParsing 'https://raw.githubusercontent.com/deepseek-ai/deepseek-har
 > 2026-09-29 三次重拉（`dsh-v0.1.7-rc.2` → `dsh-v0.2.0-rc.1`）：13 源中同样只有 `09-architecture.md` 有实质差异
 > （新增一行「失败步骤会[记录缺失的工具结果](../packages/core/agent-loop/README.zh.md#understand-the-implementation)。」，
 > 净 +121 字节——对应本版「修复工具调度异常后对话无法继续」的 `ToolCallRecovery` 重构），其余 12 份逐字节相同。
+>
+> 2026-09-29 四次重拉（`dsh-v0.2.0-rc.1` → `dsh-v0.2.0-rc.2`）：13 源中依旧只有 `09-architecture.md` 有实质差异
+> （「桌面应用」段重写：桌面端在签名资源内携带精确匹配的 dsh 运行时、`Desktop 与 npm CLI 共享产品数据，但包、启用选择与锁文件保持独立。
+> Desktop 内置 CLI 管理其已初始化的插件。」，净 **−173 字符**——对应本版「桌面端可在菜单栏管理/安装 dsh 命令与插件」的新能力，
+> 属桌面载体说明的措辞更新），其余 12 份逐字节相同；本轮直连 `raw.githubusercontent` 一次成功，无需代理或重试。

@@ -7,6 +7,34 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.2.0-rc.2 核验（2026-09-29）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，tag `dsh-v0.2.0-rc.2`，
+> 2026-09-29 发布；`latest` 仍 0.1.7-rc.2、`alpha` 仍 0.1.7-alpha.2——**装最新仍须显式写版本号**）。**发布初期整条线对 npm 用户不可装**：
+> `dsh-web-app@0.2.0-rc.2` 精确 pin 的 `@deepseek-ai/dsh-client-ui-settings-account@0.2.0-rc.2` 漏发（注册表直查与 tarball HEAD 双证 404；
+> 全依赖闭包扫描 252 包确认唯一缺口），`--install-strategy=shallow`／`--omit=optional`／cwd package.json `overrides`（实测对 `npm i -g`
+> 不生效）三类变通全部 ETARGET——约 2 小时后上游补发，`npm install -g @deepseek-ai/dsh@0.2.0-rc.2` 成功（534 包替换、2 分钟；
+> 工作区 `dsh-settings` junction 自动跟随到 rc.2；`dsh --version` 实测 `0.2.0-rc.2`）。该包经查**非启动必需件**（`dsh-web-app` 组成里
+> 的一行独立客户端插件 `ui-settings-account`，管 DeepSeek 登录与平台计费页；运行期依赖仅 schemastery/cordis，两版均未变），留 rc.1
+> 混装亦兼容。**核验方式为 tarball 级逐文件 SHA256 比对**（不依赖安装成功：27 个官方 rc.2 包 vs 本机 rc.1 实装）。**零改动集合**：
+> 6 个 peer（`dsh-session`/`dsh-session-query`/`dsh-settings`/`dsh-shell`/`dsh-host-webserver`/`dsh-sandbox-policy`）＋`dsh-base`/
+> `dsh-plugin-manager` **只有 package.json 版本号变化**；四个注册/消费面契约文件**字节级全等**——ui-chat `contract/slots.d.ts`
+> （chat.node props）、plugin-manager `slot-contract.d.ts`（`plugins.bundle.config`；其 client.js 的 +82/−101 行无一行涉及 slot
+> key/entryKey/bundle 解析）、api-session-controller `contract/sessions.d.ts`（fork/binding）、ui-conversation `contract/slots.d.ts`
+> （composer/草稿）；`dsh-session-projection`（消息 kind 归属）、`dsh-client-ui-slots`、`dsh-api-workspace-controller`/
+> `dsh-api-settings-controller`/`dsh-client-connection` 亦仅版本号变化。**真增量全部落在插件不消费处**：ui-chat（`formatRunDuration`
+> 改返回 `RunDurationPart[]`、鲸鱼尾改 APNG 资源、locale）、ui-theme（`FONT_SIZE_MIN/MAX` 12–17→10–22）、api-remotes（新增
+> `export type {} from '@deepseek-ai/dsh-user-questions/remote'`）、dsh-schedule（提醒框架文案由「untrusted reminder content…」改为
+> 固定句 `This is a scheduled message from the user`，6 增 4 删，**无新事件类型、无新消息 kind、投递路径不变**）、
+> dsh-tool-ask-user（异步问答 opt-in `Config{mode?: 'legacy' | 'timed', timeout?}`，默认 legacy；新增 `lib/types/timed.d.ts`）、
+> plugin-manager（`InstallInputError.problem` 增 `'shipped'`、`managementText` 增可选 `installing`）、api-session-controller typert
+> 签名表增可选 `userQuestions`（active/settled）、两次 pwsh 工具仅提示文案与持久完成标记识别、镜像 `09-architecture.md` 桌面段重写
+> （净 −173 字符，对应桌面内置 dsh 命令的新能力）。**门禁**：`test:probe` **52/52**、`verify:host` 装配断言全过（inject=shell,sessions,agents、
+> 端点 12 项）、`check:dsh` 在镜像与契约文档字段同步后全绿（6 条 peer 落在 `>=0.2.0-rc.1 <0.2.1` 窗口内）。**兼容声明**：peer 范围由既有
+> 0.2.0 窗口天然覆盖——同 minor 线内出新版**不追加 tuple**（符合 2.3.11 起约定），`dshReleases` 补 `0.2.0-rc.2: compatible`。
+> **观察项（非阻塞）**：① 上游漏发任一子包会让整条 dsh 线对 npm 用户不可装——升级前可先用依赖闭包探针预检（本轮脚本化扫描 252 包）；
+> ② 异步问答 timed 模式若被用户手动开启，等待超时后 agent 继续工作——插件 P0-1 拦截读 `agents.status`，语义不变，未实弹验证；
+> ③ 既有观察项延续（`fork.onCreated` 未用、`dsh-tool-jobs` 唤醒上限、`sessionQuery` 三 API 仍 `@deprecated`）。**待办**：活体冒烟本轮未跑
+> （本版对插件零契约变更），如需按 smoke-checklist 补一轮真宿主 + 浏览器实弹。评估实证见 [upgrade-assessments/dsh-0.2.0-rc.2.md](upgrade-assessments/dsh-0.2.0-rc.2.md)。
+>
 > **0.2.0-rc.1 核验（2026-09-29）——零破坏版本，无需改码**：**npm 已发布**（dist-tag `next` 指向本版，
 > tag `dsh-v0.2.0-rc.1`，2026-09-28 发布、0.2.0 系列首个候选版本、汇总自 `v0.1.7-rc.2`；`latest` 仍 0.1.7-rc.2、
 > `alpha` 仍 0.1.7-alpha.2——**`npm i -g @deepseek-ai/dsh` 装不到本版，必须显式写版本号**），`npm install -g
