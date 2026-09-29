@@ -14,7 +14,7 @@
  * 覆盖——静态扫描是廉价的第一道网，不追求完备（完备要 AST，投入不成比例）。
  */
 
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
 import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -98,12 +98,23 @@ describe('i18n key 空间静态扫描', () => {
 })
 
 describe('i18n 兜底链与插值', () => {
-  it('resolveLocale：显式 zh/en 直取；auto/非法值在无 navigator 环境回落 zh', () => {
+  // navigator 是宿主全局：node ≥ 21 起真实存在且 language 随系统 locale 变化
+  // （CI runner 为 en-US、中文开发机为 zh-CN）——不桩定就等于把断言挂到运行
+  // 环境的 locale 上，本地绿 CI 红（2026-09-30 首发实锤）。每个分支显式桩定，
+  // afterEach 统一恢复原值（vi.stubGlobal 记录「存在/不存在」两态）。
+  afterEach(() => { vi.unstubAllGlobals() })
+
+  it('resolveLocale：显式 zh/en 直取；auto 按 navigator.language 判、无 navigator 回落 zh', () => {
     expect(resolveLocale('zh')).toBe('zh')
     expect(resolveLocale('en')).toBe('en')
-    expect(resolveLocale('auto')).toBe('zh') // node（无 navigator）
+    vi.stubGlobal('navigator', { language: 'zh-CN' })
+    expect(resolveLocale('auto')).toBe('zh')
+    vi.stubGlobal('navigator', { language: 'en-US' })
+    expect(resolveLocale('auto')).toBe('en')
+    expect(resolveLocale('fr-FR')).toBe('en') // 非法值不炸，按 auto 处理
+    vi.stubGlobal('navigator', undefined) // 老 node / 嵌入式无 navigator 环境
+    expect(resolveLocale('auto')).toBe('zh')
     expect(resolveLocale(undefined)).toBe('zh')
-    expect(resolveLocale('fr-FR')).toBe('zh') // 非法值不炸，按 auto 处理
   })
 
   it('translate：命中取当前语言；本语言缺 key 回 zh；都缺回 key 本身', () => {
