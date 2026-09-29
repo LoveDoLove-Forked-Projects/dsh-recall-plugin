@@ -118,8 +118,15 @@ dsh plugin --profile web remove dsh-recall-plugin
 | `refillDraft` | true | 撤回后把被撤回的消息（文本与附件）回填到输入框 |
 | `snapshotEnabled` | true | 快照总开关（关闭只冻结新建，已有快照仍可撤回） |
 | `archiveOriginal` | true | 撤回后归档原会话（关闭后原会话保留在会话列表中） |
+| `locale` | auto | 界面语言：`auto` 跟随系统（`navigator.language` 以 `zh` 开头用中文，否则英文）、`zh` / `en` 显式锁定。见下方「界面语言」 |
 
 设置卡片另提供「恢复默认」（一键重置全部字段）与「最近错误」查看/清空。
+
+### 界面语言
+
+插件自绘的界面（撤回按钮与确认面板、toast 提示、设置卡片三张卡、快照管理树、最近错误）全部双语，由 `locale` 控制，在配置卡片的「界面」分组里下拉切换、保存即生效（设置页立刻切换；聊天页的会话文案在下次刷新页面后跟进）。
+
+两处 v1 明示限制：① 宿主官方设置表单自己渲染的字段说明（即 `Schema.description()` 文本）仍是中文，插件无法本地化——插件自绘的配置卡片不受影响；② 错误面板与「最近错误」里，万一出现「宿主侧带动态细节的错误」（如回退失败的救援结果、具体校验失败原因、原始异常文本），会原样展示宿主返回的中文/英文原文而不再套本地化短句——宁可中英混排也不吞掉排障需要的细节。
 
 ## 快照维护与清理
 
@@ -153,6 +160,8 @@ dsh plugin --profile web remove dsh-recall-plugin
   git --git-dir="<store>\git\.git" ls-tree -r --name-only snap-<消息ID>
   ```
 
+- 存储目录里每个文件（索引、撤回链、格式标记、意图记录等）的格式与版本兼容约定见 [docs/format.md](docs/format.md)。
+
 ## 本地开发（无需发布）
 
 把 profile 对本包的依赖改成 `link:` 指向克隆目录；DSH 加载的是工作区 `lib/` 构建产物（源码在 `src/`），改 `src/` 后先 `npm run build` 再重启 DSH 生效，无需复制或发布：
@@ -171,11 +180,12 @@ pnpm install
 
 ### 测试
 
-- `npm test`：纯逻辑单测（vitest，34 个文件 436 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm test`：纯逻辑单测（vitest，37 个文件 476 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、磁盘格式守卫、操作意图 journal、i18n 词典与 key 漏配扫描、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm run test:client`：client 组件测试（vitest + jsdom，6 个文件 82 例，CI 同跑）——撤回节点主链（preview→execute→fork→回填）、快照管理树与删除流、配置/排除卡片错误路径、logger 开关矩阵、zh/en 双语渲染链；断言只锁行为与结构（className / aria / 请求载荷），不锁文案字面量；
 - `npm run test:probe`：官方 API 字段探针（依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
 - `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件跑两个 pass（旧面桩 + 只给新面的桩），断言 inject 声明、端点注册、Config schema、卸载清理与 settings 面分派，装配回归发版前即可拦截；
 - `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）。
-- CI（GitHub Actions）跑 `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + 产物新鲜度统一校验（`npm run build && git diff --exit-code lib/`；探针与装配门禁只在有 dsh 的机器跑）。
+- CI（GitHub Actions）跑 `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + `npm run test:client` + 产物新鲜度统一校验（`npm run build && git diff --exit-code lib/`；探针与装配门禁只在有 dsh 的机器跑）。
 
 ## License
 

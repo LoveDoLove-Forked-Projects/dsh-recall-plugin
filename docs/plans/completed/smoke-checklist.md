@@ -1,6 +1,6 @@
 # 冒烟测试待办清单
 
-> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：**第一〜七节均已执行通过（2026-08-29：Windows + WSL + v2.1.1 本机验证 + PF 批次实弹；执行记录见 [smoke-checklist-records.md](./smoke-checklist-records.md)）**
+> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：**第一〜九节均已执行通过**（一〜七节 2026-08-29、第八节 2026-09-18、第九节 rewind 加固批次 2026-09-30；执行记录见 [smoke-checklist-records.md](./smoke-checklist-records.md)）
 > 范围：必须在真实 DSH web 环境实弹验证的项。单测（212 项）、`verify:host`、`check:dsh` 已覆盖的逻辑正确性与装配正确性不在此重复；本清单 = AGENTS.md 常规回归路径 + 各已实施计划（`completed/`）验收标准中「需活体验证」的项。
 > 环境准备：Windows 侧确认 `~/.dsh/profiles/web/package.json` 的 `dsh-recall-plugin` 依赖处于 **link 模式**（改代码联调，工作区 `lib/` 即已装代码，改完重启 dsh-web 生效）；npm 模式下跑的是 registry 旧版，验证新版前须 `pnpm update dsh-recall-plugin` 或切 link 模式。**WSL 侧前置准备见第五节**（POSIX 分支实弹，阻塞环境诊断批次随 minor 发版）。
 > 全部通过后：本文件与 `smoke-checklist-records.md` 一起移入 `completed/`，并按 docs/README.md 生命周期约定同步总索引链接。
@@ -93,6 +93,17 @@
 - [x] **S-3 AGENT_BUSY 拦截**：agent 运行中发起撤回 → 被拦截 ✅ 错误面板「无法回退：Agent 正在运行中，请先停止后再撤回」（preview 层拦截；session-only execute 层拦截由 routes-scope 单测钉住）
 - [x] **S-4 首条消息无 radio**：首条用户消息的确认面板无 radio 组（与现状一致）✅ 面板 HTML 无 `.dsh-recall-scope`/radio，文案「第一条用户消息…仅回退项目文件」、按钮「确认回退」
 - [x] **S-5 面板分叉渲染**：session-only 选中时清单改参考语义、安全快照预告隐藏、按钮文案分叉 ✅ notes 变「项目文件保持当前状态…」+「以下差异仅作参考，所选模式不会改动文件。」、按钮「确认撤回对话」；radio 切回 both 时全部恢复现状文案
+
+## 九、rewind 加固批次（Windows 侧必测，发版前置；[plan-quality-hardening.md](./plan-quality-hardening.md) A1–A8）
+
+> 2026-09-30 实施：单测 478 例 + client 组件测试 83 例 + verify:host 全绿，本节是真实 DSH 链路的活体验收（**六项 R-1〜R-6 已于同日实弹通过**，执行记录见 smoke-checklist-records 的 2026-09-30 节）。A1/A5/A6/A7/A8 无活体面（分别由 client 组件测试、logger 开关测试、编译门禁、format.md 文档、注释纪律覆盖），故只列 A2/A3/A4 三项。
+
+- [x] **R-1 崩溃恢复实弹（A2）**：撤回进行中强杀宿主进程 → 重启 DSH → 工作区被自动救回安全快照（`snap-pre-rollback-*`）、文件回到回退前状态，「最近错误」出现 `recovered interrupted rollback` 记录；若救援失败，错误提示里含**意图文件路径**（`recall-intent.json`）且该文件可读 ✅ 两次实弹：① 回退前杀（工作区未变=与目标一致）→ 重启后 init 腿走「一致即仅清理」分支（journal 写空串、零告警、不 reset）；② 造 1501 项差异后杀（phase=rollback、safetyOk=true，journal 完整落盘）→ 重启预热腿立刻 `recovered interrupted rollback … 工作区已复位到安全快照`，错误记录进「最近错误」、journal 清零、preview 照常（total=1501）
+- [x] **R-2 幂等残留（A2 边界）**：手工构造「回退已完成但 clear 未执行」的残留 journal → 重启 → 不触发二次 reset（工作区保持用户后续改动，仅清记录）✅ 由 R-1① 自然覆盖：残留 journal（phase=rollback）+ 工作区与目标 tag 一致 → 只清记录、无 rescue、无错误记录、`a.txt` 内容未被改动（对照：不一致时才会走复位分支，即 R-1②）
+- [x] **R-3 格式守卫实弹（A3）**：store 手工放 `format=99` → 快照/撤回被拒 + 最近错误有提示，列表仍可读；改回后功能恢复 ✅ `format` 由插件首条快照自动补戳为 `1`；置 99 后 execute 返回 `{ok:false, code:'FORMAT_BLOCKED', message:'磁盘格式不受支持，已停止写入；详见「最近错误」}`，status 记 `磁盘格式标记为 v99（本插件支持 v1）…请升级插件`；manage list 照常（total=52）；删掉 marker 后 init/预览恢复。**注**：本项实弹还掘出 win32 侧缺席读取退出码缺陷（见执行记录缺陷 1），已修
+- [x] **R-4 en locale 全链（A4）**：设置卡片切 English → 设置页即刻全英文（配置卡、快照管理树折叠头、按钮）；刷新后聊天页英文（撤回按钮 aria/title、确认面板、done 面板）✅ host 侧 API：`config-set locale=en` → `config-get` 回读 `values.locale=en`/`overridden.locale=en` → `init.config.locale=en`；非法值 `fr` 被 `BAD_TYPE` 拒。浏览器实弹（内置浏览器）：面板标题 `Roll back`、按钮 `Cancel/Roll back`、tooltip `Roll back: files and chat return to before this message`、清单表头 `modified/deleted`；卡片字段/分组/折叠头/保存提示三处同时切英（含修复后的即时一致性）
+- [x] **R-5 zh 回归（A4）**：`locale=auto` 且系统语言为中文时全部文案与 2.4.6 一致（含「最近错误」按 kind 本地化、原 message 在 title 上）✅ 面板逐字与 2.4.6 相同（`整段回退` / `将项目恢复到 00:31 发送该消息时的状态。共 1501 个文件将变更（修改 1 · 删除 499）…` / `取消`+`确认回退`）；工具栏与 aria 中文；切回 auto 后三处同时回中文。**注**：实弹掘出三处 i18n 失配（英文缺空格 / 折叠头停旧语言 / 提示旧语言），已修复并复验（见执行记录缺陷 4）
+- [x] **R-6 构建产物 root 提示（A4 artifactSeg）**：构建产物目录开工作区 → init 与近消息 toast 的停用提示按语言渲染（中/英各验一次），文案仍 ≤140 字符、含可行动出口 ✅ `D:\tmp\rw-smoke2\target\debug` 实测：`init.notice.buildRootArtifactSeg='target'` + 中文 `buildRootNotice` 并存下发；`snapshot-info` 同样带 `artifactSeg`；客户端按段名本地取词（中英词条由 parity 钉住，文案 61 字符、含「从基础排除表移除该项」出口）
 
 ---
 

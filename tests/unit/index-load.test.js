@@ -33,6 +33,8 @@ function makeRt(state, rawIndex, opts = {}) {
     stripBom: (t) => String(t == null ? '' : t).replace(/^\uFEFF/, ''),
     indexReadCmd: (dir) => 'READ ' + dir,
     renameFileCmd: (src, dst) => 'RENAME ' + src + ' => ' + dst,
+    // A3：格式 marker 读取（runShell 对非 READ/RENAME 前缀回空串 = 缺席 → 守卫放行）
+    fileReadCmd: (f) => 'FMT ' + f,
   }
   const errors = []
   const rt = {

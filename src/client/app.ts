@@ -11,6 +11,7 @@ import { CSS } from './css.js'
 import { buildUtil } from './util.js'
 import { buildRecallNode } from './recall-node.js'
 import { buildSettingsCards } from './settings-cards.js'
+import { appLog } from './log.js'
 import type { ReactApi, UtilApi } from './util.js'
 import type { ClientContext, ClientSessionsService, ClientWorkspacesService, SlotsService, SlotEntryOptions, StylesService } from '../types/client-contract.js'
 
@@ -76,7 +77,8 @@ export function createApp(React: ReactApi) {
           )
         })
       } catch (error) {
-        console.error('[dsh-recall-plugin] slot register failed (' + slotKey + '):', error)
+        // 单 slot 注册失败只记日志不抛：其余 slot 与插件主链继续（降级可用）
+        appLog.error('slot register failed (' + slotKey + '):', error)
       }
     }
 
@@ -95,7 +97,8 @@ export function createApp(React: ReactApi) {
         RecallSettingsCard
       ))
     } catch (error) {
-      console.error('[dsh-recall-plugin] settings card register failed:', error)
+      // 同上：单 slot 失败不影响其余注册（旧版 dsh 上该 key 本就是静默 no-op）
+      appLog.error('settings card register failed:', error)
     }
 
     // 0.1.6-alpha.2 新插件管理页（ui-plugin-manager）：bundle 自带配置挂
@@ -109,7 +112,11 @@ export function createApp(React: ReactApi) {
         RecallSettingsCard
       ))
     } catch (error) {
-      console.error('[dsh-recall-plugin] plugin manager config register failed:', error)
+      // 同上：双 slot 键各吃各的版本，单侧失败互不牵连
+      appLog.error('plugin manager config register failed:', error)
     }
+    // 装配完成一行 info：现场排障（「Host 活 Client 死」类症状，I29）时
+    // 开 dsh-recall.debug 开关即可确认 client 半是否真的 apply 过
+    appLog.info('client applied')
   }
 }

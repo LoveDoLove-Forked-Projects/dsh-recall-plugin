@@ -15,6 +15,7 @@ docs/
 ├── compat-audit.md        # 契约台账：官方 API 耦合点「子系统 × 不变量 × 探针」矩阵（dsh 升级后定点复查）
 ├── dsh-contract-verify.md # 契约可用性二次验证记录（基准 2026-08-31 / dsh 0.1.2-alpha.2；候选落地状态随实施标记）
 ├── design-tokens.md       # 设计令牌与官方组件配方参考（client UI 改样式先查）
+├── format.md              # 磁盘格式 spec（快照存储逐文件格式 + 版本与兼容纪律；漂移即 bug）
 ├── routing-interplay.md   # 与 dsh-routing-suite 的交互说明（撤回 × 路由阶段，事实文档）
 ├── reference/             # 官方文档本地镜像（随仓库提交，只读不改；索引与重拉方式见 reference/README.md）
 ├── plans/                 # 计划文档族（状态即目录：pending/ 待办，completed/ 已完成）
@@ -36,13 +37,15 @@ docs/
 │       ├── plan-performance.md              # 性能优化（PF-1〜PF-9，2026-08-29 实施 + 实弹通过）
 │       ├── plan-ts-refactor.md              # TS 迁移总计划（JS → TypeScript，计划修订至 v3.2；M1–M8 已实施，2026-09-01 归档）
 │       ├── plan-ts-refactor-m1..m8.md       # 同上的 8 份阶段实施文档（随总计划归档）
-│       ├── smoke-checklist.md               # 冒烟测试待办清单（八节全部通过：2026-08-29 七节 + 2026-09-18 追加第八节）
+│       ├── smoke-checklist.md               # 冒烟测试待办清单（九节全部通过：2026-08-29 七节 + 2026-09-18 第八节 + 2026-09-30 第九节质量加固批次）
 │       ├── plan-shell-dialect-win32.md      # win32 shell 方言冲突修复（issue #15，2026-09-16 实施并随 2.3.22 发版）：方言探针 + 直连 powershell.exe 通道
 │       ├── plan-session-only.md             # 仅撤回对话模式（execute scope：both/session-only；plan-competitor-ux U2 拆出，2026-09-18 实施 + 实弹 5/5）
 │       ├── smoke-checklist-records.md       # 冒烟测试执行记录（随清单归档）
 │       ├── pr17-review.md                   # PR #17 审查：gc 失败退避 / oversize 目录跳过 / baseExcludes 加宽（2026-09-22 合入上游 cd9a9bd，P0/P1 修复 + W1–W3 实弹复核 + P2 逐项核验与定案）
 │       ├── plan-build-root-guard.md         # 构建产物工作区根的快照护栏与残骸回收（issue #18）：复现验证 + M1/M2/M3 全部实施 + 双平台实弹 6/6、M3 实弹 4/4
 │       ├── plan-dsh-0.1.7-adapt.md          # dsh 0.1.7-alpha.1 适配（2026-09-23 归档）：shell 接缝换 execute / settings 换 SettingsForms 双分支 + M5 双平台实弹全过（WSL 硬指标零 shell.run）
+│       ├── plan-quality-hardening.md         # 质量加固专项 A1–A8（2026-09-30 归档）：client UI 测试体系 / intent journal 崩溃恢复 / 磁盘格式守卫 / i18n 双语层 / logger / 严格索引 / format.md / catch 纪律；活体冒烟 R-1〜R-6 全过（实弹掘出并修复 4 个真实缺陷）
+│       ├── plan-warmup-unhandled-rejection.md  # 启动预热 IIFE 未捕获拒绝加固（2026-09-30 归档）：随质量加固批次实弹复现 fatal 后修复（IIFE 接 catch + 诊断）
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿 / 性能回退已修复）
@@ -71,7 +74,7 @@ docs/
 | 分期 / 专题实施计划（已完成） | `plans/completed/` | 同上，**文件名不变**（代码注释与台账按文件名引用） | `completed/plan-p1.md` |
 | 冒烟 / 回归验证清单 | `plans/pending/`，全部执行完移入 `completed/` | `smoke-<范围>.md` | `completed/smoke-checklist.md` |
 | 调研报告 | `plans/`（与衍生计划放一起，积累多了再拆 `research/`） | `research-<主题>.md`；同主题多轮加 `-YYYY-MM` 后缀 | `research-competitors.md`、`research-competitors-2026-09.md` |
-| 长期事实文档（契约、台账、验证记录、设计令牌、交互说明等） | `docs/` 根 | 小写 kebab-case，不带 plan 与日期 | `dsh-contract.md`、`compat-audit.md`、`dsh-contract-verify.md`、`design-tokens.md`、`routing-interplay.md`；规划中 `format.md`、`security.md`（见 `pending/plan-p2.md` P2-2） |
+| 长期事实文档（契约、台账、验证记录、设计令牌、磁盘格式、交互说明等） | `docs/` 根 | 小写 kebab-case，不带 plan 与日期 | `dsh-contract.md`、`compat-audit.md`、`dsh-contract-verify.md`、`design-tokens.md`、`format.md`、`routing-interplay.md`；规划中 `security.md`（见 `pending/plan-p2.md` P2-2 SECURITY 半） |
 | dsh 版本升级影响评估 | `upgrade-assessments/` | `dsh-<版本号>.md`（版本快照，无完成态，不进 plans 状态目录；每 dsh 版本一份） | `dsh-0.1.5-rc.1.md` |
 | 官方文档本地镜像 | `reference/` | 保留官方编号文件名（01〜13 + README），随仓库提交 | `reference/README.md` |
 

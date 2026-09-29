@@ -63,12 +63,17 @@ function fakeRt(root) {
   const rt = {
     state,
     isWin: true,
-    scripts: { stripBom: (t) => String(t == null ? '' : t), indexReadCmd: () => 'READ', snapshotScript: () => 'SNAP_SCRIPT', pruneScript: () => 'PRUNE' },
+    scripts: { stripBom: (t) => String(t == null ? '' : t), indexReadCmd: () => 'READ', fileReadCmd: (f) => 'FMT ' + f, snapshotScript: () => 'SNAP_SCRIPT', pruneScript: () => 'PRUNE' },
     resolveRoot: async () => root,
     resolveStore: async () => { calls.resolveStore++; return store },
     tryUpgradeToHome: async () => store,
     ensureGit: async () => { calls.ensureGit++; return { ok: true } },
-    runShell: async () => { calls.runShell++; return 'TREE abc\nSNAP_OK' },
+    runShell: async (cmd) => {
+      // A3：格式 marker 读取返回空串（缺席 → 守卫放行并补戳）；不计入调用数
+      if (String(cmd).startsWith('FMT ')) return ''
+      calls.runShell++
+      return 'TREE abc\nSNAP_OK'
+    },
     runShellMeta: async () => ({ text: '', truncated: false }),
     writeTextViaShell: async () => {},
     recordError: () => {},
@@ -110,7 +115,12 @@ describe('端点 notice：构建产物 root 的停用说明', () => {
         ensureGit: async () => ({ ok: true }),
         cleanupLegacy: () => {},
       },
-      snaps: { loadIndex: async () => {}, rebuildOrphans: async () => {}, feedbackFor: async () => ({}) },
+      snaps: { loadIndex: async () => {}, rebuildOrphans: async () => {}, feedbackFor: async () => ({}), guardStoreFormat: async () => true },
+      // A2/A3 桩：本文件只关心 notice 文案，守卫与意图恢复一律放行/空操作
+      intentJournal: {
+        begin: async () => {}, advance: async () => {}, clear: async () => {},
+        read: async () => null, file: () => '/store/recall-intent.json', recover: async () => false,
+      },
       state,
       cfg: { baseExcludes: BASE },
       supported: true,

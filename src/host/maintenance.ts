@@ -52,8 +52,11 @@ export function selectOverLimitVictims(snapshots: Map<string, SnapshotInfo>, lim
   const byRoot = new Map<string, SnapshotLite[]>()
   for (const [id, s] of snapshots.entries()) {
     if (!s || !s.root) continue
-    if (!byRoot.has(s.root)) byRoot.set(s.root, [])
-          byRoot.get(s.root)!.push({ id, time: s.time })
+    // get-or-create 守卫（A6）：替代原 `get(...)!` 非空断言——断言靠的是
+    // 上一行的 has/set，类型层不可见；显式分支让两条路径都自证非空。
+    const list = byRoot.get(s.root)
+    if (list) list.push({ id, time: s.time })
+    else byRoot.set(s.root, [{ id, time: s.time }])
   }
   const victims = new Map<string, SnapshotLite[]>()
   for (const [root, list] of byRoot) {
@@ -112,8 +115,10 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     const byRoot = new Map<string, string[]>()
     for (const [id, s] of state.snapshots.entries()) {
       if (!s || s.sessionId !== sessionId) continue
-      if (!byRoot.has(s.root)) byRoot.set(s.root, [])
-            byRoot.get(s.root)!.push(id)
+      // get-or-create 守卫（A6）：替代 `get(...)!` 断言，两条路径各自自证非空
+      const list = byRoot.get(s.root)
+      if (list) list.push(id)
+      else byRoot.set(s.root, [id])
     }
     let purged = 0
     for (const [root, ids] of byRoot) {
@@ -124,6 +129,9 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         try { store = await rt.resolveStore(root) } catch (error) { store = null }
       }
       if (!store || !state.gitExe) continue
+      // A3：格式守卫——拒写态下不删 tag（tag 删了而索引写被拒会留下失配状态；
+      // 告警由 guard 侧节流 recordError，不中断宿主）
+      if (!(await snaps.guardStoreFormat(store))) continue
       try {
         for (let i = 0; i < ids.length; i += 100) {
           await rt.runShell(S.purgeTagsScript(store, state.gitExe, ids.slice(i, i + 100).map((id) => 'snap-' + id)), { timeoutMs: 120000, stdoutMaxBytes: 4096 })
@@ -132,6 +140,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         await snaps.saveIndex(root, sessionId)
         purged += ids.length
       } catch (error) {
+        // 已告警；单个会话清理失败不阻断其余（purged 照常累计已成功的）
         rt.recordError('recall purge session failed: ' + String(error))
       }
     }
@@ -168,6 +177,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         .map((r) => r && r.header && r.header.id)
         .filter((v): v is string => Boolean(v)))
     } catch (error) {
+      // 枚举失败整体跳过（宁可不清理，论证见上方注释）
       return
     }
     for (const id of ids) {
@@ -190,9 +200,12 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     for (const [root, victims] of victimsMap) {
       let store: StoreInfo | null = state.stores.get(root) || null
       if (!store) {
+        // 现场解析失败按无 store 跳过该 root（与 sweepDeletedSessions 同款理由）
         try { store = await rt.resolveStore(root) } catch (error) { store = null }
       }
       if (!store || !state.gitExe) continue
+      // A3：格式守卫——拒写态下不删 tag（同 purgeSession 的理由）
+      if (!(await snaps.guardStoreFormat(store))) continue
       try {
         for (let i = 0; i < victims.length; i += 100) {
           await rt.runShell(S.purgeTagsScript(store, state.gitExe, victims.slice(i, i + 100).map((v) => 'snap-' + v.id)), { timeoutMs: 120000, stdoutMaxBytes: 4096 })
@@ -202,6 +215,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         dropped += victims.length
         console.error('recall enforceLimits dropped ' + victims.length + ' oldest snapshots for: ' + root + ' (max ' + config.maxSnapshotsPerWorkspace + ')')
       } catch (error) {
+        // 已告警；单 root 失败继续下一个
         rt.recordError('recall enforceLimits failed for ' + root + ': ' + String(error))
       }
     }
@@ -219,9 +233,12 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     for (const [root, victims] of victimsMap) {
       let store: StoreInfo | null = state.stores.get(root) || null
       if (!store) {
+        // 现场解析失败按无 store 跳过该 root（与 enforceLimits 同款理由）
         try { store = await rt.resolveStore(root) } catch (error) { store = null }
       }
       if (!store || !state.gitExe) continue
+      // A3：格式守卫——拒写态下不删 tag（同 purgeSession 的理由）
+      if (!(await snaps.guardStoreFormat(store))) continue
       try {
         for (let i = 0; i < victims.length; i += 100) {
           await rt.runShell(S.purgeTagsScript(store, state.gitExe, victims.slice(i, i + 100).map((v) => 'snap-' + v.id)), { timeoutMs: 120000, stdoutMaxBytes: 4096 })
@@ -231,6 +248,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         dropped += victims.length
         console.error('recall enforceRetention dropped ' + victims.length + ' expired snapshots for: ' + root + ' (retention ' + config.retentionDays + 'd)')
       } catch (error) {
+        // 已告警；单 root 失败继续下一个
         rt.recordError('recall enforceRetention failed for ' + root + ': ' + String(error))
       }
     }
@@ -265,6 +283,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
       await rt.runShell(S.gcScript(store, state.gitExe), { timeoutMs: GC_TIMEOUT_MS, stdoutMaxBytes: 4096 })
       ok = true
     } catch (error) {
+      // 已告警；失败不推进完整周期、按退避回拨（理由见函数头注释）
       rt.recordError('recall maintenance failed: ' + String(error))
     }
     state.gcLastAt.set(store.git, ok ? Date.now() : Date.now() - config.gcHours * 3600000 + GC_RETRY_BACKOFF_MS)
@@ -281,6 +300,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     try {
       return await deps.dumpStores()
     } catch (error) {
+      // 已告警；枚举失败按空 Map 继续（维护 best-effort，见函数头注释）
       rt.recordError('recall disk store dump failed: ' + String(error))
       return new Map()
     }
@@ -344,6 +364,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         console.error('recall reaped empty store:', dir)
         removed++
       } catch (error) {
+        // 已告警；单条目录失败继续下一条（best-effort，见函数头注释）
         rt.recordError('recall reap store failed for ' + dir + ': ' + String(error))
       }
     }
@@ -361,6 +382,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     try {
       await sweepDeletedSessions()
     } catch (error) {
+      // 已告警；清扫失败不阻断后续步骤（逐个 best-effort，见函数头注释）
       rt.recordError('recall sweep failed: ' + String(error))
     }
     try {
@@ -368,12 +390,14 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
       // root 遍历内存快照，天然覆盖全部已知工作区）
       await enforceLimits()
     } catch (error) {
+      // 已告警；该步失败不阻断后续步骤（逐个 best-effort）
       rt.recordError('recall enforceLimits failed: ' + String(error))
     }
     try {
       // S2-3：按时间保留全局清理一次
       await enforceRetention()
     } catch (error) {
+      // 已告警；该步失败不阻断后续步骤（逐个 best-effort）
       rt.recordError('recall enforceRetention failed: ' + String(error))
     }
     let done = 0
@@ -383,6 +407,7 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
         done++
         state.gcLastAt.set(store.git, Date.now())
       } catch (error) {
+        // 已告警；失败按退避回拨重试窗口（与 runGc 同款），循环继续下一个 store
         rt.recordError('recall gc failed for ' + (store && store.git) + ': ' + String(error))
         state.gcLastAt.set(store.git, Date.now() - config.gcHours * 3600000 + GC_RETRY_BACKOFF_MS)
       }

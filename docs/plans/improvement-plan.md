@@ -1,6 +1,6 @@
 # dsh-recall-plugin 改进计划（总索引）
 
-> 状态：进行中 ｜ 更新：2026-09-22
+> 状态：进行中 ｜ 更新：2026-09-29
 > 本文档是计划族的导航索引与单一事实源：子计划从这里拆出并回链，任务细节一律住在子计划里，这里只维护清单、状态与全局顺序。
 > 调研背景与路线决策依据：[research-competitors.md](./research-competitors.md)（第一/二轮，2026-08-26/28）、[research-competitors-2026-09.md](./research-competitors-2026-09.md)（第四轮六维度评估，2026-09-09，增量输入 [plan-competitor-ux.md](./pending/plan-competitor-ux.md)：P1 模型随行建议新增 U7、plan 会话绑定随 U5）。
 > 发版版本号在发版时确定，计划文档内不预先指定（规范见 [../README.md](../README.md)）。
@@ -22,11 +22,12 @@
 | [竞品评估优化计划：交互补强与可靠性钉子](./pending/plan-competitor-ux.md) | 第三轮竞品改进（2026-09-04 三竞品评估驱动）：草稿保护、仅回退对话模式、crash-safety 测试、settings-cards 拆分、preview TTL、还原 journal、版本翻页器调研 | 待实施（S1 settings-cards 拆分已于 2026-09-04 随 settings-ui 一期完成，见该文档实施记录；U3/U2 建议先行，其余按需） |
 | [设置页 UI 优化：视觉层次与可访问性](./pending/plan-settings-ui.md) | 2026-09-04 八维 UI 审计驱动：语义色修复、可访问性补强、交互反馈、布局 Grid 化、表单分组、健康/错误视觉升级、排版/响应式/动效打磨（V1–V9） | 已实施（2026-09-04 全量落地并独立提交；自动化冒烟已执行——V1–V9 通过、双主题与功能回归实弹，剩真实窄视口/真实键盘/读屏 3 项人工复核，见该文档冒烟路径与 records 第八节） |
 | [Host 自建 seed fork：撤回排队残留源头消除](./pending/plan-host-seed-fork.md) | 撤回对话半改走 Host 侧 `ctx.agents.create` 自建截断 seed（残留不进 seed）；含 H0 清理链加固 + 客户端匹配断点（已实施：按 item id 直删）、H1 版本矩阵、H2 seed 构造、H3 Host 端点、H4 Client 双轨、H5 沙箱与门禁 | 实施中（H0 已实施并实弹验收：子会话日志 `removed=1`、重复删 `queue-item-not-found`、零告警；P2 矩阵与 P3 沙箱待做） |
-| [预热 IIFE 未捕获拒绝加固](./pending/plan-warmup-unhandled-rejection.md) | apply 末尾的启动预热 IIFE 是 fire-and-forget，fiber 停用后访问服务会冒未捕获拒绝（`cannot get required service … in inactive context`）——既有行为、非 0.1.7 引入，verify-host 已用「卸载前留一拍」规避 | 待实施（0.1.7 适配终审 P1 拆出，小计划） |
+| [预热 IIFE 未捕获拒绝加固](./completed/plan-warmup-unhandled-rejection.md) | apply 末尾的启动预热 IIFE 是 fire-and-forget，fiber 停用后访问服务会冒未捕获拒绝（`cannot get required service … in inactive context`）——既有行为、非 0.1.7 引入，verify-host 已用「卸载前留一拍」规避 | 已实施（2026-09-30：随质量加固批次实弹复现 `fatal load failure` 后当场修复——IIFE 尾部接 catch + 诊断；差异与门禁见该文档实施记录） |
 | [仅撤回对话模式（execute scope）](./completed/plan-session-only.md) | 撤回确认面板模式二选一：回退文件与对话（默认，现状）／仅撤回对话（零 git 写操作，只 fork 回退对话）；由 plan-competitor-ux U2 拆出立项 | 已实施（2026-09-18：门禁全绿 + 实弹 5/5 通过，见该文档实施记录与 smoke-checklist-records 同日批次） |
 | [win32 shell 方言冲突修复（issue #15）](./completed/plan-shell-dialect-win32.md) | 宿主把 `ctx.shell` 配成 bash 时 pwsh 模板被 bash 执行致快照/撤回全死；方言行为探针 + win32 直连 powershell.exe 执行通道（保留 stdin/截断/超时/失败清扫四语义） | 已实施（2026-09-16 落地并随 2.3.22 发版：361 例单测 + 双路径活体冒烟，见该文档实施记录） |
 | [构建产物工作区根的快照护栏与残骸回收（issue #18）](./completed/plan-build-root-guard.md) | workspace root 自身是构建产物目录（`target/debug`、`dist`）时排除表失效致 GB 级残留，且 refs 空 + index 残留让 gc 回收不了；M1 脚本层清陈旧 index 后 gc、M2 构建产物 root 不再建快照 + 可见性、M3 磁盘枚举覆盖 + 空仓整目录回收 | 已实施（2026-09-22：M1+M2+M3 全部落地，M1 双平台实弹 6/6、M3 实弹 4/4、391 例单测与门禁全绿；DSH 会话级实弹留待人工冒烟） |
 | [dsh 0.1.7-alpha.1 适配](./completed/plan-dsh-0.1.7-adapt.md) | 上游首个破坏性版本的消费接缝迁移：M1 `ShellExecutor.run` → `execute()` + `result()`（双分支）、M2 settings 三分支接线 → `SettingsForms` + profile entry id + schema `.volatile()`（双分支）、M3 探针/装配桩/台账、M4 兼容声明与文档同步、M5 双平台实弹；中/低相关条目按「处置表」逐条记账（多为零代码，含事件集 54→59 同步与 6 个对照点并入 M5） | 已完成（2026-09-23：M1–M4 门禁全绿 + M5 双平台实弹全过——WSL 硬指标零 `shell.run`、npm 模式持久化、0.1.6 降级回归实锤并修复一处旧面注册回归（`c3cc8a7`）、fork 边界与对照点逐项过；M5-6② 附件复验因环境无图片模型受限记账） |
+| [质量加固专项（A1–A8）](./completed/plan-quality-hardening.md) | 2026-09-29 同类插件专项六维度对比驱动：client UI 测试体系、intent journal 崩溃恢复（吸收 competitor-ux U4）、磁盘格式版本守卫、i18n 双语层、client logger、`noUncheckedIndexedAccess`、format.md（提前 P2-2 FORMAT 半）、catch 理由注释纪律 | 已实施并验收（2026-09-30：A1–A8 全落地过门禁 + 活体冒烟第九节 R-1〜R-6 全过；实弹掘出并修复 4 个真实缺陷（含 win32 格式守卫永久锁死），见该文档「活体冒烟」节与 smoke-checklist-records 同日批次） |
 
 ## 全局实施顺序
 

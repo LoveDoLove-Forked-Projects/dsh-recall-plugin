@@ -11,6 +11,7 @@
 
 import type { ReactApi, UtilApi, TreeWorkspace, TreeSession } from './util.js'
 import { useAutoDismissMessage } from './util.js'
+import { hasTranslation } from './locales/index.js'
 import type { ClientSessionsService, ClientUiWorkspaceService, ClientWorkspacesService } from '../types/client-contract.js'
 import type { ManageListItem, ManageResponse, ManageListOk, ManageTitlesOk, ManageMessagesOk, ManageUsageOk, ManageLineageOk, StatusErrorItem, StatusResponse } from '../types/api.js'
 import type { LineageEntry } from '../types/payloads.js'
@@ -67,7 +68,7 @@ export function groupByLineage(ids: Array<string | null | undefined>, lineage: L
 }
 
 export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService, workspacesSvc?: ClientWorkspacesService, uiWorkspaceSvc?: ClientUiWorkspaceService): { ManageCard: () => import('react').ReactNode } {
-  const { api, clockText, sizeText, buildTree } = util
+  const { api, clockText, sizeText, buildTree, t } = util
 
   // 树行内的删除按钮：垃圾桶图标 + 稳定命中区，紧贴会话/快照名渲染（不再排到
   // 行尾——文本 chip 逐行右对齐成一列，用户实测反馈容易点错行）。颜色随主题：
@@ -136,7 +137,7 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           )))
         }
         setTitlesPending(false)
-      }).catch(() => setTitlesPending(false))
+      }).catch(() => setTitlesPending(false)) // 标题补齐失败静默（叶子留白，属渐进增强）
     }
 
     // 消息文本补齐：只请求 live 拿不到文本的快照；同一会话多条消息在 Host 端
@@ -154,9 +155,11 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             it.id && Object.prototype.hasOwnProperty.call(map, it.id) ? Object.assign({}, it, { messageText: map[it.id] }) : it
           )))
         }
-      }).catch(() => {})
+      }).catch(() => {}) // 消息文本补齐失败静默（列表已渲染，属渐进增强）
     }
 
+    // 手动刷新：不能把 refresh 直接交给 onClick——事件对象会被当成 overLimit
+    // 透传进请求载荷（JSON.stringify 事件 -> 循环引用抛错，按钮整只失效）
     function refresh(overLimit?: number): void {
       const useLimit = overLimit || limit
       api<ManageListOk>('manage', { op: 'list', limit: useLimit }).then((res) => {
@@ -176,13 +179,13 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
                 fetchTitles(res2.items || [])
                 fetchMessages(res2.items || [])
               }
-            }).catch(() => {})
+            }).catch(() => {}) // 二段刷新失败静默（旧列表仍可用；不循环重试，等手动刷新）
           }
         }
         // F1：加载 fork lineage（版本家族），列表成功后异步补齐，不阻塞首屏
         api<ManageLineageOk>('manage', { op: 'lineage' }).then((res) => {
           if (res && res.ok && Array.isArray(res.lineage)) setLineage(res.lineage)
-        }).catch(() => {})
+        }).catch(() => {}) // lineage 补齐失败静默（树退化为无版本家族标记）
         // 列表返回后再补 usage/status：首次冷启动时磁盘占用和错误日志都各要
         // 一条 shell，和 list 并发会抢资源拖慢首屏；延后到列表渲染后。
         api<ManageUsageOk>('manage', { op: 'usage' }).then((res) => {
@@ -190,10 +193,10 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             setUsage(res.bytes || 0)
             setHealth({ gitAvailable: res.gitAvailable !== false, homeStores: res.homeStores || 0, fallbackStores: res.fallbackStores || 0 })
           }
-        }).catch(() => {})
+        }).catch(() => {}) // usage 补齐失败静默（占用留空，不打断列表）
         api<StatusResponse>('status', {}).then((res) => {
           if (res && res.ok) setErrors(res.errors || [])
-        }).catch(() => {})
+        }).catch(() => {}) // status 补齐失败静默（错误列表留空，下次刷新补）
       }).catch(() => {
         // list 失败时仍尝试补 usage/status，避免整卡全空
         api<ManageUsageOk>('manage', { op: 'usage' }).then((res) => {
@@ -201,10 +204,10 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             setUsage(res.bytes || 0)
             setHealth({ gitAvailable: res.gitAvailable !== false, homeStores: res.homeStores || 0, fallbackStores: res.fallbackStores || 0 })
           }
-        }).catch(() => {})
+        }).catch(() => {}) // 降级分支同上：补齐失败静默，不叠加错误态
         api<StatusResponse>('status', {}).then((res) => {
           if (res && res.ok) setErrors(res.errors || [])
-        }).catch(() => {})
+        }).catch(() => {}) // 降级分支同上：错误列表留空即可
       })
     }
 
@@ -212,21 +215,23 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
 
     function clearErrors(): void {
       setErrors([])
-      api<unknown>('status', { op: 'clear' }).catch(() => {})
+      api<unknown>('status', { op: 'clear' }).catch(() => {}) // 清除失败静默：本地已清空，刷新后回显仍可再清
     }
 
-    function run(op: string, extra: Record<string, unknown> | null | undefined, doneText: string): void {
+    // doneKey 是词表键（不是文案）：调用点只报「哪一种操作完成了」，文案随
+    // 当前语言在 run 内取词——模块里不再散落半句中文
+    function run(op: string, extra: Record<string, unknown> | null | undefined, doneKey: string): void {
       if (state.busy) return
-      setState({ busy: true, message: '执行中…', error: false })
+      setState({ busy: true, message: t('manage.busy'), error: false })
       api<ManageResponse>('manage', Object.assign({ op }, extra || {})).then((res) => {
         if (res && res.ok) {
           const deleted = (res as { deleted?: unknown }).deleted
-          setState({ busy: false, message: typeof deleted === 'number' ? '已删除 ' + deleted + ' 条快照' : doneText, error: false })
+          setState({ busy: false, message: typeof deleted === 'number' ? t('manage.deletedCount', { deleted }) : t(doneKey), error: false })
           refresh()
         } else {
-          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || '操作失败', error: true })
+          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || t('common.opFailed'), error: true })
         }
-      }).catch((e) => setState({ busy: false, message: String(e), error: true }))
+      }).catch((e) => setState({ busy: false, message: String(e), error: true })) // 操作异常落错误态（与 ok=false 同显式面）
     }
 
     const [expanded, setExpanded] = React.useState(() => new Set())
@@ -237,18 +242,18 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
     function ConfirmRow(props: { text: string; onConfirm: () => void; onCancel: () => void }): import('react').ReactNode {
       return React.createElement('div', { className: 'dsh-recall-tree-confirm' },
         props.text,
-        React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip dsh-recall-ex-chip-danger', onClick: props.onConfirm }, '确认'),
-        React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: props.onCancel }, '取消')
+        React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip dsh-recall-ex-chip-danger', onClick: props.onConfirm }, t('common.confirm')),
+        React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: props.onCancel }, t('common.cancel'))
       )
     }
 
     function renderDeleteAllConfirm(): import('react').ReactNode {
       if (!confirming || confirming.kind !== 'all') return null
       return React.createElement(ConfirmRow, {
-        text: '确认删除所有工作区的全部快照？此操作不可恢复。',
+        text: t('manage.confirm.all'),
         onConfirm: () => {
           setConfirming(null)
-          run('deleteAll', {}, '已清空全部快照')
+          run('deleteAll', {}, 'manage.done.deleteAll')
         },
         onCancel: () => setConfirming(null)
       })
@@ -272,7 +277,7 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           String(it.id || '').toLowerCase().indexOf(q) >= 0
         )
       : items
-    const tree = buildTree(filteredItems)
+    const tree = buildTree(filteredItems, t)
     // F1：版本家族映射 + 可切换会话（在官方列表且未归档的）。versionMap
     // 用全部快照会话 id 与 lineage 推导；sessions.list 快照同步读取——「切换」
     // 只在会话可导航时渲染，判据两半：会话在官方列表里，且不在归档集合里。
@@ -286,26 +291,27 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         const snapshot = sessionsSvc.list.getSnapshot()
         listById = (snapshot && snapshot.byId) || null
       }
-    } catch (e) { listById = null }
+    } catch (e) { listById = null } // 读取失败按 null：下方 switchable 判据保守不渲染「切换」
     let archivedIds: Set<string> | null = null
     try {
       const snapshot = workspacesSvc && workspacesSvc.list && typeof workspacesSvc.list.getSnapshot === 'function'
         ? workspacesSvc.list.getSnapshot()
         : null
       archivedIds = new Set((snapshot && snapshot.archivedSessionIds) || [])
-    } catch (e) { archivedIds = null }
+    } catch (e) { archivedIds = null } // 读取失败按 null：归档检查跳过（退回「在册即可切换」的旧语义）
 
-    function confirmDelete(kind: string, key: string, extra: Record<string, unknown>, text: string): void {
-      setConfirming({ kind, key, extra, text })
+    // text 传词表键（渲染时才取词）：确认行的说明文案同样随语言
+    function confirmDelete(kind: string, key: string, extra: Record<string, unknown>, textKey: string): void {
+      setConfirming({ kind, key, extra, text: textKey })
     }
-    function renderConfirm(kind: string, key: string, extra: Record<string, unknown>, text: string): import('react').ReactNode {
+    function renderConfirm(kind: string, key: string, extra: Record<string, unknown>, textKey: string): import('react').ReactNode {
       if (!confirming || confirming.kind !== kind || confirming.key !== key) return null
       return React.createElement(ConfirmRow, {
-        text,
+        text: t(textKey),
         onConfirm: () => {
           const c = confirming
           setConfirming(null)
-          run('delete', c.extra, '已删除')
+          run('delete', c.extra, 'manage.done.delete')
         },
         onCancel: () => setConfirming(null)
       })
@@ -326,19 +332,19 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             // 删除紧贴本条消息摘要（而非行尾）：按行扫读时动作落在「看的那一行」，
             // 不必横跳到右侧同列按钮再回读行号
             React.createElement(DeleteButton, {
-              title: '删除该快照（tag 与索引条目）',
-              onClick: () => confirmDelete('snapshot', key, { messageId: it.id, root: it.root || null }, '确认删除该快照？此操作不可恢复。')
+              title: t('tree.delete.snapshot.title'),
+              onClick: () => confirmDelete('snapshot', key, { messageId: it.id, root: it.root || null }, 'tree.delete.snapshot.confirm')
             })
           )
         ),
-        renderConfirm('snapshot', key, { messageId: it.id, root: it.root || null }, '确认删除该快照？此操作不可恢复。')
+        renderConfirm('snapshot', key, { messageId: it.id, root: it.root || null }, 'tree.delete.snapshot.confirm')
       )
     }
     // 会话节点：折叠按钮 + 标题 + 版本/快照数 + 删除图标（贴行内），切换 chip 居尾；子节点为叶子。
     function renderSession(s: TreeSession): import('react').ReactNode {
       const key = 'session-' + (s.root || '') + '-' + s.sessionId
       const open = expanded.has(key)
-      const label = s.title || (titlesPending && s.sessionId ? '…' : '（已删除会话）')
+      const label = s.title || (titlesPending && s.sessionId ? '…' : t('tree.deletedSession'))
       const version = s.sessionId ? versionMap.get(String(s.sessionId)) : null
       const switchable = Boolean(s.sessionId && listById && listById[s.sessionId] && !(archivedIds && archivedIds.has(String(s.sessionId))))
       return React.createElement('div', { className: 'dsh-recall-tree-node', key: key },
@@ -352,16 +358,16 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             type: 'button',
             className: 'dsh-recall-tree-toggle',
             'aria-expanded': open,
-            'aria-label': (open ? '收起' : '展开') + '：' + label,
+            'aria-label': t(open ? 'tree.collapse' : 'tree.expand', { label }),
             onClick: (e: import('react').MouseEvent) => { e.stopPropagation(); toggle(key) }
           }, chevronIcon(open)),
           React.createElement('span', { className: 'dsh-recall-tree-label', title: s.sessionId || '' },
             React.createElement('span', { className: 'dsh-recall-tree-title' }, label),
-            version ? React.createElement('span', { className: 'dsh-recall-tree-meta', title: '版本家族：' + version.family.join(' → ') }, 'v' + version.index + '/' + version.family.length) : null,
-            React.createElement('span', { className: 'dsh-recall-tree-meta' }, s.items.length + ' 条'),
+            version ? React.createElement('span', { className: 'dsh-recall-tree-meta', title: t('tree.family.title', { chain: version.family.join(' → ') }) }, 'v' + version.index + '/' + version.family.length) : null,
+            React.createElement('span', { className: 'dsh-recall-tree-meta' }, t('tree.snapCount', { n: s.items.length })),
             s.sessionId ? React.createElement(DeleteButton, {
-              title: '删除该会话全部快照',
-              onClick: () => confirmDelete('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, '确认删除该会话全部快照？此操作不可恢复。')
+              title: t('tree.delete.session.title'),
+              onClick: () => confirmDelete('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, 'tree.delete.session.confirm')
             }) : null
           ),
           // 「切换」留在行尾单占右侧：它是导航动作（离开当前视图），与行内
@@ -369,17 +375,17 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           switchable ? React.createElement('button', {
             type: 'button',
             className: 'dsh-recall-ex-chip',
-            title: '切换到该版本会话',
+            title: t('tree.switch.title'),
             onClick: (ev: import('react').MouseEvent) => { ev.stopPropagation(); try {
               // 打开会话：0.1.6-alpha.2 起 ISessions 移除 open（导航归视图所有
               // 者），优先 ui-workspace 的 openSession；旧版回退 sessions.open
               if (uiWorkspaceSvc && typeof uiWorkspaceSvc.openSession === 'function') uiWorkspaceSvc.openSession(s.sessionId as string)
               else if (typeof sessionsSvc.open === 'function') sessionsSvc.open(s.sessionId as string)
             } catch (e) { /* 会话已不可切换则静默 */ } }
-          }, '切换') : null
+          }, t('tree.switch')) : null
         ),
         open ? React.createElement('div', { className: 'dsh-recall-tree-children' }, ...s.items.map(renderLeaf)) : null,
-        s.sessionId ? renderConfirm('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, '确认删除该会话全部快照？此操作不可恢复。') : null
+        s.sessionId ? renderConfirm('session', key, { scope: 'session', sessionId: s.sessionId, root: s.root || null }, 'tree.delete.session.confirm') : null
       )
     }
     // 工作区节点：折叠按钮 + 文件夹名 + 会话数/快照数 + 删除图标（贴行内）。
@@ -396,20 +402,20 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
             type: 'button',
             className: 'dsh-recall-tree-toggle',
             'aria-expanded': open,
-            'aria-label': (open ? '收起' : '展开') + '：' + ws.name,
+            'aria-label': t(open ? 'tree.collapse' : 'tree.expand', { label: ws.name }),
             onClick: (e: import('react').MouseEvent) => { e.stopPropagation(); toggle(key) }
           }, chevronIcon(open)),
           React.createElement('span', { className: 'dsh-recall-tree-label', title: ws.root || '' },
             React.createElement('span', { className: 'dsh-recall-tree-name' }, ws.name),
-            React.createElement('span', { className: 'dsh-recall-tree-meta' }, sessionCount + ' 会话 / ' + snapCount + ' 快照'),
+            React.createElement('span', { className: 'dsh-recall-tree-meta' }, t('tree.wsCount', { n: sessionCount, m: snapCount })),
             ws.root ? React.createElement(DeleteButton, {
-              title: '删除该工作区全部快照',
-              onClick: () => confirmDelete('workspace', key, { scope: 'workspace', root: ws.root }, '确认删除该工作区全部快照？此操作不可恢复。')
+              title: t('tree.delete.workspace.title'),
+              onClick: () => confirmDelete('workspace', key, { scope: 'workspace', root: ws.root }, 'tree.delete.workspace.confirm')
             }) : null
           )
         ),
         open ? React.createElement('div', { className: 'dsh-recall-tree-children' }, ...ws.sessions.map(renderSession)) : null,
-        ws.root ? renderConfirm('workspace', key, { scope: 'workspace', root: ws.root }, '确认删除该工作区全部快照？此操作不可恢复。') : null
+        ws.root ? renderConfirm('workspace', key, { scope: 'workspace', root: ws.root }, 'tree.delete.workspace.confirm') : null
       )
     }
     const treeNodes = tree.map(renderWorkspace)
@@ -417,8 +423,21 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
     // 计数用 Host 返回的全量 total 而非已加载条数
     const loaded = items ? items.length : null
     const countText = loaded === null
-      ? '共 … 条快照'
-      : '共 ' + total + ' 条快照' + (limit < total ? '（当前显示最新 ' + loaded + ' 条）' : '')
+      ? t('manage.countLoading')
+      : t('manage.countLoaded', { total }) + (limit < total ? t('manage.countShown', { shown: loaded }) : '')
+    // 最近错误区：payload 带 kind 时按 kind 取本地词（hint 只是 Host 侧的
+    // 中文回落，dict 命中就不必再展示）；未分类错误（kind 缺失/'unknown'）与
+    // 未命中词表的 kind 一律回落 host 的 message/hint 原文，保住细节。
+    // 原始 message 始终挂在 title 上——本地化换的是「给人看的那行」，
+    // 排障要的全文仍一键可查
+    function errorLine(e: StatusErrorItem, key: number): import('react').ReactNode {
+      const kindKey = e.kind ? 'errorKind.' + e.kind : ''
+      const localized = kindKey !== '' && hasTranslation(kindKey)
+      const base = localized
+        ? t(kindKey) + (typeof e.count === 'number' && e.count > 1 ? t('manage.errors.dup', { n: e.count }) : '')
+        : String(e.hint || e.message || '')
+      return React.createElement('div', { className: 'dsh-recall-ex-note', key, title: e.message || '' }, clockText(e.time) + '  ' + base)
+    }
 
     function loadMore(): void {
       const next = Math.min(Math.max(total, limit), 2000)
@@ -433,8 +452,8 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
       // 折叠头，信息层级 = 折叠头（标题）→ 计数/健康（摘要）→ 搜索 → 树。
       React.createElement('div', { className: 'dsh-recall-ex-note' },
         usage === null
-          ? countText + '。'
-          : countText + '，全部工作区快照存储占用 ' + sizeText(usage) + '。'
+          ? countText + t('manage.countEnd')
+          : countText + t('manage.usageSuffix', { size: sizeText(usage) })
       ),
       // V6 健康行徽章化：git 状态用彩色 pill（成功/失败，官方状态行配对），
       // 从普通 note 提升为卡片顶部横幅（渲染在搜索框与树之前）；存储计数
@@ -442,9 +461,9 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
       health ? React.createElement('div', { className: 'dsh-recall-ex-note', key: 'health' },
         React.createElement('span', {
           className: 'dsh-recall-health-pill ' + (health.gitAvailable ? 'dsh-recall-health-pill-ok' : 'dsh-recall-health-pill-bad'),
-          title: '快照引擎依赖 git'
-        }, health.gitAvailable ? 'git 可用' : 'git 不可用（快照引擎依赖 git）'),
-        ' · 快照存储：home ' + health.homeStores + ' 个工作区' + (health.fallbackStores ? '，降级 ' + health.fallbackStores + ' 个' : '')
+          title: t('manage.health.gitTitle')
+        }, t(health.gitAvailable ? 'manage.health.gitOk' : 'manage.health.gitBad')),
+        t('manage.health.stores', { n: health.homeStores }) + (health.fallbackStores ? t('manage.health.storesFallback', { n: health.fallbackStores }) : '')
       ) : null,
       // 搜索行：图标绝对定位在框内左侧（pointer-events:none 不挡点击），输入框
       // 靠 padding-left 让出图标位；高度由 CSS 的 .dsh-recall-search 覆写加高 20%
@@ -460,8 +479,8 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         ),
         React.createElement('input', {
           className: 'dsh-recall-ex-input',
-          placeholder: '搜索工作区 / 会话标题 / 消息内容 / ID',
-          'aria-label': '搜索快照',
+          placeholder: t('manage.search.placeholder'),
+          'aria-label': t('manage.search.aria'),
           value: query,
           spellCheck: false,
           onChange: (e) => setQuery(e.target.value),
@@ -476,40 +495,40 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
         : null,
       treeNodes.length > 0 ? React.createElement('div', { className: 'dsh-recall-tree' }, ...treeNodes) : null,
       items && items.length === 0 && !q
-        ? React.createElement('div', { className: 'dsh-recall-empty', key: 'empty' }, '在任意工作区发送一条消息后，这里会出现快照。')
+        ? React.createElement('div', { className: 'dsh-recall-empty', key: 'empty' }, t('manage.empty'))
         : null,
       q && filteredItems && filteredItems.length === 0
-        ? React.createElement('div', { className: 'dsh-recall-empty', key: 'no-match' }, '无匹配快照')
+        ? React.createElement('div', { className: 'dsh-recall-empty', key: 'no-match' }, t('manage.emptyFiltered'))
         : null,
       renderDeleteAllConfirm(),
       // V6：错误区从卡片最底上移到操作区上方（fail-loud 可见性）；标题
       // error 色带条数徽章，时间戳格式维持原样
       errors && errors.length > 0
         ? React.createElement('div', { key: 'errors' },
-            React.createElement('div', { className: 'dsh-recall-errors-title' }, '最近错误 (' + errors.length + ')'),
-            (showAllErrors ? errors : errors.slice(0, 5)).map((e, i) => React.createElement('div', { key: i, className: 'dsh-recall-ex-note' }, clockText(e.time) + '  ' + e.message)),
+            React.createElement('div', { className: 'dsh-recall-errors-title' }, t('manage.errors.title', { n: errors.length })),
+            (showAllErrors ? errors : errors.slice(0, 5)).map(errorLine),
             React.createElement('div', { className: 'dsh-recall-panel-actions' },
-              errors.length > 5 ? React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: () => setShowAllErrors((v) => !v) }, showAllErrors ? '收起' : '展开全部 (' + errors.length + ')') : null,
-              React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: clearErrors }, '清空')
+              errors.length > 5 ? React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: () => setShowAllErrors((v) => !v) }, showAllErrors ? t('manage.errors.collapse') : t('manage.errors.expand', { n: errors.length })) : null,
+              React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: clearErrors }, t('manage.errors.clear'))
             )
           )
         : null,
       React.createElement('div', { className: 'dsh-recall-panel-actions' },
-        state.message ? React.createElement('span', { role: 'status', 'aria-live': 'polite', className: 'dsh-recall-ex-status' + (state.error ? ' dsh-recall-ex-status-error' : ' dsh-recall-ex-status-success') }, (state.error ? '错误：' : '') + state.message) : null,
+        state.message ? React.createElement('span', { role: 'status', 'aria-live': 'polite', className: 'dsh-recall-ex-status' + (state.error ? ' dsh-recall-ex-status-error' : ' dsh-recall-ex-status-success') }, (state.error ? t('common.errorPrefix') : '') + state.message) : null,
         limit < total ? React.createElement('button', {
           type: 'button',
           className: 'dsh-recall-btn',
           disabled: state.busy,
           onClick: loadMore
-        }, '加载更多') : null,
-        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', disabled: state.busy, onClick: refresh }, '刷新'),
+        }, t('manage.loadMore')) : null,
+        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', disabled: state.busy, onClick: () => refresh() }, t('manage.refresh')),
         React.createElement('button', {
           type: 'button',
           className: 'dsh-recall-btn',
           disabled: state.busy,
-          title: '立即对全部工作区执行一次 git gc（压缩对象库释放空间）',
-          onClick: () => run('gc', {}, 'gc 完成')
-        }, '立即 gc'),
+          title: t('manage.gc.title'),
+          onClick: () => run('gc', {}, 'manage.done.gc')
+        }, t('manage.gc')),
         // V5：全部删除固定为操作区最后一个按钮（排在立即 gc 之后）——即使
         // 「加载更多」出现/消失也不漂移；danger 与普通按钮间在 panel-actions
         // 统一 gap:8px 之上再加 btn-gap 的 8px 物理间隔，危险按钮与常规按钮
@@ -518,9 +537,9 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           type: 'button',
           className: 'dsh-recall-btn dsh-recall-btn-danger dsh-recall-btn-gap',
           disabled: state.busy,
-          title: '删除全部工作区的所有快照；会直接核对并删除 git tag（即使列表为空也可清理残留）',
+          title: t('manage.deleteAll.title'),
           onClick: () => setConfirming({ kind: 'all' })
-        }, '全部删除')
+        }, t('manage.deleteAll'))
       )
     )
   }

@@ -3,10 +3,14 @@
  *
  * 纯函数（clockText/sizeText/bytesToMb/buildTree）模块级导出，供单测直接
  * import 与工厂复用；api/toast/ensureInit 有闭包状态（每会话 init 缓存、
- * 提示节流），由 buildUtil() 工厂生产，避免模块级可变状态（HMR 假设）。
+ * 提示节流、当前语言），由 buildUtil() 工厂生产，避免模块级可变状态（HMR
+ * 假设）。文案一律经 locales 词典层取词（A4）：纯函数不收词表参数时按 zh
+ * 渲染，组件侧统一吃 util.t。
  */
 
 import type { ManageListItem } from '../types/api.js'
+import { hasTranslation, resolveLocale, translate, zhTranslate } from './locales/index.js'
+import type { DictParams, Locale, Translate } from './locales/index.js'
 
 // React 以参数逐层注入（同形态复刻的依赖注入形态）：参数类型即 React 全量
 // 命名空间类型（@types/react 是唯一用途，import type 运行时零依赖）
@@ -38,6 +42,7 @@ export function clockText(ms: unknown): string {
     const mm = String(d.getMinutes()).padStart(2, '0')
     return sameDay ? hh + ':' + mm : (d.getMonth() + 1) + '/' + d.getDate() + ' ' + hh + ':' + mm
   } catch (e) {
+    // 防御性兜底：脏时间戳/宿主 Date 异常都回落空串（见上方注释）
     return ''
   }
 }
@@ -62,15 +67,22 @@ export function bytesToMb(bytes: unknown): string {
 // 把扁平列表组装成树（工作区 → 会话 → 快照三级）。同一快照只属于一个
 // 工作区/会话，root 或 sessionId 缺失时归入「未知」节点，避免行凭空消失。
 // 构建期会话以 Map 暂存（按键快速归组），收尾统一转数组供渲染。
-export function buildTree(list: ManageListItem[] | null | undefined): TreeWorkspace[] {
+// t 可省略（缺省 zh 词表）：单测与「没有 util 实例」的调用点不因缺词表而崩。
+export function buildTree(list: ManageListItem[] | null | undefined, t: Translate = zhTranslate): TreeWorkspace[] {
   const workspaces = new Map<string, { root: string | null; name: string; sessions: Map<string, TreeSession> }>()
   for (const it of list || []) {
     const rootKey = it.root || 'unknown-root'
-    if (!workspaces.has(rootKey)) workspaces.set(rootKey, { root: it.root || null, name: it.workspace || '未知工作区', sessions: new Map() })
-    const ws = workspaces.get(rootKey)!
+    // get-or-create 守卫（A6）：一次取值建/取同用，替代 `get(...)!` 断言
+    let ws = workspaces.get(rootKey)
+    if (!ws) {
+      ws = { root: it.root || null, name: it.workspace || t('tree.unknownWorkspace'), sessions: new Map() }
+      workspaces.set(rootKey, ws)
+    }
     const sidKey = it.sessionId || 'unknown-session'
     if (!ws.sessions.has(sidKey)) ws.sessions.set(sidKey, { root: ws.root, sessionId: it.sessionId || null, title: it.sessionTitle || null, items: [] })
-    ws.sessions.get(sidKey)!.items.push(it)
+    // get-or-create 守卫（A6）：替代 `get(...)!` 断言
+    const session = ws.sessions.get(sidKey)
+    if (session) session.items.push(it)
   }
   const wsList: TreeWorkspace[] = Array.from(workspaces.values()).map((ws) => ({ root: ws.root, name: ws.name, sessions: Array.from(ws.sessions.values()) }))
   wsList.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
@@ -100,6 +112,7 @@ export function recallApiUrl(name: string, base?: string): string {
     if (!baseUrl.pathname.endsWith('/')) baseUrl.pathname += '/'
     return new URL('api/recall/' + name, baseUrl).href
   } catch (e) {
+    // 解析失败回落原根绝对路径（见上方注释：保持旧行为不倒退）
     return '/api/recall/' + name
   }
 }
@@ -145,11 +158,26 @@ export interface UtilApi {
   writeClipboard(text: string): Promise<boolean>
   sizeText(bytes: unknown): string
   bytesToMb(bytes: unknown): string
-  buildTree(list: ManageListItem[] | null | undefined): TreeWorkspace[]
+  // t 可选：缺省 zh 词表（A4），组件侧统一传 util.t 拿到当前语言
+  buildTree(list: ManageListItem[] | null | undefined, t?: Translate): TreeWorkspace[]
+  // A4：词表取词与语言切换（locale 偏好由 Host config 下发，见 ensureInit）
+  t: Translate
+  setLocalePref(pref: unknown): void
   pluginConfig: { refillDraft: boolean; archiveOriginal: boolean }
 }
 
 export function buildUtil(): UtilApi {
+  // 当前语言：初始按 auto 解析（navigator.language），随后由 init 响应与
+  // 设置页 config-get 覆写——同一页面内改语言只影响设置页（保存后重渲染），
+  // 聊天半的会话文案在下一次 init（页面重载）后跟进（v1 明示限制，见 README）
+  let locale: Locale = resolveLocale('auto')
+  function t(key: string, params?: DictParams): string {
+    return translate(locale, key, params)
+  }
+  function setLocalePref(pref: unknown): void {
+    locale = resolveLocale(pref)
+  }
+
   // Host HTTP API（动态插件的 harness RPC 在此换成 fetch 调用）；路径经
   // recallApiUrl 按文档基址解析，子路径部署（官方 rc.1 支持）才可达
   function api<T = unknown>(name: string, args?: unknown): Promise<T> {
@@ -160,19 +188,15 @@ export function buildUtil(): UtilApi {
     }).then((r) => r.json())
   }
 
-  // 机器码 → 人文案映射（H3）：host 端点 code 是线上契约（machine），
-  // client 这里做展示层文案（human），未命中回退 host 的 message 兜底。
-  const CODE_TEXT: Record<string, string> = {
-    STALE: '预览后项目文件发生了变化，请重新预览确认',
-    AGENT_BUSY: 'Agent 正在运行中，请先停止后再撤回',
-    NO_SNAPSHOT: '该消息没有可用的项目快照',
-    NO_STORE: '快照存储不可用',
-    ROLLBACK_FAILED: '回退失败',
-  }
+  // 机器码 → 人文案映射（H3/A4）：host 端点 code 仍是线上契约（machine），
+  // 展示层文案改由 locales 词典的 `err.<code>` 承载（双语）；词典只收 host
+  // 侧文案静态的码，动态细节码（ROLLBACK_FAILED 的救援结果等）不设条目——
+  // hasTranslation 未命中即回落 host message，宁中英混排也不吞排障细节。
   function messageFor(res: unknown, fallback: string): string {
     if (!res) return fallback
     const code = (res as { code?: unknown }).code
-    if (code && CODE_TEXT[String(code)]) return CODE_TEXT[String(code)]
+    const key = code ? 'err.' + String(code) : ''
+    if (key && hasTranslation(key)) return t(key)
     // message/error 均为 unknown（端点返回形状宽松），取首个 truthy 并 String 化
     const m = (res as { message?: unknown }).message
     const e = (res as { error?: unknown }).error
@@ -190,7 +214,7 @@ export function buildUtil(): UtilApi {
       el.className = 'dsh-recall-toast'
       const tag = document.createElement('span')
       tag.className = 'dsh-recall-toast-tag'
-      tag.textContent = '撤回插件'
+      tag.textContent = t('toast.tag')
       const body = document.createElement('span')
       body.textContent = text
       el.appendChild(tag)
@@ -242,23 +266,30 @@ export function buildUtil(): UtilApi {
     if (cached) return cached
     const done = api<import('../types/api.js').InitResponse>('init', { sessionId }).then((res) => {
       if (res && res.config && typeof res.config === 'object') {
-        const cfg = res.config as { refillDraft?: unknown; archiveOriginal?: unknown }
+        const cfg = res.config as { refillDraft?: unknown; archiveOriginal?: unknown; locale?: unknown }
         if (typeof cfg.refillDraft === 'boolean') pluginConfig.refillDraft = cfg.refillDraft
         if (typeof cfg.archiveOriginal === 'boolean') pluginConfig.archiveOriginal = cfg.archiveOriginal
+        // A4：init 是每会话必经的预热通道，语言偏好随之落地；老 Host 不下发
+        // 该字段（undefined）时解析回落 auto（按 navigator.language）
+        setLocalePref(cfg.locale)
       }
       const notice = res && res.notice
       if (notice && notice.unsupported) {
-        showNotice('unsupported', '撤回插件仅支持 Windows / Linux / macOS，当前平台的快照不可用。')
+        showNotice('unsupported', t('notice.unsupported'))
       }
       if (notice && notice.gitMissing) {
-        showNotice('git', '未检测到 git CLI，撤回功能不可用（快照引擎依赖 git）。安装 git 并重启 DSH 后即可使用。')
+        showNotice('git', t('notice.gitMissing'))
       }
       if (notice && notice.homeFallback) {
-        showNotice('home', 'home 目录不可写，快照已降级存储到项目内 .dsh-recall-snapshots 目录。')
+        showNotice('home', t('notice.homeFallback'))
       }
       // issue #18：工作区根自身是构建产物目录时不建快照（Host 侧 captureSnapshot
-      // 早退），文案由 Host 单点拼好（exclude-patterns.buildRootNotice），client 只展示
-      if (notice && notice.buildRootNotice) {
+      // 早退）。A4 起 Host 另下发 artifactSeg（命中段名）供 client 本地取词——
+      // 优先按它渲染；老 Host 只给拼好的中文字段（buildRootNotice），保留一个
+      // 版本周期的回落
+      if (notice && typeof notice.buildRootArtifactSeg === 'string' && notice.buildRootArtifactSeg) {
+        showNotice('buildRoot', t('notice.buildRoot', { seg: notice.buildRootArtifactSeg }))
+      } else if (notice && notice.buildRootNotice) {
         showNotice('buildRoot', String(notice.buildRootNotice).slice(0, 140))
       }
     }).catch(() => {
@@ -296,5 +327,5 @@ export function buildUtil(): UtilApi {
     return Promise.resolve(false)
   }
 
-  return { api, messageFor, showNotice, showThrottledToast, ensureInit, clockText, writeClipboard, sizeText, bytesToMb, buildTree, pluginConfig }
+  return { api, messageFor, showNotice, showThrottledToast, ensureInit, clockText, writeClipboard, sizeText, bytesToMb, buildTree, t, setLocalePref, pluginConfig }
 }

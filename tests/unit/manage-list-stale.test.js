@@ -47,6 +47,8 @@ function makeDeps(opts = {}) {
     snaps: {
       saveIndex: async () => {},
       loadIndex: async () => {},
+      // A3：格式守卫放行（拒写矩阵在 store-format.test.js 钉）
+      guardStoreFormat: async () => true,
     },
     sessionInfo: {
       sessionTitles: new Map(),

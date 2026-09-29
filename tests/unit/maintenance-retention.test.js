@@ -78,7 +78,8 @@ describe('enforceRetention（工厂级执行链路）', () => {
       runShell: async (cmd) => { if (String(cmd).startsWith('PURGE ')) { purged.push(...String(cmd).slice(6).split(' ')) } return '' },
       recordError: (t) => { state.lastError = t },
     }
-    const snaps = { saveIndex: async (root) => { saved.push(root) } }
+    // A3：格式守卫放行（拒写矩阵在 store-format.test.js 钉；此处只关心保留链路）
+    const snaps = { saveIndex: async (root) => { saved.push(root) }, guardStoreFormat: async () => true }
     const ctx = { sessions: { get: () => null }, get: () => null }
     // retentionDays = 0 的默认不启用路径由 createConfig 兜底；工厂直接
     // 以注入的 days 驱动，与 config 解析层解耦

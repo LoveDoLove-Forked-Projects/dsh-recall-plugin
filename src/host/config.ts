@@ -14,7 +14,7 @@
  */
 
 import Schema from '@deepseek-ai/schemastery'
-import type { ResolvedConfig, RawConfig } from '../types/config.js'
+import type { ResolvedConfig, RawConfig, LocalePref } from '../types/config.js'
 
 // 排除表必须同时覆盖两种存储目录名：降级存储是项目内 .dsh-recall-snapshots/，
 // 而 home 存储目录名是 dsh-recall-snapshots/（无点）——工作区 root 恰为
@@ -51,6 +51,10 @@ export const Config = Schema.object({
   snapshotEnabled: withVolatile(Schema.boolean().default(true).description('启用消息快照（关闭后不再新建，已有快照仍可撤回）')),
   archiveOriginal: withVolatile(Schema.boolean().default(true).description('撤回后归档原会话（关闭后原会话保留在列表中）')),
   retentionDays: withVolatile(Schema.number().default(0).description('按天数保留快照，超期自动删除；0 表示不启用')),
+  // A4：界面语言。union 三值而不是自由字符串——非法配置在加载时响亮失败
+  //（合规清单 #3）；description 保持中文是 v1 明示限制：它由宿主官方设置
+  // 表单在 host 侧渲染，插件无法本地化（自定义配置卡片不受影响，见 README）
+  locale: withVolatile(Schema.union(['auto', 'zh', 'en'] as const).default('auto').description('界面语言：auto 跟随系统，可选 zh / en（保存后生效）')),
 })
 
 // 旧面判据（≤0.1.6 的 SettingsProvider）：配置所有权在插件——namespace 由
@@ -102,7 +106,8 @@ export function resolveSettingsNs(ctx: SettingsNsContext | null | undefined, set
   for (const id of entryIds) {
     if (known.indexOf(id) >= 0) return id
   }
-  return entryIds.length ? entryIds[0] : null
+  const first = entryIds[0]
+  return first !== undefined ? first : null
 }
 
 // describe() 的 ns 集合（best-effort：服务缺席/方法报错都按「无交集」处理，
@@ -119,6 +124,7 @@ function describeNamespaces(settings: unknown): string[] {
     }
     return out
   } catch (error) {
+    // 方法报错按无交集（best-effort，调用方候选回退不依赖它成功）
     return []
   }
 }
@@ -185,6 +191,7 @@ export const DEFAULTS: ResolvedConfig = {
   snapshotEnabled: true,
   archiveOriginal: true,
   retentionDays: 0,
+  locale: 'auto',
 }
 
 export function createConfig(raw: RawConfig): ResolvedConfig {
@@ -230,5 +237,9 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
     : parseInt(String(cfg.retentionDays == null ? '' : cfg.retentionDays), 10)
   const retentionDays = Number.isFinite(rawDays) ? Math.max(0, rawDays) : 0
 
-  return { gcSnaps, gcHours, maxFileBytes, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, retentionDays }
+  // 界面语言（A4）：非法/缺失一律回 auto——schema union 已在加载期拦掉非法
+  // 值（响亮失败），这里只兜 env 覆盖与旧配置文档缺字段两条路径
+  const locale: LocalePref = cfg.locale === 'zh' || cfg.locale === 'en' ? cfg.locale : 'auto'
+
+  return { gcSnaps, gcHours, maxFileBytes, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, retentionDays, locale }
 }

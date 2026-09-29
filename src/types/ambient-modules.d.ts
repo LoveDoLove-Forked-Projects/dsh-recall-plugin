@@ -26,6 +26,9 @@ declare module '@deepseek-ai/schemastery' {
     string(): SchemaChain<string>
     array<T>(item: SchemaChain<T>): SchemaChain<T[]>
     boolean(): SchemaChain<boolean>
+    // A4：常量枚举（locale 三值）。官方 Static.union 会把数组里的字面量收敛成
+    // 联合类型（TypeS<X>），这里同义声明——默认值才可直接写 'auto' 而不必强转
+    union<T extends readonly (string | number | boolean)[]>(values: T): SchemaChain<T[number]>
   }
   const Schema: SchemaFactory
   export default Schema

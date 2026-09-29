@@ -4,9 +4,16 @@
  * 从原 lib/client.js 抽出：kind 单表、变更摘要、确认面板、用户消息重绘
  * （文本/图片/JSON 块，图片经官方 renderMessageImages 管线）、撤回执行链
  * （preview→execute→fork→回填）。KIND_INFO/summaryText 模块级导出供单测。
+ *
+ * A4：全部可见文案经 util.t 取词（词典层见 locales/）；模块级纯函数保留
+ * 「不收词表则按 zh 渲染」的缺省（zhTranslate），单测与降级路径不因缺 util
+ * 而崩，替换前的单语文案行为等价。
  */
 
 import type { ReactApi, UtilApi } from './util.js'
+import { recallNodeLog } from './log.js'
+import { zhTranslate } from './locales/index.js'
+import type { Translate } from './locales/index.js'
 import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange, RecallScope } from '../types/api.js'
 
@@ -80,19 +87,22 @@ function fileCardSizeText(bytes: unknown): string {
 // 纯函数（模块级导出供单测）：file 块 → 文件卡片信息。只认 type === 'file'；
 // 引用形状异常（缺 attachment）时给兜底名，绝不返回 null —— file 块一旦漏回
 // JSON 兜底就是「整块原文」的可见回归，宁可渲染一张信息不全的卡片。
-export function fileCardInfo(block: ChatBlock | null | undefined): FileCardInfo | null {
+// t 缺省 zh 词表（同 summaryText）：兜底名也要可译，但不能逼调用点必传
+export function fileCardInfo(block: ChatBlock | null | undefined, t: Translate = zhTranslate): FileCardInfo | null {
   if (!block || block.type !== 'file') return null
   const ref = block.attachment as { name?: unknown; bytes?: unknown } | null | undefined
-  const name = ref && typeof ref === 'object' && typeof ref.name === 'string' && ref.name !== '' ? ref.name : '未命名文件'
+  const name = ref && typeof ref === 'object' && typeof ref.name === 'string' && ref.name !== '' ? ref.name : t('file.unnamed')
   return { name, ext: fileExtOf(name), size: fileCardSizeText(ref && typeof ref === 'object' ? ref.bytes : undefined) }
 }
 
-// kind 语义单表承载（文案/徽章类名/汇总顺序）：新增 kind 时只改这一处
+// kind 语义单表承载（词键/徽章类名/汇总顺序）：新增 kind 时只改这一处。
+// A4 起 label 换成 labelKey——文案归词典（kind.*），单表继续管「语义 → 词键
+// + 类名」映射，渲染期再 t(labelKey)
 export type ChangeKind = 'modified' | 'restored' | 'added'
-export const KIND_INFO: Record<ChangeKind, { label: string; cls: string }> = {
-  modified: { label: '修改', cls: 'modified' },
-  restored: { label: '恢复', cls: 'restored' },
-  added: { label: '删除', cls: 'added' }
+export const KIND_INFO: Record<ChangeKind, { labelKey: string; cls: string }> = {
+  modified: { labelKey: 'kind.modified', cls: 'modified' },
+  restored: { labelKey: 'kind.restored', cls: 'restored' },
+  added: { labelKey: 'kind.added', cls: 'added' }
 }
 
 export interface ChangeCounts {
@@ -101,10 +111,17 @@ export interface ChangeCounts {
   added: number
 }
 
-export function summaryText(counts: ChangeCounts): string {
+// kind 白名单判定（A6）：计数只认 KIND_INFO 登记的三个 kind——payload 是 host
+// 下发的宽松形状，未知/缺失 kind 原样跳过（不进任何计数桶）。判据派生自
+// KIND_INFO 而非硬编码字面量，保住「新增 kind 只改这一处」的单表纪律。
+export function isChangeKind(kind: unknown): kind is ChangeKind {
+  return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(KIND_INFO, kind)
+}
+
+export function summaryText(counts: ChangeCounts, t: Translate = zhTranslate): string {
   const parts: string[] = []
   for (const kind of Object.keys(KIND_INFO) as ChangeKind[]) {
-    if (counts[kind] > 0) parts.push(KIND_INFO[kind].label + ' ' + counts[kind])
+    if (counts[kind] > 0) parts.push(t(KIND_INFO[kind].labelKey) + ' ' + counts[kind])
   }
   return parts.join(' · ')
 }
@@ -131,7 +148,7 @@ export function buildRecallNode(
   workspacesSvc: ClientWorkspacesService,
   uiWorkspaceSvc?: ClientUiWorkspaceService
 ): RecallNodeApi {
-  const { api, ensureInit, showThrottledToast, writeClipboard, clockText, pluginConfig, messageFor } = util
+  const { api, ensureInit, showThrottledToast, writeClipboard, clockText, pluginConfig, messageFor, t } = util
 
   function CopyIcon() {
     return React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, 'aria-hidden': true },
@@ -166,15 +183,15 @@ export function buildRecallNode(
   function recallPanel(recall: RecallStage, closePanel: () => void, executeRecall: () => void, scope: RecallScope, onScopeChange: (s: RecallScope) => void) {
     if (recall.stage === 'loading') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, '正在计算变更…')
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, t('recall.loading'))
       )
     }
     if (recall.stage === 'error') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, '无法回退'),
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, t('recall.error.title')),
         React.createElement('div', { className: 'dsh-recall-panel-note' }, recall.message || ''),
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, '关闭')
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, t('common.close'))
         )
       )
     }
@@ -183,12 +200,12 @@ export function buildRecallNode(
       const total = typeof recall.total === 'number' ? recall.total : changes.length
       const counts: ChangeCounts = { modified: 0, restored: 0, added: 0 }
       for (const c of changes) {
-        if (c && (counts as unknown as Record<string, number>)[c.kind] !== undefined) (counts as unknown as Record<string, number>)[c.kind]++
+        if (c && isChangeKind(c.kind)) counts[c.kind]++
       }
       const rows: Array<ReturnType<typeof React.createElement>> = changes.map((c: DiffChange, i: number) => {
         const info = KIND_INFO[c.kind as ChangeKind]
         return React.createElement('div', { className: 'dsh-recall-file', key: i },
-          React.createElement('span', { className: 'dsh-recall-badge dsh-recall-badge-' + (info ? info.cls : '') }, info ? info.label : (c.kind || '')),
+          React.createElement('span', { className: 'dsh-recall-badge dsh-recall-badge-' + (info ? info.cls : '') }, info ? t(info.labelKey) : (c.kind || '')),
           React.createElement('span', { className: 'dsh-recall-rel' }, c.rel || '')
         )
       })
@@ -199,75 +216,81 @@ export function buildRecallNode(
       const sessionOnly = canRevertChat && scope === 'session-only'
       if (recall.truncated) {
         rows.push(React.createElement('div', { className: 'dsh-recall-panel-note', key: 'truncated' },
-          sessionOnly
-            ? '…仅显示前 ' + changes.length + ' 条，共 ' + total + ' 处差异'
-            : '…仅显示前 ' + changes.length + ' 条，共 ' + total + ' 个文件将变更'
+          t(sessionOnly ? 'recall.truncated.chat' : 'recall.truncated.files', { shown: changes.length, total })
         ))
       }
+      // both 首段按「有时间 / 无时间」「有摘要 / 无摘要」四个分叉组合：模板各自
+      // 成句（英文语序与括号标点都和中文不同），不在渲染里拼中文句子骨架
+      const summary = summaryText(counts, t)
+      const rollbackLead = recall.time
+        ? t('recall.confirm.rollbackAt', { time: clockText(recall.time) })
+        : t('recall.confirm.rollbackNoTime')
+      const filesLead = t('recall.confirm.files', {
+        total,
+        summary: summary ? t('common.paren', { text: summary }) : ''
+      })
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, '整段回退'),
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, t('recall.confirm.title')),
         sessionOnly
           ? // session-only：零文件改动即无不可逆操作缺口——安全快照预告随之隐藏
             //（不打安全快照），主说明换成模式语义
             React.createElement('div', { className: 'dsh-recall-panel-note' },
-              '项目文件保持当前状态，不会被回退或删除；对话回退到该消息之前。'
+              t('recall.confirm.sessionOnly')
             )
           : React.createElement('div', { className: 'dsh-recall-panel-note' },
-              '将项目恢复到' + (recall.time ? ' ' + clockText(recall.time) + ' ' : ' ') + '发送该消息时的状态。共 ' + total + ' 个文件将变更' + (summaryText(counts) ? '（' + summaryText(counts) + '）' : '') + '。此操作会覆盖当前文件内容；回退前会自动保存一份当前状态的安全快照（不含在下方清单内）。'
+              rollbackLead + filesLead
             ),
         sessionOnly ? null : React.createElement('div', { className: 'dsh-recall-panel-note' },
-          canRevertChat
-            ? '对话将一并回退到该消息之前：该消息及之后的全部对话会从当前视图移除，原会话归档保存（可从归档找回）。'
-            : '该消息是本会话中第一条用户消息，无法回退对话；确认后仅回退项目文件。'
+          t(canRevertChat ? 'recall.confirm.chatBoth' : 'recall.confirm.chatFirst')
         ),
         sessionOnly && changes.length > 0
           ? // 文件清单保留展示但降级为参考语义：清单照常算（Host preview 链路
             // 不分叉），只是告知用户所选模式不会真的改这些文件
             React.createElement('div', { className: 'dsh-recall-panel-note', key: 'ref-note' },
-              '以下差异仅作参考，所选模式不会改动文件。'
+              t('recall.confirm.refNote')
             )
           : null,
         changes.length > 0 ? React.createElement('div', { className: 'dsh-recall-list' }, ...rows) : null,
         canRevertChat
           ? // 模式二选一（原生 radio，键盘方向键可达）：临场选择不设全局配置项；
             // 默认 both 与现状一致，面板每次打开都复位到默认起点
-            React.createElement('div', { className: 'dsh-recall-scope', role: 'radiogroup', 'aria-label': '撤回范围' },
+            React.createElement('div', { className: 'dsh-recall-scope', role: 'radiogroup', 'aria-label': t('recall.scope.aria') },
               React.createElement('label', { className: 'dsh-recall-scope-item' },
                 React.createElement('input', { type: 'radio', name: 'dsh-recall-scope', checked: scope === 'both', onChange: () => onScopeChange('both') }),
-                React.createElement('span', { className: 'dsh-recall-scope-label' }, '回退文件与对话')
+                React.createElement('span', { className: 'dsh-recall-scope-label' }, t('recall.scope.both'))
               ),
               React.createElement('label', { className: 'dsh-recall-scope-item' },
                 React.createElement('input', { type: 'radio', name: 'dsh-recall-scope', checked: scope === 'session-only', onChange: () => onScopeChange('session-only') }),
-                React.createElement('span', { className: 'dsh-recall-scope-label' }, '仅撤回对话')
+                React.createElement('span', { className: 'dsh-recall-scope-label' }, t('recall.scope.sessionOnly'))
               )
             )
           : null,
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, '取消'),
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-danger', onClick: executeRecall }, sessionOnly ? '确认撤回对话' : '确认回退')
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, t('common.cancel')),
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-danger', onClick: executeRecall }, t(sessionOnly ? 'recall.confirm.submit.sessionOnly' : 'recall.confirm.submit.both'))
         )
       )
     }
     if (recall.stage === 'executing') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, scope === 'session-only' ? '正在撤回对话…' : '正在回退…')
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, t(scope === 'session-only' ? 'recall.executing.sessionOnly' : 'recall.executing.both'))
       )
     }
     if (recall.stage === 'done') {
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, '回退完成'),
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, t('recall.done.title')),
         React.createElement('div', { className: 'dsh-recall-panel-note' },
           scope === 'session-only'
             ? // session-only 文案矩阵：文件侧零改动是确定事实，失败时也只描述对话侧
               (recall.chatReverted
-                ? '对话已回退到该消息之前，项目文件保持当前状态。新会话已打开，原会话已归档（可从归档找回）。'
-                : '对话回退失败：' + (recall.chatError || '未知原因') + '。项目文件未做任何改动。')
+                ? t('recall.done.sessionOnly.ok')
+                : t('recall.done.sessionOnly.fail', { error: recall.chatError || t('common.unknownReason') }))
             : (recall.chatReverted
-                ? '项目文件与对话已回退到该消息之前。新会话已打开，原会话已归档（可从归档找回）。'
-                : '项目已恢复到发送该消息时的状态。' + (recall.chatError ? ' 对话回退失败：' + recall.chatError : ''))
+                ? t('recall.done.both.ok')
+                : t('recall.done.both.partial') + (recall.chatError ? t('recall.done.both.failChat', { error: recall.chatError }) : ''))
         ),
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, '关闭')
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, t('common.close'))
         )
       )
     }
@@ -330,7 +353,7 @@ export function buildRecallNode(
     if (add === null) return false
     ;(async () => {
       let list: File[] = []
-      try { list = await files } catch (e) { return }
+      try { list = await files } catch (e) { return } // 附件早读失败放弃附件回填（文本回填不受影响）
       if (!Array.isArray(list) || list.length === 0) return
       try {
         const drafts = conversation.createDrafts ? conversation.createDrafts(sessionId, list) : []
@@ -398,14 +421,14 @@ export function buildRecallNode(
           // 已被消费时返回 queue-item-not-found，此时已无残留可清。
           for (const itemId of itemIds) {
             if (typeof itemId !== 'string' || itemId === '') continue
-            face.updateQueue(itemId, { kind: 'remove' }).catch(() => {})
+            face.updateQueue(itemId, { kind: 'remove' }).catch(() => {}) // 逐项静默（not-found = 已无残留，语义见上）
           }
           return
         }
       } catch (error) { /* 服务面未就绪：继续等待 */ }
       if (Date.now() >= deadline) {
-        console.warn('[dsh-recall-plugin] 残留排队消息未能自动清理（会话面未就绪）：', itemIds)
-        showThrottledToast('撤回前的一条排队消息未被自动清理，可点击该卡片右上角的删除按钮手动移除')
+        recallNodeLog.warn('残留排队消息未能自动清理（会话面未就绪）：', itemIds)
+        showThrottledToast(t('toast.staleQueue'))
         return
       }
       setTimeout(attempt, 250)
@@ -468,25 +491,33 @@ export function buildRecallNode(
             // fail-open 跳过的路径：快照存在但个别目录没进去——仅对正在发生的
             // 消息提示，让用户知道快照少了什么（issue #7 失败可见性）
             if (recent && Array.isArray(res.skipped) && res.skipped.length) {
-              const names = res.skipped.slice(0, 5).join('、') + (res.skipped.length > 5 ? ' 等 ' + res.skipped.length + ' 项' : '')
-              showThrottledToast('快照已跳过未纳入的路径：' + names + '（撤回不会恢复或删除这些路径）')
+              const names = res.skipped.slice(0, 5).join(t('common.listSep')) + (res.skipped.length > 5 ? t('toast.skippedMore', { n: res.skipped.length }) : '')
+              showThrottledToast(t('toast.skipped', { names }))
             }
             setHasSnapshot(true)
             return
           }
           // 失败/熔断是终止态：快照不会迟到，提示后停止轮询
           if (res && res.failed) {
-            if (recent) showThrottledToast('快照失败：' + String(res.error || '未知原因').slice(0, 140))
+            if (recent) showThrottledToast(t('toast.snapshotFailed', { error: String(res.error || t('common.unknownReason')).slice(0, 140) }))
             return
           }
           // issue #18：has=false 的「非失败」解释（当前只有构建产物工作区根停用
-          // 快照）——同样是终止态：快照不会迟到，提示一次后停止空轮询
-          if (res && res.notice) {
-            if (recent) showThrottledToast(String(res.notice).slice(0, 140))
+          // 快照）——同样是终止态：快照不会迟到，提示一次后停止空轮询。
+          // A4：Host 下发 artifactSeg（命中段名）时本地取词；仅老 Host 才回落
+          // 拼好的中文字段 notice
+          if (res && (res.artifactSeg || res.notice)) {
+            if (recent) {
+              const text = res.artifactSeg
+                ? t('notice.buildRoot', { seg: res.artifactSeg })
+                : String(res.notice).slice(0, 140)
+              showThrottledToast(text)
+            }
             return
           }
           if (recent && attempts < MAX_ATTEMPTS) timer = setTimeout(schedule, RETRY_MS)
         }).catch(() => {
+          // 查询失败按未就绪退避重试（与 has:false 同节奏，不打扰用户）
           if (alive && recent && attempts < MAX_ATTEMPTS) timer = setTimeout(schedule, RETRY_MS)
         })
       }
@@ -495,6 +526,7 @@ export function buildRecallNode(
         if (!messageId || !alive) return
         schedule()
       }).catch(() => {
+        // init 失败按未就绪退避重试（同上节奏）
         if (alive && messageId) timer = setTimeout(schedule, RETRY_MS)
       })
       return () => {
@@ -523,7 +555,7 @@ export function buildRecallNode(
       setRecall({ stage: 'loading' })
       api<PreviewResponse>('preview', { messageId, sessionId }).then((res) => {
         if (!res || !res.ok) {
-          setRecall({ stage: 'error', message: messageFor(res, '无法获取快照') })
+          setRecall({ stage: 'error', message: messageFor(res, t('fallback.preview')) })
           return
         }
         // PF-1：treeId 是 preview 时的 index 树指纹，确认时透传回 execute——
@@ -538,6 +570,7 @@ export function buildRecallNode(
           cutSeq: typeof res.cutSeq === 'number' ? res.cutSeq : null
         })
       }).catch((error) => {
+        // 端点异常落错误态（面板显示可重试）
         setRecall({ stage: 'error', message: String(error) })
       })
     }
@@ -568,7 +601,7 @@ export function buildRecallNode(
             setRecall({ stage: 'loading' })
             api<PreviewResponse>('preview', { messageId, sessionId }).then((res2) => {
               if (!res2 || !res2.ok) {
-                setRecall({ stage: 'error', message: messageFor(res2, '无法获取快照') })
+                setRecall({ stage: 'error', message: messageFor(res2, t('fallback.preview')) })
                 return
               }
               setRecall({
@@ -581,11 +614,12 @@ export function buildRecallNode(
                 cutSeq: typeof res2.cutSeq === 'number' ? res2.cutSeq : null
               })
             }).catch((error) => {
+              // 重拉失败落错误态（与首次 preview 同显式面）
               setRecall({ stage: 'error', message: String(error) })
             })
             return
           }
-          setRecall({ stage: 'error', message: messageFor(res, '回退失败') })
+          setRecall({ stage: 'error', message: messageFor(res, t('fallback.rollback')) })
           return
         }
         // 文件已回退；对话回退独立进行，失败只降级为“仅文件回退”而不是整体失败
@@ -617,7 +651,7 @@ export function buildRecallNode(
               removeStaleQueueItems(childId, res.staleQueueItemIds)
               // F1：上报撤回链（childId ↔ parentId），Host 持久化供版本家族展示；
               // 上报失败不阻断撤回主流程（家族是纯增量 UI）。
-              api<unknown>('lineage-record', { childId, parentId: sessionId }).catch(() => {})
+              api<unknown>('lineage-record', { childId, parentId: sessionId }).catch(() => {}) // 静默（纯增量 UI，见上）
               // 回退前的原会话归档（可关）：只是从列表隐藏、可恢复
               if (pluginConfig.archiveOriginal && workspacesSvc && typeof workspacesSvc.archiveSession === 'function') {
                 // stopActivity：官方归档前经 `workspace/session-activity` 瀑布问「这会话还有
@@ -630,14 +664,15 @@ export function buildRecallNode(
                 // 旧版服务无此参数时多传一个实参在 JS 侧无害）。
                 workspacesSvc.archiveSession(sessionId as string, { stopActivity: true }).catch((error) => {
                   // 仍不阻断撤回主流程（fork 与回填已完成），但不再静默：归档失败意味着
-                  // 原会话留在列表且可能继续跑，属用户可见降级，console 留痕便于排查
-                  console.warn('[dsh-recall-plugin] archive original session failed:', error)
+                  // 原会话留在列表且可能继续跑，属用户可见降级，warn（恒输出）留痕便于排查
+                  recallNodeLog.warn('archive original session failed:', error)
                 })
               }
             } else {
-              chatError = '未返回新会话'
+              chatError = t('recall.chat.noChild')
             }
           } catch (error) {
+            // fork 失败只降级为「仅文件回退」（chatError 进结果面板，见上方注释）
             chatError = String(error)
           }
         }
@@ -650,13 +685,14 @@ export function buildRecallNode(
           // （Host 侧 referencedImage + readImage，file 块直接判 ATTACHMENT_NOT_
           // REFERENCED），插件侧读不到字节就必然填不回输入框。文本与图片照常
           // 回填，这里只把「少了什么」讲清楚，免得用户以为回填是完整的。
-          if (fileBlocks.length > 0) showThrottledToast('被撤回消息里的文件附件无法自动回填（官方接口只支持图片回读），请重新选择文件')
+          if (fileBlocks.length > 0) showThrottledToast(t('toast.fileAttachRefill'))
         }
         setHasSnapshot(false)
         // 注：快照 tag 在 Host 侧有意保留（幂等回退），刷新页面后该消息的
         // 撤回按钮会重新出现——这是「可再次回退到同一点」的特性而非 bug。
         setRecall({ stage: 'done', count: typeof res.count === 'number' ? res.count : changes.length, chatReverted, chatError })
       }).catch((error) => {
+        // 端点异常落错误态（文件可能未回退，面板提示可重试）
         setRecall({ stage: 'error', message: String(error) })
       })
     }
@@ -676,7 +712,7 @@ export function buildRecallNode(
     }
     // 文件卡片与图片同属「附件在上、文本在下」的官方布局
     for (let i = 0; i < fileBlocks.length; i++) {
-      const info = fileCardInfo(fileBlocks[i])
+      const info = fileCardInfo(fileBlocks[i], t)
       if (!info) continue
       bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-filecard', key: 'file-' + i },
         React.createElement('span', { className: 'dsh-recall-filecard-icon' }, info.ext),
@@ -697,8 +733,8 @@ export function buildRecallNode(
       key: 'copy',
       type: 'button',
       className: 'dsh-recall-action',
-      'aria-label': copied ? '已复制' : '复制',
-      title: copied ? '已复制' : '复制',
+      'aria-label': copied ? t('action.copied') : t('action.copy'),
+      title: copied ? t('action.copied') : t('action.copy'),
       onClick: onCopy
     }, copied ? React.createElement(CheckIcon, {}) : React.createElement(CopyIcon, {})))
     if (hasSnapshot) {
@@ -706,8 +742,8 @@ export function buildRecallNode(
         key: 'recall',
         type: 'button',
         className: 'dsh-recall-action',
-        'aria-label': '撤回',
-        title: '整段回退：文件与对话一并回到该消息之前',
+        'aria-label': t('action.recall'),
+        title: t('action.recall.title'),
         onClick: openPreview
       }, React.createElement(UndoIcon, {})))
     }

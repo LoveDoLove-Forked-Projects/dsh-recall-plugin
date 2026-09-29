@@ -13,6 +13,7 @@ import { buildArtifactRootSegment, buildRootNotice } from './exclude-patterns.js
 import type { Runtime, SharedState, ErrorRecord, StoreInfo } from '../types/state.js'
 import type { ResolvedConfig } from '../types/config.js'
 import type { SnapshotsApi } from './snapshots.js'
+            import type { IntentJournal } from './intent-journal.js'
 import type { EnvErrorKind } from './diagnostics.js'
 import type { InitArgs, InitResponse, InitNotice, SnapshotInfoArgs, SnapshotInfoResponse, PreviewArgs, PreviewResponse, ExecuteArgs, ExecuteResponse, RecallScope, StatusArgs, StatusResponse, LineageRecordArgs, LineageRecordResponse, ErrBody } from '../types/api.js'
 
@@ -20,6 +21,8 @@ import type { InitArgs, InitResponse, InitNotice, SnapshotInfoArgs, SnapshotInfo
 export interface RoutesCoreDeps {
   rt: Runtime
   snaps: SnapshotsApi
+  // A2 操作意图 journal（init 端点是 recover 的第二挂载点；execute 三针写记录）
+  intentJournal: IntentJournal
   state: SharedState
   cfg: ResolvedConfig
   supported: boolean
@@ -32,7 +35,7 @@ export interface RoutesCoreDeps {
 export function createRoutesCore(deps: RoutesCoreDeps) {
   // ctx 不解构（A4）：本域所有服务访问都已由 rt/snaps 封装，直接摸 ctx 会
   // 绕过工厂分层——留空位只会诱导未来代码破坏依赖注入约定
-  const { rt, snaps, state, cfg, supported, enqueue, agentBusy, rescueRollback, E } = deps
+  const { rt, snaps, state, cfg, supported, enqueue, agentBusy, rescueRollback, intentJournal, E } = deps
 
   return {
     'init': async (args: InitArgs): Promise<InitResponse> => {
@@ -52,6 +55,9 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
         await rt.ensureGit(root, store!)
         await snaps.loadIndex(root, sessionId)
         await snaps.rebuildOrphans(root, sessionId)
+        // A2：中断回退续做（预热有 shellReady 放弃分支，init 是每会话必经
+        // 通道——两路幂等，journal 内部按 store 去重）。A3 拒写态下跳过
+        if (store && await snaps.guardStoreFormat(store)) await intentJournal.recover(store)
         rt.cleanupLegacy(root)
         // 降级状态随 init 下发，Client 弹一次性提示（每次页面加载各弹一次）：
         // gitMissing=未检测到 git CLI（撤回按钮不出现）；homeFallback=home
@@ -62,12 +68,17 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
         }
         // issue #18：root 自身是构建产物目录时快照被停用（captureSnapshot 早退），
         // 会话级说明一次——否则用户只会看到「撤回按钮不出现」而无从判断原因。
+        // A4：段名（artifactSeg）与拼好的中文文案（buildRootNotice）一并下发——
+        // client 优先按段名本地取词，中文字段保留一个版本周期
         const artifactSeg = buildArtifactRootSegment(root, cfg.baseExcludes, rt.isWin)
-        if (artifactSeg) notice.buildRootNotice = buildRootNotice(artifactSeg)
+        if (artifactSeg) {
+          notice.buildRootArtifactSeg = artifactSeg
+          notice.buildRootNotice = buildRootNotice(artifactSeg)
+        }
       }
       // 顺带下发客户端行为开关（fillDraft 等）：Client 无须为读配置单开请求，
-      // init 是每会话必经的预热通道
-      return { ok: Boolean(root), root: root || null, notice, config: { refillDraft: cfg.refillDraft, archiveOriginal: cfg.archiveOriginal } }
+      // init 是每会话必经的预热通道；A4 追加 locale（界面语言偏好）
+      return { ok: Boolean(root), root: root || null, notice, config: { refillDraft: cfg.refillDraft, archiveOriginal: cfg.archiveOriginal, locale: cfg.locale } }
     },
 
     'snapshot-info': async (args: SnapshotInfoArgs): Promise<SnapshotInfoResponse> => {
@@ -84,7 +95,9 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       const artifactSeg = sroot ? buildArtifactRootSegment(sroot, cfg.baseExcludes, rt.isWin) : null
       return {
         has: Boolean(snap), time: snap ? snap.time : null, id, ...feedback,
-        notice: artifactSeg ? buildRootNotice(artifactSeg) : undefined
+        // A4：段名与中文 notice 并存下发（client 优先段名本地取词，见 init 同处注释）
+        notice: artifactSeg ? buildRootNotice(artifactSeg) : undefined,
+        artifactSeg: artifactSeg || undefined
       }
     },
 
@@ -136,6 +149,11 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
         if (!snap) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该消息没有可用的项目快照' }
         const store = state.stores.get(snap.root)
         if (!store) return { ok: false, code: E.RECALL_NO_STORE, message: '快照存储不可用' }
+        // A3：格式守卫（fail-closed）——安全快照打 tag 与工作区 reset 都是写
+        // 操作，高版本/损坏 store 拒执行；预览/列表等读路径不受影响
+        if (!(await snaps.guardStoreFormat(store))) {
+          return { ok: false, code: E.RECALL_FORMAT_BLOCKED, message: '磁盘格式不受支持，已停止写入；详见「最近错误」' }
+        }
         // P0-1：队列内第一步——执行前再查一次 agent 状态。检查放在互斥
         // 队列内，检查后紧接执行，中间不可能插进别的操作，窗口为零。
         if (agentBusy(sessionId, snap.root)) return { ok: false, code: E.RECALL_AGENT_BUSY, message: 'Agent 正在运行中，请先停止后再撤回' }
@@ -178,15 +196,32 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
         if (previewTreeId && safetyTreeId && safetyTreeId !== previewTreeId) {
           return { ok: false, code: E.RECALL_STALE, message: '预览后项目文件发生了变化，请重新预览确认' }
         }
+        // A2 针 1：安全快照后、动磁盘前落意图（回退中途断电时启动/init 的
+        // recover 据此续做；写失败只告警不阻断主流程——U4 纪律）
+        await intentJournal.begin(store, snap.root, { messageId: id, safetyId, safetyOk })
         const rolled = await snaps.rollbackFor(id)
-        if (rolled.ok) return rolled
+        if (rolled.ok) {
+          // A2 针 2：回退成功清记录（残留会被下次启动误判为中断，见 recover）
+          await intentJournal.clear(store)
+          return rolled
+        }
+        // A2 针 3：救援也会写工作区（reset 到安全快照），先推进 phase 再执行；
+        // rescue 后无论成败都 clear——失败虽留下现场，但手动命令逃生门已在
+        // 结果面板给出：留着记录会让下次启动的自动 reset 覆盖用户按手动命令
+        // 恢复后的新改动（记录内容由下方提示的路径可查）。
         // 回退失败（rollbackFor 返回 partial，工作区可能半回退）：用安全快照
         // 救援（H1）。rescueRollback 是 snapshots.js 模块级纯逻辑，副作用经
         // deps 注入，三分支（无救援点/救援成功/救援失败）单测直接钉。
-        return rescueRollback(
+        await intentJournal.advance(store, 'rescue')
+        const rescueResult = await rescueRollback(
           { runShell: rt.runShell, scripts: rt.scripts, gitExe: state.gitExe || '', recordError: rt.recordError },
           { root: snap.root, store, safetyId, safetyOk, rollbackError: rolled.error }
         )
+        await intentJournal.clear(store)
+        // U4 留痕：提示附意图文件路径（中断点记录位置，用户可精确知道恢复
+        // 到了哪一步、现场在哪）
+        if (rescueResult && rescueResult.message) rescueResult.message += '（中断点记录：' + intentJournal.file(store) + '）'
+        return rescueResult
       })
       if (!result.ok) return result
       // 文件回退后再解析切点：切点只依赖会话日志，与快照是否删除无关（命中缓存，瞬时）
@@ -230,6 +265,7 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       if (!root) return { ok: false, code: E.RECALL_NO_ROOT, message: '无法解析工作区' }
       let store: StoreInfo | null = state.stores.get(root) || null
       if (!store) {
+        // 现场解析失败按无 store：下行 NO_STORE 响应
         try { store = await rt.resolveStore(root) } catch (error) { store = null }
       }
       if (!store) return { ok: false, code: E.RECALL_NO_STORE, message: '快照存储不可用' }

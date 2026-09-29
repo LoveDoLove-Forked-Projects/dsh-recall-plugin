@@ -159,17 +159,23 @@ export function createRoutesManage(deps: RoutesManageDeps) {
     const byRoot = new Map<string, string[]>()
     for (const rec of records.values()) {
       if (!match(rec) || !rec.root) continue
-      if (!byRoot.has(rec.root)) byRoot.set(rec.root, [])
-      byRoot.get(rec.root)!.push(rec.id)
+      // get-or-create 守卫（A6）：替代 `get(...)!` 断言
+      const list = byRoot.get(rec.root)
+      if (list) list.push(rec.id)
+      else byRoot.set(rec.root, [rec.id])
     }
     let deleted = 0
     await enqueue(async () => {
       for (const [root, rootIds] of byRoot) {
         let store: StoreInfo | null = state.stores.get(root) || null
         if (!store) {
+          // 现场解析失败按无 store 跳过该 root（其余 root 继续清理）
           try { store = await rt.resolveStore(root) } catch (error) { store = null }
         }
         if (!store) continue
+        // A3：格式守卫——拒写态下该 root 跳过（批量删除为 best-effort 语义，
+        // 其余 root 照常；告警由 guard 侧节流 recordError）
+        if (!(await snaps.guardStoreFormat(store))) continue
         try {
           if (state.gitExe) {
             // tag 分块删除：win32 命令行有 32767 字符上限，整批传大量 tag 会
@@ -236,6 +242,13 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       let clearedStores = 0
       let failed = 0
       for (const { store, root } of stores.values()) {
+        // A3：格式守卫——拒写态下该 store 计入 failed（客户端 PARTIAL_DELETE
+        // 提示「有存储未完成，查看最近错误后重试」）；此处必须显式守卫：
+        // 本路径直写 index.json（不经 saveIndex 的守卫）
+        if (!(await snaps.guardStoreFormat(store))) {
+          failed += 1
+          continue
+        }
         try {
           // 先列出实际 tag；不要使用 entries 推导 tag，entries 是可丢失缓存。
           const output = await rt.runShell(rt.scripts.listTagsScript(store, gitExe), { timeoutMs: 120000, stdoutMaxBytes: 4194304 })
@@ -262,6 +275,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           deleted += tags.length
           clearedStores += 1
         } catch (error) {
+          // 单 store 失败计入 failed 继续（客户端按失败数提示可重试）
           failed += 1
           rt.recordError('recall delete all failed for ' + store.dir + ': ' + String(error))
         }
@@ -355,6 +369,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           snapshotEnabled: cfg.snapshotEnabled,
           archiveOriginal: cfg.archiveOriginal,
           retentionDays: cfg.retentionDays,
+          // A4：界面语言偏好随 values 下发（设置卡片据此渲染下拉并即时切语言）
+          locale: cfg.locale,
         },
         overridden,
         envLocks,
@@ -394,8 +410,16 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         if (!Array.isArray(patch.baseExcludes)) return { ok: false, code: E.RECALL_BAD_TYPE, message: 'baseExcludes 必须是字符串数组' }
         clean.baseExcludes = patch.baseExcludes.filter((p) => typeof p === 'string' && p.trim())
       }
+      // locale（A4）：三值白名单在端点侧再收一遍——schema union 已拦非法值，
+      // 这里是「直调 API 绕过表单」时的第二道（与其它字段的类型清洗同层）
+      if (patch.locale !== undefined) {
+        const v = String(patch.locale)
+        if (v !== 'auto' && v !== 'zh' && v !== 'en') return { ok: false, code: E.RECALL_BAD_TYPE, message: '界面语言必须是 auto / zh / en 之一' }
+        clean.locale = v
+      }
       if (!Object.keys(clean).length) return { ok: false, code: E.RECALL_EMPTY_PATCH, message: '没有可写入的配置字段' }
       let settings: SettingsService | null | undefined = null
+          // get 抛错按服务缺席处理：下方统一降级为 RECALL_SETTINGS_UNAVAILABLE 响应
           try { settings = ctx.get<SettingsService>('settings') } catch (error) { settings = null }
       const ns = settings ? resolveSettingsNs(ctx, settings) : null
       if (!settings || !ns || typeof settings.update !== 'function') {
@@ -404,6 +428,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       try {
         await settings.update(ns, clean)
       } catch (error) {
+        // 写失败转 RECALL_SETTINGS_WRITE_FAILED 响应（client 按 code 渲染文案）
         const se = error as { message?: string } | null | undefined
         return { ok: false, code: E.RECALL_SETTINGS_WRITE_FAILED, message: '配置写入失败：' + String(se && se.message ? se.message : error) }
       }
@@ -450,7 +475,10 @@ export function createRoutesManage(deps: RoutesManageDeps) {
               try {
                 const log = await query.readSession(sid)
                 title = titleFromEvents(log && log.events)
-              } catch (error) { title = null }
+              } catch (error) {
+                // 冷读失败标题按 null 缓存（列表已渲染，标题留白不阻断）
+                title = null
+              }
             }
           }
           sessionTitles.set(sid, title)
@@ -460,14 +488,18 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       }
       if (op === 'messages') {
         // supported 已在 manage 入口短路（A3：此处重复检查是死代码）
-        const reqs = Array.isArray(args && args.requests) ? args.requests!.slice(0, 200) : []
+        // 先落局部再收窄（A6）：Array.isArray 收窄不覆盖复杂表达式，去掉 `!` 断言
+        const reqsRaw = args && args.requests
+        const reqs = Array.isArray(reqsRaw) ? reqsRaw.slice(0, 200) : []
         const bySession = new Map<string, string[]>()
         for (const r of reqs) {
           const sid = r && r.sessionId ? String(r.sessionId) : null
           const mid = r && r.messageId ? String(r.messageId) : null
           if (!sid || !mid) continue
-          if (!bySession.has(sid)) bySession.set(sid, [])
-          bySession.get(sid)!.push(mid)
+          // get-or-create 守卫（A6）：替代 `get(...)!` 断言
+          const midList = bySession.get(sid)
+          if (midList) midList.push(mid)
+          else bySession.set(sid, [mid])
         }
         const texts: Record<string, string | null> = {}
         await runLimited(Array.from(bySession.entries()).map(([sid, mids]) => async () => {
@@ -479,7 +511,10 @@ export function createRoutesManage(deps: RoutesManageDeps) {
             if (query && typeof query.readSession === 'function') {
               try {
                 log = await query.readSession(sid)
-              } catch (error) { log = null }
+              } catch (error) {
+                // 冷读失败按无日志：该会话消息文本全部回落 null（叶子留白）
+                log = null
+              }
             }
           }
           for (const mid of mids) {
@@ -573,6 +608,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         let snapRoot = snap ? snap.root : root
         let store: StoreInfo | null = null
         if (snapRoot) {
+          // 解析失败按无 store：下落 locateSnapshotOnDisk 磁盘兜底链
           try { store = await rt.resolveStore(snapRoot) } catch (error) { store = null }
         }
         if (!store) {
@@ -581,6 +617,10 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           if (found) { store = found.store; snapRoot = found.root }
         }
         if (!store) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该快照不存在' }
+        // A3：格式守卫——拒写态下拒绝删除并给出可行动提示（code 供 client 渲染）
+        if (!(await snaps.guardStoreFormat(store))) {
+          return { ok: false, code: E.RECALL_FORMAT_BLOCKED, message: '磁盘格式不受支持，已停止写入；详见「最近错误」' }
+        }
         const finalStore = store
         // 非空断言：store 非 null 只能来自 resolveStore(snapRoot)（snapRoot 非 null
         // 才会尝试）或 locateSnapshotOnDisk（同时给出 root: string）——两条路径
@@ -639,6 +679,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           if (st && st.dir) hints.set(st.dir, root)
         }
         let dump
+        // dump 失败按空 lineage：树退化为无版本家族标记，不阻断列表
         try { dump = await dumpStores() } catch (error) { dump = new Map() }
         const out = []
         for (const info of dump.values()) {
@@ -654,6 +695,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
     // 没有 replace 时降级 settings.update 写 DEFAULTS。
     'config-reset': async (): Promise<ConfigResetResponse> => {
       let settings: SettingsService | null | undefined = null
+      // get 抛错按服务缺席处理：下方统一降级为 RECALL_SETTINGS_UNAVAILABLE 响应
       try { settings = ctx.get<SettingsService>('settings') } catch (error) { settings = null }
       const ns = settings ? resolveSettingsNs(ctx, settings) : null
       if (!settings || !ns || typeof settings.update !== 'function') {
@@ -666,6 +708,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           await settings.update(ns, Object.assign({}, DEFAULTS, { baseExcludes: DEFAULTS.baseExcludes.slice() }) as unknown as Record<string, unknown>)
         }
       } catch (error) {
+        // 写失败转 RECALL_SETTINGS_WRITE_FAILED 响应（client 按 code 渲染文案）
         const re = error as { message?: string } | null | undefined
         return { ok: false, code: E.RECALL_SETTINGS_WRITE_FAILED, message: '恢复默认失败：' + String(re && re.message ? re.message : error) }
       }

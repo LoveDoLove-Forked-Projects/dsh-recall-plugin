@@ -100,10 +100,10 @@ describe('client 纯逻辑', () => {
     expect(bytesToMb('x')).toBe('')
   })
 
-  it('KIND_INFO：kind 单表覆盖 modified/restored/added', () => {
+  it('KIND_INFO：kind 单表覆盖 modified/restored/added（A4 起 label 为词表键）', () => {
     expect(Object.keys(KIND_INFO).sort()).toEqual(['added', 'modified', 'restored'])
-    expect(KIND_INFO.modified.label).toBe('修改')
-    expect(KIND_INFO.added.label).toBe('删除')
+    expect(KIND_INFO.modified.labelKey).toBe('kind.modified')
+    expect(KIND_INFO.added.labelKey).toBe('kind.added')
   })
 
   it('groupByLineage：撤回两次 A→B→C 聚族，标注 v1/v2/v3', () => {

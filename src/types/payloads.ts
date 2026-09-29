@@ -37,6 +37,20 @@ export interface LineageEntry {
   time?: number
 }
 
+// recall-intent.json（A2 操作意图 journal，intent-journal.js 读写）：execute
+// both 分支「安全快照 → 回退 → 救援」的崩溃现场记录，启动/init 恢复时续做。
+// v 是格式版本（与 store 级 format marker 互补：这个管单条记录的形状演进）。
+export interface RecallIntent {
+  v: 1
+  op: 'execute'
+  messageId: string
+  root: string
+  safetyId: string
+  safetyOk: boolean
+  phase: 'rollback' | 'rescue'
+  time: number
+}
+
 // root.txt 内容（store 级元数据：工作区绝对路径；store 目录名是 root 的
 // 单向 SHA256，反解不了，跨工作区展示靠它映射回工作区名）
 export interface RootRecord {

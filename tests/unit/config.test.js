@@ -18,6 +18,8 @@ vi.mock('@deepseek-ai/schemastery', () => ({
     string: () => chain(),
     boolean: () => chain(),
     array: () => chain(),
+    // A4：locale 走 Schema.union(['auto','zh','en'])——mock 补齐同名工厂方法
+    union: () => chain(),
   },
 }))
 
@@ -54,6 +56,7 @@ describe('createConfig', () => {
       snapshotEnabled: true,
       archiveOriginal: true,
       retentionDays: 0,
+      locale: 'auto',
     })
   })
 
@@ -127,6 +130,14 @@ describe('createConfig', () => {
     expect(createConfig({}).retentionDays).toBe(0)
   })
 
+  it('locale：只接受三值，其余回落 auto（A4）', () => {
+    expect(createConfig({ locale: 'en' }).locale).toBe('en')
+    expect(createConfig({ locale: 'zh' }).locale).toBe('zh')
+    expect(createConfig({ locale: 'auto' }).locale).toBe('auto')
+    expect(createConfig({ locale: 'fr' }).locale).toBe('auto')
+    expect(createConfig({}).locale).toBe('auto')
+  })
+
   it('DEFAULTS 与 schema 默认值一致（config-reset 降级路径的单一事实源）', () => {
     const fresh = createConfig({})
     expect(DEFAULTS).toEqual({
@@ -139,6 +150,7 @@ describe('createConfig', () => {
       snapshotEnabled: fresh.snapshotEnabled,
       archiveOriginal: fresh.archiveOriginal,
       retentionDays: fresh.retentionDays,
+      locale: fresh.locale,
     })
   })
 

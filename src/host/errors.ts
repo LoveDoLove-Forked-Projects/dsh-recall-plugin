@@ -4,9 +4,9 @@
  * 端点响应 code 字段的常量表：此前 code 字符串（STALE/NO_SNAPSHOT/...）
  * 散布各 handler 内联，改一处漏一处。这里集中导出、值保持不变（code 是
  * client 已消费的线上契约，不改值只收拢），每条注释说明触发条件与 client
- * 预期行为。client 侧按 code 映射展示文案（见 client.js CODE_TEXT），未
- * 命中回退 host 返回的 message——机器码与人文案分层，为将来 locale 留口
- * （当前插件单语，不预建 i18n 抽象）。
+ * 预期行为。client 侧按 code 查 locales 词典的 `err.<code>`（未命中回退
+ * host 返回的 message）——机器码与人文案分层可译（A4）；码表本身仍是
+ * 「端点返回的 code 都在表内」的一致性扫描锚点。
  */
 
 // 预览后项目文件变化（P0-3 STALE total 比对失败）——client 自动重新预览
@@ -41,6 +41,10 @@ export const RECALL_NO_SESSION = 'NO_SESSION' as const
 export const RECALL_PARTIAL_DELETE = 'PARTIAL_DELETE' as const
 // 未知管理操作（manage 端点 op 未识别）
 export const RECALL_UNKNOWN_OP = 'UNKNOWN_OP' as const
+// A3：store 磁盘格式高于本插件支持（或格式标记损坏），写操作（快照/撤回/
+// 清理/删除）已按 fail-closed 短路；读路径（列表/状态）不受影响。
+// client 预期：提示升级插件或修复 marker，不要引导用户重试直到问题解决。
+export const RECALL_FORMAT_BLOCKED = 'FORMAT_BLOCKED' as const
 // 未知 API 端点（/api/recall/<name> 无对应端点；exact 路由未命中由宿主返回 404）
 export const RECALL_UNKNOWN_ENDPOINT = 'UNKNOWN_ENDPOINT' as const
 
@@ -68,6 +72,7 @@ export const ALL_CODES = Object.freeze([
   RECALL_NO_SESSION,
   RECALL_PARTIAL_DELETE,
   RECALL_UNKNOWN_OP,
+  RECALL_FORMAT_BLOCKED,
   RECALL_UNKNOWN_ENDPOINT,
   RECALL_INDEX_CORRUPT,
 ])

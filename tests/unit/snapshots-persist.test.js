@@ -37,6 +37,8 @@ function fakeRt(state) {
   const S = {
     stripBom: (t) => String(t == null ? '' : t).replace(/^\uFEFF/, ''),
     indexReadCmd: (dir) => 'READ ' + dir,
+    // A3：格式 marker 读取（非 READ 前缀回空串 = 缺席 → 守卫放行）
+    fileReadCmd: (f) => 'FMT ' + f,
   }
   const readDisk = (cmd) => (String(cmd).startsWith('READ ') ? diskIndex : '')
   return {
@@ -92,9 +94,10 @@ describe('P1-2 feedback 持久化', () => {
       { id: 'm-skip', time: 2000, root: ROOT, sessionId: SID, feedback: { skipped: ['a/'] } },
       { id: 'm-ok', time: 3000, root: ROOT, sessionId: SID },
     ])
-    // 直接把索引文本塞进 fake rt 的读回（loadIndex 走 runShellMeta，两处都要覆盖）
+    // 直接把索引文本塞进 fake rt 的读回（loadIndex 走 runShellMeta，两处都要覆盖）；
+    // A3：格式 marker 读取必须区分开（否则索引 JSON 会被当 marker 判损坏而拒写）
     const feedIdx = idx
-    rt.runShell = async () => feedIdx
+    rt.runShell = async (cmd) => (String(cmd).indexOf('FMT ') === 0 ? '' : feedIdx)
     rt.runShellMeta = async () => ({ text: feedIdx, truncated: false })
 
     await snaps.loadIndex(ROOT, SID)
@@ -113,7 +116,7 @@ describe('P1-2 feedback 持久化', () => {
       { id: 'm1', time: 1000, root: ROOT, sessionId: SID },
       { id: 'm2', time: 2000, root: ROOT, sessionId: SID },
     ])
-    rt.runShell = async () => legacyIdx
+    rt.runShell = async (cmd) => (String(cmd).indexOf('FMT ') === 0 ? '' : legacyIdx)
     rt.runShellMeta = async () => ({ text: legacyIdx, truncated: false })
 
     await snaps.loadIndex(ROOT, SID)
@@ -133,7 +136,7 @@ describe('P1-2 feedback 持久化', () => {
       { id: 'm2', time: 2000, root: ROOT, sessionId: SID, feedback: { skipped: 'not-array' } },
       { id: 'm3', time: 3000, root: ROOT, sessionId: SID, feedback: { failed: false } },
     ])
-    rt.runShell = async () => dirtyIdx
+    rt.runShell = async (cmd) => (String(cmd).indexOf('FMT ') === 0 ? '' : dirtyIdx)
     rt.runShellMeta = async () => ({ text: dirtyIdx, truncated: false })
 
     await snaps.loadIndex(ROOT, SID)
@@ -162,7 +165,7 @@ describe('P1-2 feedback 持久化', () => {
     const rt2 = fakeRt(state2)
     const snaps2 = createSnapshots({ sessions: { get: () => null } }, rt2, { baseExcludes: [] })
     state2.stores.set(ROOT, { dir: '/store', git: '/store/git/.git' })
-    rt2.runShell = async () => persisted
+    rt2.runShell = async (cmd) => (String(cmd).indexOf('FMT ') === 0 ? '' : persisted)
     rt2.runShellMeta = async () => ({ text: persisted, truncated: false })
     await snaps2.loadIndex(ROOT, SID)
 
@@ -184,6 +187,8 @@ describe('F-G1 rebuildOrphans 过滤 pre-rollback 条目', () => {
       stripBom: (t) => String(t == null ? '' : t).replace(/^\uFEFF/, ''),
       indexReadCmd: (dir) => 'READ ' + dir,
       listTagsWithTimeScript: () => 'LISTTAGS',
+      // A3：格式 marker 读取（非 LISTTAGS/READ 前缀回空串 = 缺席 → 守卫放行）
+      fileReadCmd: (f) => 'FMT ' + f,
     }
     return {
       state,
@@ -251,6 +256,8 @@ describe('PF-5 rebuildOrphans 四档守卫', () => {
       stripBom: (t) => String(t == null ? '' : t).replace(/^\uFEFF/, ''),
       indexReadCmd: (dir) => 'READ ' + dir,
       listTagsWithTimeScript: () => 'LISTTAGS',
+      // A3：格式 marker 读取（非 LISTTAGS/READ 前缀回空串 = 缺席 → 守卫放行）
+      fileReadCmd: (f) => 'FMT ' + f,
     }
     return {
       state,
@@ -342,10 +349,19 @@ describe('M1 环境错误诊断接线（captureSnapshot 两个失败入口）', 
     const rt = {
       state,
       resolveRoot: async () => ROOT,
-      resolveStore: async () => ({ dir: '/store', git: '/store/git/.git' }),
+      // 复刻生产语义：resolveStore 写缓存 → tryUpgradeToHome 从缓存读回
+      // （A3 守卫消费 store，undefined 会在 formatFile 处炸）
+      resolveStore: async (root) => {
+        const s = { dir: '/store', git: '/store/git/.git' }
+        state.stores.set(root, s)
+        return s
+      },
       tryUpgradeToHome: async (root) => state.stores.get(root),
+      // A3：格式 marker 读取走 runShell（'' = 缺席 → 守卫放行）；补戳走 writeTextViaShell
+      scripts: { stripBom: (t) => String(t == null ? '' : t), fileReadCmd: (f) => 'FMT ' + f },
+      runShell: async () => '',
+      writeTextViaShell: async () => {},
       ensureGit: async () => ({ ok: false, error: 'error: could not lock config file /home/kevin/dsh-recall-snapshots/x/git/.git/config: File exists' }),
-      scripts: {},
     }
     const snaps = createSnapshots({ get: () => null }, rt, { baseExcludes: [] })
 
@@ -363,14 +379,22 @@ describe('M1 环境错误诊断接线（captureSnapshot 两个失败入口）', 
     const rt = {
       state,
       resolveRoot: async () => ROOT,
-      resolveStore: async () => ({ dir: '/store', git: '/store/git/.git' }),
+      // 复刻生产语义：resolveStore 写缓存 → tryUpgradeToHome 从缓存读回（同上）
+      resolveStore: async (root) => {
+        const s = { dir: '/store', git: '/store/git/.git' }
+        state.stores.set(root, s)
+        return s
+      },
       tryUpgradeToHome: async (root) => state.stores.get(root),
       ensureGit: async () => ({ ok: true }),
       scripts: {
         stripBom: (t) => String(t == null ? '' : t).replace(/^\uFEFF/, ''),
         indexReadCmd: (dir) => 'READ ' + dir,
         snapshotScript: () => 'SNAP',
+        // A3：格式 marker 读取（非 SNAP 指令回空串 = 缺席 → 守卫放行）
+        fileReadCmd: (f) => 'FMT ' + f,
       },
+      writeTextViaShell: async () => {},
       runShellMeta: async () => ({ text: '', truncated: false }),
       runShell: async (cmd) => {
         if (String(cmd) === 'SNAP') throw new Error('git add fatal (exit 2): No space left on device')

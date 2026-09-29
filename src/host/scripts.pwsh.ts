@@ -672,6 +672,22 @@ export function lineageReadCmd(dir: string): string {
   return 'Get-Content -LiteralPath ' + psq(dir + '\\lineage.json') + ' -Raw -Encoding UTF8 -ErrorAction SilentlyContinue'
 }
 
+// 通用小文件读取（A3 引入）：任意小文件走同一形态——缺席静默回空串（与
+// indexReadCmd/lineageReadCmd/excludeReadCmd 同语义，调用侧按「空 = 不存在
+// 或为空」处理）。为每个文件加特化 ReadCmd 的复制粘贴模式到此为止，
+// A2 的 intent journal 等后续小文件读取直接复用本函数。
+//
+// 但「缺席回空串」在 win32 上必须显式构造：只写 Get-Content
+// -ErrorAction SilentlyContinue 时，SilentlyContinue 只吞报错文本，
+// **整个 PowerShell 进程的退出码仍是 1**（pwsh 与 Windows PowerShell 5.1
+// 实测同款），而 runShell 的退出码门禁（I14）会把它当执行失败抛出——调用方
+// 便无法区分「文件缺席」与「读失败」。A3 的格式守卫正因此把还没有 marker 的
+// 正常 store 误判成「标记损坏」并永久拒写（实弹发现，见 I41）。Test-Path
+// 分支让缺席路径以成功的末条命令收尾，与 POSIX 版 `cat … || true` 同语义。
+export function fileReadCmd(file: string): string {
+  return 'if (Test-Path -LiteralPath ' + psq(file) + ') { Get-Content -LiteralPath ' + psq(file) + ' -Raw -Encoding UTF8 -ErrorAction SilentlyContinue }'
+}
+
 // 旧版项目内 blobs 目录清理（仅 home 存储可用时调用，见 store.js cleanupLegacy）。
 // -ErrorAction SilentlyContinue（PF-5）：目标不存在是常态（极早期版本才有），
 // 不容错的话 Remove-Item 抛错 → cleanupLegacy 永远走不到「成功」分支，

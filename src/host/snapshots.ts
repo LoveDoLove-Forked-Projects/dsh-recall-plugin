@@ -253,6 +253,33 @@ export function parseTagsWithTime(text: unknown): Array<{ name: string; time: nu
   return out
 }
 
+// A3 格式 marker 判定（纯逻辑，模块级导出供单测）：把 <store>/format 的
+// 原文（或读取失败）折成「放行/拒写 + 原因」。marker 语义：缺席（空串）视为
+// 1——历史 store 从未写过该文件；合法版本号从 1 起（「0」按损坏处理，格式号
+// 没有 0）；非整数内容与读取失败（raw 传 null）都按损坏：fail-closed，宁停
+// 勿混——旧代码把新格式 store 当旧格式重写即数据破坏。读取失败由调用侧
+// 「不缓存、每次重试」兜底，不会把环境性故障钉死成永久拒写。
+export type StoreFormatReason = 'ok' | 'absent' | 'future' | 'corrupt' | 'unreadable'
+export interface StoreFormatVerdict {
+  ok: boolean
+  v: number | null
+  reason: StoreFormatReason
+}
+export function judgeStoreFormat(raw: unknown, supported: number): StoreFormatVerdict {
+  if (raw === null) return { ok: false, v: null, reason: 'unreadable' }
+  const t = String(raw == null ? '' : raw).trim()
+  let v: number
+  if (!t) {
+    v = 1 // 缺席 = 视为 v1
+  } else {
+    if (!/^\d+$/.test(t)) return { ok: false, v: null, reason: 'corrupt' }
+    v = parseInt(t, 10)
+    if (v < 1) return { ok: false, v: null, reason: 'corrupt' }
+  }
+  if (v > supported) return { ok: false, v, reason: 'future' }
+  return { ok: true, v, reason: t ? 'ok' : 'absent' }
+}
+
 // ---- 配置工厂 ----
 
 export interface SnapshotsApi {
@@ -269,6 +296,9 @@ export interface SnapshotsApi {
   feedbackFor(sessionId: string | null | undefined, messageId: string): Promise<SnapshotFeedback | {}>
   loadLineage(root: string): Promise<LineageEntry[]>
   recordLineage(root: string, childId: string, parentId: string): Promise<void>
+  // A3 格式守卫：写路径统一先过它（execute/maintenance/manage 的删除流在
+  // 各自 tag 清理动作前调用；capture/loadIndex/saveIndex/recordLineage 内部已挂）
+  guardStoreFormat(store: StoreInfo): Promise<boolean>
 }
 
 // 回退结果判别联合：成功恒带 count；失败带 error（可能半回退 partial）
@@ -298,12 +328,100 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   const FUSE_BACKOFF_CAP_MS = 60 * 60 * 1000
   const snapFailures = new Map()
 
+  // ---- A3：磁盘格式版本守卫 ----
+  // 补「新读旧」方向的防线：读取侧字段全部可选化只解决旧插件读新格式；
+  // 降级安装读到更高版本格式时行为未定义。per-store format marker：高版本/
+  // 损坏拒写放行读（fail-closed，宁停勿混），低版本（含缺席=1）照常读写。
+  const SUPPORTED_FORMAT = 1
+  // 确认缓存 TTL：marker 在场且为支持版本时短期免读（稳态零额外进程），
+  // 30s 对齐 index.ts excludeCache 的既有先例
+  const FORMAT_OK_TTL_MS = 30000
+  // store.dir -> 确认时刻：只记肯定结果（读到合法 marker），拒写/读失败/
+  // 缺席都不缓存 → 每次重试自愈（改回 marker 立即恢复，不等缓存过期）
+  const formatOkAt = new Map<string, number>()
+  // 拒写告警节流（每 store 5min 一条）：被拒的写路径每条消息都会经过，
+  // 不节流会把最近错误环刷满（与 quarantineErrorThrottled 同款纪律）
+  const formatBlockedAt = new Map<string, number>()
+
+  function formatFile(store: StoreInfo): string {
+    return store.dir + (rt.isWin ? '\\' : '/') + 'format'
+  }
+
+  // marker 读取：null 表示读命令失败（shell 未就绪等），交判据按不可读处理
+  async function readFormatRaw(store: StoreInfo): Promise<string | null> {
+    try {
+      return S.stripBom(await rt.runShell(S.fileReadCmd(formatFile(store)), { stdoutMaxBytes: 4096 }))
+    } catch (error) {
+      // 读失败按「不可读」交判据（fail-closed）；不缓存 → 下一条消息重试
+      return null
+    }
+  }
+
+  async function storeFormatVerdict(store: StoreInfo): Promise<StoreFormatVerdict> {
+    const at = formatOkAt.get(store.dir)
+    if (at !== undefined && Date.now() - at < FORMAT_OK_TTL_MS) return { ok: true, v: SUPPORTED_FORMAT, reason: 'ok' }
+    const verdict = judgeStoreFormat(await readFormatRaw(store), SUPPORTED_FORMAT)
+    // 只缓存「在场且受支持」；缺席留给补戳后再缓存（见 stampStoreFormat）
+    if (verdict.ok && verdict.reason === 'ok') formatOkAt.set(store.dir, Date.now())
+    return verdict
+  }
+
+  function formatBlockedThrottled(store: StoreInfo, verdict: StoreFormatVerdict): void {
+    const last = formatBlockedAt.get(store.dir) || 0
+    if (Date.now() - last < 5 * 60 * 1000) return
+    formatBlockedAt.set(store.dir, Date.now())
+    // 文案按原因三分：future=升级出口；corrupt=文件内容问题（可行动：改回 1）；
+    // unreadable=读不到（多为环境未就绪——shell/subprocess 在宿主启动早期不可用，
+    // 2026-09-30 实弹：headless 宿主预热期即命中）。三分而不是合并成
+    // 「不可读或内容非法」的原因：把环境抖动说成「标记损坏」会让用户去翻一个
+    // 根本没有问题的文件（误导），且它其实每次调用都会重试、下一条消息自愈。
+    // 文案纪律同前：≤140 字符、不嵌长路径。
+    const detail = verdict.reason === 'future'
+      ? '磁盘格式标记为 v' + verdict.v + '（本插件支持 v' + SUPPORTED_FORMAT + '）：写入已暂停（快照/撤回/清理），列表仍可查看；请升级插件'
+      : verdict.reason === 'corrupt'
+        ? '磁盘格式标记内容非法（应为 ' + SUPPORTED_FORMAT + '）：写入已暂停（快照/撤回/清理）；请检查该 store 目录下的 format 文件'
+        : '读不到快照库的磁盘格式标记（环境未就绪或文件不可读）：本次写入已暂停，下一条消息自动重试；持续出现请检查该 store 目录权限'
+    rt.recordError('recall store format blocked: ' + detail)
+  }
+
+  // 写路径守卫（A3）：返回 false 即拒写（已按节流 recordError 告警）。
+  async function guardStoreFormat(store: StoreInfo): Promise<boolean> {
+    const verdict = await storeFormatVerdict(store)
+    if (verdict.ok) return true
+    formatBlockedThrottled(store, verdict)
+    return false
+  }
+
+  // marker 补戳（挂在 saveIndex 写入路径）：缺席才写，稳态零额外进程——
+  // 建库（ensureGit）后的首次 index 写入自然覆盖新 store，老 store 在下次
+  // 写索引时自愈补齐；在 index 落盘前补戳（先立格式再落内容，中途崩溃时
+  // marker 已在，老索引 + v1 marker 无害）。写失败不阻断（索引照常落盘），
+  // 因未缓存确认而在下一条消息重试。
+  async function stampStoreFormat(store: StoreInfo, verdict: StoreFormatVerdict): Promise<void> {
+    if (!verdict.ok || verdict.reason !== 'absent') return
+    try {
+      await rt.writeTextViaShell(formatFile(store), String(SUPPORTED_FORMAT))
+      formatOkAt.set(store.dir, Date.now())
+    } catch (error) {
+      // 补戳失败已告警、不阻断；下条消息重试
+      rt.recordError('recall format stamp failed: ' + String(error))
+    }
+  }
+
   // 索引落盘：任意长度文本统一走 rt.writeTextViaShell（win32 base64
   // 分块 / POSIX stdin，实现见 store.js）——saveIndex 与 writeExclude
   // 曾逐字重复这套平台分叉，改一处漏一处的风险随合并消失。
   async function saveIndex(root: string, sessionId: string | null): Promise<void> {
     const store = state.stores.get(root)
     if (!store) return
+    // A3：格式守卫——高版本/损坏时索引写整体短路（tag/内存删除侧在各自
+    // 入口先行守卫，见 maintenance 与 routes-manage 的调用点）
+    const verdict = await storeFormatVerdict(store)
+    if (!verdict.ok) {
+      formatBlockedThrottled(store, verdict)
+      return
+    }
+    await stampStoreFormat(store, verdict)
     // 每条带 root：设置页「快照管理」要跨工作区展示列表，而 store 目录名
     // 是 root 的单向哈希、反解不了——index.json 是唯一能持久「哈希↔工作区
     // 路径」对应关系的地方。loadIndex 忽略 entry.root（以参数为准），
@@ -323,6 +441,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     try {
       await rt.writeTextViaShell(store.dir + (rt.isWin ? '\\' : '/') + 'index.json', JSON.stringify(entries))
     } catch (error) {
+      // 写失败已告警；索引丢失可从 tag 反推重建（rebuildOrphans），不阻断主链
       rt.recordError('recall saveIndex failed: ' + String(error))
     }
   }
@@ -331,6 +450,9 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     if (state.indexLoaded.has(root)) return
     const store = state.stores.get(root)
     if (!store) return
+    // A3：格式守卫——拒写态下不载入（隔离改名是写操作，也一并免掉）；
+    // 不标记 indexLoaded，下次 init/预热自然重试
+    if (!(await guardStoreFormat(store))) return
     let raw = ''
     let truncated = false
     try {
@@ -441,6 +563,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       rt.recordError('recall index corrupt: 已按空索引继续，坏文件保留为 ' + corrupt)
       return true
     } catch (error) {
+      // 隔离失败已告警（带节流）；返回 false 让 loadIndex 不标记已载入、下次重试
       quarantineErrorThrottled(store, 'recall index quarantine failed: ' + String(error))
       return false
     }
@@ -463,6 +586,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
         ? arr.filter((e) => e && typeof e.childId === 'string' && typeof e.parentId === 'string')
         : []
     } catch (error) {
+      // 损坏/不可读按「无 lineage」继续（不隔离不告警，语义区分见函数头注释）
       return []
     }
   }
@@ -470,6 +594,8 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   async function recordLineage(root: string, childId: string, parentId: string): Promise<void> {
     const store = state.stores.get(root)
     if (!store) return
+    // A3：格式守卫——拒写态下不落 lineage（纯增量 UI 数据，静默跳过）
+    if (!(await guardStoreFormat(store))) return
     const sep = rt.isWin ? '\\' : '/'
     const existing = await loadLineage(root)
     // 去重：同一 (childId, parentId) 只记一次（fork 幂等）
@@ -478,6 +604,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       try {
         await rt.writeTextViaShell(store.dir + sep + 'lineage.json', JSON.stringify(existing))
       } catch (error) {
+        // 已告警；lineage 只是展示增强，写失败不影响快照/回退主链
         rt.recordError('recall recordLineage failed: ' + String(error))
       }
     }
@@ -540,6 +667,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       }
       await saveIndex(root, sessionId)
     } catch (error) {
+      // 已告警；孤立重建失败不致命——快照本体在 tag 上，下次启动会再试
       rt.recordError('recall rebuildOrphans failed: ' + String(error))
     }
   }
@@ -561,6 +689,8 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     // tryUpgradeToHome 对刚 resolveStore 的 root 恒返回非空（缓存已写入）；
     // 断言仅为类型收口，运行语义与迁移前一致（原代码直接透传返回值）
     store = (await rt.tryUpgradeToHome(root))!
+    // A3：格式守卫（fail-closed）——高版本/损坏 store 拒建快照（写操作）
+    if (!(await guardStoreFormat(store))) return
     // ensureGit 失败（issue #11 主线缺口）：原先静默 return，不进
     // snapFeedback，客户端空轮询 20 次后放弃、用户零感知。现在走与
     // snapshotScript 失败相同的反馈通道——buildFeedbackError 把原始
@@ -575,12 +705,13 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     }
     await loadIndex(root, sessionId)
     try {
-      const out = await rt.runShell(S.snapshotScript(root, store!, state.gitExe || '', messageId, BASE()), { timeoutMs: 600000, stdoutMaxBytes: 65536 })
+      const out = await rt.runShell(S.snapshotScript(root, store, state.gitExe || '', messageId, BASE()), { timeoutMs: 600000, stdoutMaxBytes: 65536 })
       snapFailures.delete(root)
       state.snapshots.set(String(messageId), { root, time: time || Date.now(), sessionId })
       await saveIndex(root, sessionId)
       setFeedback(messageId, { skipped: parseSkipped(out) })
     } catch (error) {
+      // 已告警并回传失败反馈（客户端轮询到即弹提示）；handleSnapshotFailure 走 prune+熔断善后
       rt.recordError('recall snapshot failed: ' + String(error))
       // 分类后的提示替代原始 stderr 直传（M1-D4）：识别为环境错误时给
       // 可行动文案，未识别时 buildFeedbackError 内部回落原文截断（保现状）
@@ -597,7 +728,11 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     const keep = rec && ((rec.failed) || (Array.isArray(rec.skipped) && rec.skipped.length))
     if (keep) state.snapFeedback.set(id, rec)
     else state.snapFeedback.delete(id)
-    if (state.snapFeedback.size > 200) state.snapFeedback.delete(state.snapFeedback.keys().next().value!)
+    // 环形上限超出即删最旧项（Map 迭代序 = 插入序）；取值判空替代 `!` 断言（A6）
+    if (state.snapFeedback.size > 200) {
+      const oldest = state.snapFeedback.keys().next().value
+      if (oldest !== undefined) state.snapFeedback.delete(oldest)
+    }
   }
 
   // snapshot-info 端点的反馈查询：优先逐消息记录；无记录但该 root 熔断中
@@ -627,6 +762,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       try {
         await rt.runShell(S.pruneScript(store, state.gitExe), { timeoutMs: 600000, stdoutMaxBytes: 4096 })
       } catch (error) {
+        // prune 失败已告警；善后整体 best-effort（理由见函数头注释）
         rt.recordError('recall prune after snapshot failure failed: ' + String(error))
       }
     }
@@ -675,8 +811,9 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
         // 一律按「可能半回退」处理，交给 execute 侧救援（H1）。
         return { ok: false, partial: true, error: '回退脚本未正常完成（工作区可能处于半回退状态）：' + text.slice(0, 300) }
       }
-      const deleted = parseInt(m[1], 10)
-      const restored = parseInt(m[2], 10)
+      // 捕获组缺席时 parseInt 得 NaN，由下方 Number.isNaN 兜零（与旧行为一致）
+      const deleted = parseInt(m[1] ?? '', 10)
+      const restored = parseInt(m[2] ?? '', 10)
       return { ok: true, count: (Number.isNaN(deleted) ? 0 : deleted) + (Number.isNaN(restored) ? 0 : restored) }
     } catch (error) {
       // runShell 抛错（脚本异常终止）：工作区同样可能半回退，交 execute 救援。
@@ -719,6 +856,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
           result = detail.cut
           fallback = !detail.found
         } catch (error) {
+          // readSession 抛错（seeded 会话恒抛，I33）换 observeSession 跳
           fallback = true
         }
         // 第二跳：observeSession（契约可选——旧版 dsh 无此 API 时维持原行为）。
@@ -732,6 +870,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
               disposeLease(lease)
             }
           } catch (error) {
+            // 两跳都失败落 null：保守降级——文件回退不受影响，面板不出对话选项
             result = null
           }
         }
@@ -769,9 +908,10 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       const log = await query.readSession(sessionId)
       return log && Array.isArray(log.events) ? scanStaleQueueItemIds(log.events, cutSeq) : []
     } catch (error) {
+      // 三跳都失败按空数组（= 不清理，残留项可手动删；见函数头注释）
       return []
     }
   }
 
-  return { saveIndex, loadIndex, readExclude, writeExclude, rebuildOrphans, captureSnapshot, diffFor, rollbackFor, resolveCutSeq, resolveStaleQueueItemIds, feedbackFor, loadLineage, recordLineage }
+  return { saveIndex, loadIndex, readExclude, writeExclude, rebuildOrphans, captureSnapshot, diffFor, rollbackFor, resolveCutSeq, resolveStaleQueueItemIds, feedbackFor, loadLineage, recordLineage, guardStoreFormat }
 }

@@ -2,7 +2,7 @@
 
 > 配套文档：[smoke-checklist.md](./smoke-checklist.md)（测试项清单；逐项 ✅/△ 结果注在对应条目上）｜ 本文件只登记**会话级执行记录**：日期、环境、结果、发现与发版判定。
 > 约定：每次执行后追加一节（日期 + 范围）；出现失败的记 issue 并回链；清单全部通过后与 checklist 一起移入 `completed/`。
-> 状态总览：第一〜七节均已执行通过（2026-08-29：Windows 侧 + WSL 侧 + 修复实施 + v2.1.1 本机验证 + PF 性能批次实弹）。
+> 状态总览：第一〜八节均已执行通过（一〜七节 2026-08-29：Windows 侧 + WSL 侧 + 修复实施 + v2.1.1 本机验证 + PF 性能批次实弹；第八节 2026-09-18：仅撤回对话模式 5/5）。第九节（rewind 加固批次 A2/A3/A4，2026-09-30 登记）待实弹。
 
 ## 2026-08-29 Windows 侧（第一〜四节）
 
@@ -200,3 +200,20 @@
 4. **[观察] 自动化任务默认关闭**：0.2.0-rc.1 把 `schedule`/`time-context` 从 `dsh-web-app` patch 移除、改由可选 bundle `@deepseek-ai/dsh-experimental-schedule-bundle` 提供（插件管理页开关默认关）；与撤回插件无耦合，仅提示用户能力开关变化。
 
 **发版判定**：0.2.0-rc.1 升级实弹无阻塞项。本轮扩范围改动已发 **2.4.6**（2026-09-29：npm `latest` + GitHub Release `v2.4.6` 双上线，tag 指向 `484bf99`），并已切回 npm 模式复验「npm 模式 + 0.2.0-rc.1 不被启动门禁跳过」——核验记录见 compat-audit 的 2.4.6 段。测试产物 `D:\tmp\recall-h0\smoke-020.txt`（回退后为 `v1 line`）与本次 2+1 条快照 / 1 条 lineage 留 store 供复验。
+
+## 2026-09-30 rewind 加固批次（第九节，A1–A8 活体验收）
+
+- **环境**：Windows 10 ｜ dsh 0.2.0-rc.2（全局）｜ dsh-recall-plugin **link 模式**（`~/.dsh/profiles/web` 与临时接线的 `headless` profile，指向工作区 `lib/`）｜ dsh web `127.0.0.1:3080`（token 换 cookie 后走 `/api/recall/*` 直调）｜ 测试工作区 `D:\tmp\rw-smoke`（含 1500 文件的 bulk/ 子树）与 `D:\tmp\rw-smoke2\target\debug`（构建产物 root 场景）｜ 消息由 headless 宿主产生（web 宿主不驱动模型也能触发快照捕获），UI 侧用内置浏览器实弹。
+- **结果**：R-1〜R-6 六项**全部通过**（证据逐项注在清单条目上）。门禁：`typecheck` / `npm test` 478 / `npm run test:client` 83 / `verify:host` 全绿；`npm run build` 产物同步。
+
+**实弹发现（按严重度，除第 5 项外均已在本批次修复并重跑门禁）**：
+
+1. **[缺陷·严重] win32 上 `fileReadCmd` 读缺席文件退出码为 1 → A3 格式守卫把正常 store 锁死**：启动日志实测 `recall store format blocked: 磁盘格式标记不可读或内容非法…`——`Get-Content -ErrorAction SilentlyContinue` 只吞报错文本，**进程退出码仍是 1**（pwsh 与 PS 5.1 双版本实测），runShell 的退出码门禁（I14）据此抛错，守卫遂把「没有 marker」判成「标记损坏」；由于守卫同时挂在 capture 与 saveIndex 上，补戳永远写不下去 → **快照/撤回/列表载入全停且不可自愈**（POSIX 侧靠 `cat … || true` 无此问题）。修复＝Test-Path 分支让缺席路径以成功收尾（与 POSIX 同语义）；补 `scripts-contract` 文本钉；沉淀为 compat-audit **I41**。修复后重启复验：启动零告警、首条快照照常落盘并自动补戳 `format=1`。
+2. **[缺陷·中] 启动预热 async IIFE 未接 catch → 宿主退出期可 fatal**：`dsh --profile headless --help` 实测 `dsh: fatal load failure: Error: cannot get required service "sessions" in inactive context`（栈指向预热里的 `ctx.sessions.list()`）——宿主打印帮助后立即卸载，预热恰在 inactive context 上取值，未接的 rejection 被 cordis 加载器记成 fatal。修复＝IIFE 整体 `.catch(() => {})`（预热是纯优化，任何失败都不该影响宿主启动/退出）。
+3. **[缺陷·低] 守卫读失败文案误报「内容非法」**：读命令失败（宿主启动早期 shell/subprocess 未就绪）与 marker 内容损坏共用一句「不可读或内容非法」，把用户引向一个没有问题的文件（headless 预热期实测命中）。修复＝按 future / corrupt / unreadable 三分文案，单测钉「读失败不得出现内容非法字样」。
+4. **[缺陷·中] i18n 三处失配（浏览器实弹）**：① 英文确认句拼接缺空格（`sent.1501 files`）；② 语言切换后设置卡片的两个分区折叠头停在挂载时语言（外壳文案在 ConfigForm 之外渲染，不重渲染）；③ 保存提示用切换前的旧语言（提示是保存时刻取词的字符串）。修复＝en 词条补句首空格、ConfigForm 增 `onLocaleApplied` 回调驱动外壳重渲染、locale 补丁先本地落地再报成功；三处均补进 `tests/client/i18n.test.ts` 并在浏览器复验通过（切 English/切回 auto 三处同时生效）。
+5. **[观察·既有·未修] 撤回确认面板贴近输入框时按钮被输入框遮挡**：面板锚定在消息附近、整体下移时会与官方 composer 重叠，`取消/确认回退` 被 `RlGAzG_input` 盖住点不中（两次实弹各自经 `elementFromPoint` 复核命中输入框）；滚回上方后正常。属既有布局问题（非本批次引入），留待单独评估。另：官方侧栏工作区悬停信息卡移开鼠标后长期驻留（官方 UI 现象，与插件无关）。
+6. **[观察] recover 的两个挂载点实测分工**：崩溃续做（R-1）由**预热腿**完成（重启日志直接出现 `recovered interrupted rollback … 工作区已复位到安全快照`）；R-2 的「一致即仅清理」分支由 **init 腿**完成（空闲进程被 create 时预热腿恰好未覆盖到该 root）。两腿幂等（`handled` 去重），用户可见语义一致；「清理」是写空串而非删除文件（读侧空串按无记录处理）。
+7. **[观察] 记实弹手法**：headless 宿主可直接产生「真实用户消息 + 快照」（web profile 不动模型也能复现），快照与索引由 headless 侧的插件写入、web 宿主经磁盘读回——`init/snapshot-info/preview/execute/status/manage` 全链可纯 API 直调验证；杀进程窗口用「轮询 `recall-intent.json` 出现即杀」稳定命中（两次分别落在回退前与回退中，恰好覆盖 inject 与 recover 两条分支）。
+
+**发版判定**：第九节通过，无阻塞项；本批次修复（含 fileReadCmd 严重缺陷）随下一次发版一起上线。测试产物保留：`D:\tmp\rw-smoke`（含 bulk/ 1500 文件与 `a.txt=v1-killed`）、`D:\tmp\rw-smoke2\target\debug`、store `dff4e521…`（快照 1 条 + 安全快照多个 + 已清空的 intent journal 留档）供复验；web/headless profile 已还原为 npm 模式（2.4.6）、3080 服务已停。

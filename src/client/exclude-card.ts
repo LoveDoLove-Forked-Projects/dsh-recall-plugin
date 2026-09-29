@@ -15,7 +15,7 @@ import type { ExcludeGetResponse, ExcludeSetResponse } from '../types/api.js'
 const EXCLUDE_SUGGESTIONS = ['dist/', 'build/', 'out/', 'coverage/', '*.log', '.env']
 
 export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFilesSection: () => import('react').ReactNode } {
-  const { api } = util
+  const { api, t } = util
 
   // 单个 exclude 文件的编辑卡片。draft/baseline 分离实现「未保存修改」判定
   // （textarea 所见即将保存的原文，不偷偷规范化）；key=file.path 挂载，
@@ -36,24 +36,27 @@ export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFile
       setDraft((d: string) => (d && !d.endsWith('\n') ? d + '\n' : d) + pattern + '\n')
     }
 
+    // 局部量改名 pattern（不叫 t）：与词表函数 t 撞名会让「这个 t 是取词」
+    // 的读法在函数里失效（同名遮蔽是纯噪音，改名零成本）
     function addQuick() {
-      const t = quick.trim()
-      if (!t) return
-      appendPattern(t)
+      const pattern = quick.trim()
+      if (!pattern) return
+      appendPattern(pattern)
       setQuick('')
     }
 
     function save(): void {
       if (state.busy || !dirty) return
-      setState({ busy: true, message: '保存中…', error: false })
+      setState({ busy: true, message: t('exclude.msg.saving'), error: false })
       api<ExcludeSetResponse>('exclude-set', { path: file.path, content: draft }).then((res) => {
         if (res && res.ok) {
           setBaseline(draft)
-          setState({ busy: false, message: '已保存，下一次快照 / 预览 / 回退时生效', error: false })
+          setState({ busy: false, message: t('exclude.msg.saved'), error: false })
         } else {
-          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || '保存失败', error: true })
+          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || t('exclude.msg.saveFailed'), error: true })
         }
       }).catch((error) => {
+        // 保存异常落错误态（与响应 ok=false 同显式面）
         setState({ busy: false, message: String(error), error: true })
       })
     }
@@ -74,14 +77,14 @@ export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFile
       // 前会撑出断裂换行（实测丑），独立行 break-all 整齐折行。
       React.createElement('div', { className: 'dsh-recall-ex-note' },
         file.home
-          ? '此配置全局共享，对所有工作区的快照生效。'
-          : 'home 目录不可写时此工作区降级存储，排除配置独立生效。'
+          ? t('exclude.note.home')
+          : t('exclude.note.fallback')
       ),
-      React.createElement('div', { className: 'dsh-recall-ex-path' }, '存储位置：' + file.path),
-      React.createElement('div', { className: 'dsh-recall-ex-note' }, 'gitignore 语法，一行一条，支持 # 注释；命中项不进快照、不被回退触碰。'),
+      React.createElement('div', { className: 'dsh-recall-ex-path' }, t('exclude.path', { path: file.path })),
+      React.createElement('div', { className: 'dsh-recall-ex-note' }, t('exclude.syntax')),
       React.createElement('textarea', {
         className: 'dsh-recall-ex-area',
-        'aria-label': '快照排除模式列表（gitignore 语法，一行一条）',
+        'aria-label': t('exclude.area.aria'),
         value: draft,
         spellCheck: false,
         onChange: (e: import('react').ChangeEvent<HTMLTextAreaElement>) => setDraft(e.target.value)
@@ -90,26 +93,26 @@ export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFile
         React.createElement('input', {
           className: 'dsh-recall-ex-input',
           value: quick,
-          placeholder: '输入路径或模式，回车快速添加',
-          'aria-label': '快速添加排除模式',
+          placeholder: t('exclude.quick.placeholder'),
+          'aria-label': t('exclude.quick.aria'),
           onChange: (e: import('react').ChangeEvent<HTMLInputElement>) => setQuick(e.target.value),
           onKeyDown: (e: import('react').KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); addQuick() } }
         }),
-        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: addQuick }, '添加'),
+        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: addQuick }, t('exclude.add')),
         ...suggestions.map((s) => React.createElement('button', {
           key: 'chip-' + s,
           type: 'button',
           className: 'dsh-recall-ex-chip',
-          title: '点击追加 ' + s,
+          title: t('exclude.chip.title', { pattern: s }),
           onClick: () => appendPattern(s)
         }, s))
       ),
       React.createElement('div', { className: 'dsh-recall-panel-actions' },
-        state.message ? React.createElement('span', { role: 'status', 'aria-live': 'polite', className: 'dsh-recall-ex-status' + (state.error ? ' dsh-recall-ex-status-error' : ' dsh-recall-ex-status-success') }, (state.error ? '错误：' : '') + state.message) : null,
-        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', disabled: !dirty || state.busy, onClick: discard }, '放弃修改'),
+        state.message ? React.createElement('span', { role: 'status', 'aria-live': 'polite', className: 'dsh-recall-ex-status' + (state.error ? ' dsh-recall-ex-status-error' : ' dsh-recall-ex-status-success') }, (state.error ? t('common.errorPrefix') : '') + state.message) : null,
+        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', disabled: !dirty || state.busy, onClick: discard }, t('common.discard')),
         // 保存升主色实心（与配置表单同一约定：每卡唯一主动作，对齐官方插件卡
         // footer 的 discard 幽灵 + save 实心组合）
-        React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-primary', disabled: !dirty || state.busy, onClick: save }, '保存')
+        React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-primary', disabled: !dirty || state.busy, onClick: save }, t('common.save'))
       )
     )
   }
@@ -123,9 +126,9 @@ export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFile
     function load(): void {
       api<ExcludeGetResponse>('exclude-get', {}).then((res) => {
         if (res && res.ok) { setFiles(res.files || []); setError(''); return }
-        if (res && res.unsupported) { setError('当前平台不支持快照功能，排除配置不可用。'); return }
-        setError((res && ((res as { message?: string }).message || (res as { error?: string }).error)) || '无法读取排除配置')
-      }).catch((e) => setError(String(e)))
+        if (res && res.unsupported) { setError(t('exclude.unsupported')); return }
+        setError((res && ((res as { message?: string }).message || (res as { error?: string }).error)) || t('exclude.loadFailed'))
+      }).catch((e) => setError(String(e))) // 读取异常落错误态（含重试按钮）
     }
 
     React.useEffect(() => { load() }, [])
@@ -134,15 +137,15 @@ export function buildExcludeCards(React: ReactApi, util: UtilApi): { ExcludeFile
       return React.createElement('div', { className: 'dsh-recall-ex-card' },
         React.createElement('div', { className: 'dsh-recall-ex-note' }, error),
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: load }, '重试')
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: load }, t('common.retry'))
         )
       )
     }
     if (files === null) {
-      return React.createElement('div', { className: 'dsh-recall-ex-note' }, '正在加载排除配置…')
+      return React.createElement('div', { className: 'dsh-recall-ex-note' }, t('exclude.loading'))
     }
     if (!files.length) {
-      return React.createElement('div', { className: 'dsh-recall-ex-note' }, '尚未创建任何快照存储：在任意工作区发送一条消息后，这里会出现可编辑的排除配置。')
+      return React.createElement('div', { className: 'dsh-recall-ex-note' }, t('exclude.empty'))
     }
     return React.createElement('div', { className: 'dsh-recall-ex-card' },
       ...files.map((f) => React.createElement(ExcludeCard, { key: f.path, file: f }))

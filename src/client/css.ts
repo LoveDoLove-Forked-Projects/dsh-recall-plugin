@@ -81,11 +81,11 @@ export const CSS = [
   // 变色、不套 ring。替换 V2-5 的 border-l3 环方案（当时核验的是旧版写法）。
   '.dsh-recall-btn:focus-visible,.dsh-recall-ex-chip:focus-visible,.dsh-recall-tree-toggle:focus-visible,.dsh-recall-cfg-switch:focus-visible,.dsh-recall-icon-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px}',
   '.dsh-recall-cardbtn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}',
-  '.dsh-recall-ex-input:focus-visible,.dsh-recall-cfg-input:focus-visible,.dsh-recall-ex-area:focus-visible,.dsh-recall-cfg-area:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}',
+  '.dsh-recall-ex-input:focus-visible,.dsh-recall-cfg-input:focus-visible,.dsh-recall-cfg-select:focus-visible,.dsh-recall-ex-area:focus-visible,.dsh-recall-cfg-area:focus-visible{border-color:var(--dsw-alias-brand-primary);outline:none}',
   // 输入类 hover 中间态：rest l4 → hover l3 → focus brand 三级递进，与按钮的
   // 描边 hover 逻辑同语言；:not(:focus-visible) 收口是防 hover 伪类（特异性更
   // 高）把 focus 的品牌色描边刷回 l3
-  '.dsh-recall-ex-input:hover:not(:disabled):not(:focus-visible),.dsh-recall-cfg-input:hover:not(:disabled):not(:focus-visible),.dsh-recall-ex-area:hover:not(:disabled):not(:focus-visible),.dsh-recall-cfg-area:hover:not(:disabled):not(:focus-visible){border-color:var(--dsw-alias-border-l3)}',
+  '.dsh-recall-ex-input:hover:not(:disabled):not(:focus-visible),.dsh-recall-cfg-input:hover:not(:disabled):not(:focus-visible),.dsh-recall-cfg-select:hover:not(:disabled):not(:focus-visible),.dsh-recall-ex-area:hover:not(:disabled):not(:focus-visible),.dsh-recall-cfg-area:hover:not(:disabled):not(:focus-visible){border-color:var(--dsw-alias-border-l3)}',
   '.dsh-recall-toast{position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:10000;max-width:min(560px,86vw);box-sizing:border-box;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border:1px solid var(--dsw-alias-border-l2);border-radius:12px;padding:10px 16px;font-size:13px;line-height:1.5;box-shadow:0 8px 28px rgba(0,0,0,.22);display:flex;align-items:baseline;gap:8px;opacity:0;transition:opacity .25s ease;pointer-events:auto}',
   '.dsh-recall-toast.dsh-recall-toast-in{opacity:1}',
   '.dsh-recall-toast-tag{flex:none;font-weight:600;color:var(--dsw-alias-state-error-primary)}',
@@ -248,13 +248,17 @@ export const CSS = [
   '.dsh-recall-cfg-input{flex:none;width:var(--dsh-recall-input-w);box-sizing:border-box;height:34px;font:inherit;font-size:13px;text-align:right;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;padding:0 12px}',
   // disabled 随官方 input：文字降 tertiary，不动透明度（整框变淡会让「框还在
   // 只是不可写」的语义变含糊）
-  '.dsh-recall-cfg-input:disabled,.dsh-recall-cfg-area:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}',
+  '.dsh-recall-cfg-input:disabled,.dsh-recall-cfg-select:disabled,.dsh-recall-cfg-area:disabled{color:var(--dsw-alias-label-tertiary);cursor:default}',
   // 数字输入框隐藏原生加减微调按钮（spinner）：34px 高的定宽框里 spinner 挤占
   // 右侧数字区、跨引擎渲染不一（Chromium 上下箭头 / Firefox 无），与「右对齐
   // 数字」的纵向扫描相冲；隐藏后键盘 ↑↓ 与直接输入仍可用，步进语义不丢。
   // scope 到 cfg-input，不外溢影响宿主或其他插件的 number 输入。
   '.dsh-recall-cfg-input::-webkit-inner-spin-button,.dsh-recall-cfg-input::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}',
   '.dsh-recall-cfg-input{-moz-appearance:textfield;appearance:textfield}',
+  // 语言下拉（A4）：与数字输入框同一套描边/底色/高度配方，差异只在文本左对齐
+  // 与宽度自适应——select 的选项文本长度不可控（Follow system (auto) 最长），
+  // 定宽会截断；min-width 与输入框同宽保住「控件列」的视觉对齐基线
+  '.dsh-recall-cfg-select{flex:none;box-sizing:border-box;height:34px;min-width:var(--dsh-recall-input-w);font:inherit;font-size:13px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;padding:0 8px 0 10px}',
   '.dsh-recall-cfg-area{font-family:inherit;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-3);border:.5px solid var(--dsw-alias-border-l4);border-radius:8px;padding:6px 8px;min-height:64px;box-sizing:border-box;width:100%;grid-column:2}',
   // 布尔开关：官方设置表单的布尔字段用 role=switch 滑钮而非原生 checkbox
   //（vCGm7G_switch 逐字配方：36×20 轨道 border-l3 底、开=brand-primary、

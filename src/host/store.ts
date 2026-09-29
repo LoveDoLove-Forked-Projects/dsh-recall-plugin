@@ -71,6 +71,7 @@ export async function resolvePosixHomeBase(
     )
     return homedir
   } catch (error) {
+    // 迁移探测失败不阻断启动：沿用旧位继续（已 recordError 告警）
     deps.recordError('recall 旧快照容器迁移探测失败，沿用旧位: ' + String(error))
     return homedir
   }
@@ -84,7 +85,7 @@ export async function resolvePosixHomeBase(
 // 与模板输出逐字对应（改标记必须两侧同步）。
 export function parseCleanupResult(out: unknown): { otherPid: number | null; skippedFresh: boolean } {
   const m = String(out || '').match(/CLEANUP_OTHER_INSTANCE\s+(\d+)/)
-  if (m) return { otherPid: parseInt(m[1], 10), skippedFresh: false }
+  if (m) return { otherPid: parseInt(m[1] ?? '', 10), skippedFresh: false }
   if (String(out || '').indexOf('CLEANUP_SKIPPED_FRESH_LOCK') >= 0) return { otherPid: null, skippedFresh: true }
   return { otherPid: null, skippedFresh: false }
 }
@@ -221,8 +222,12 @@ export async function runViaSpawn(spawn: SpawnLike, req: DirectShellRequest): Pr
           const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk))
           chunks.push(buf)
           total += buf.length
-          while (chunks.length > 1 && total - chunks[0].length > maxBytes) {
-            total -= chunks[0].length
+          // 头块长度落局部再判空（A6）：循环条件里的索引读取在类型层可能
+          // undefined，先取头再一并校验「头存在且仍超预算」。
+          while (chunks.length > 1) {
+            const head = chunks[0]
+            if (!head || total - head.length <= maxBytes) break
+            total -= head.length
             chunks.shift()
           }
         },
@@ -388,6 +393,8 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
             sandboxPolicy: { mode: 'danger-full-access', workspaceRoot: (sp && sp.workspaceRoot) || process.cwd() },
           }))
         } catch (error) {
+          // 探针失败折 null → judgeShellDialect 判 bash 走直连通道（对 pwsh
+          // 模板同样兼容、误判不致命，论证见上方注释）
           res = null
         }
         const dialect = judgeShellDialect(res)
@@ -503,7 +510,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
   // 安全降级为本兜底加入前的行为。
   function extractGitDir(command: string): string | null {
     const m = String(command).match(/(?:^|\n)[ \t]*(?:\$g|g)[ \t]*=[ \t]*'([^']+)/)
-    return m ? m[1] : null
+    return m ? (m[1] ?? null) : null
   }
 
   async function cleanupAfterGitFailure(command: string): Promise<void> {
@@ -580,6 +587,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
       const path = scripts.stripBom(await runShell(scripts.resolveGitScript(), { stdoutMaxBytes: 4096 })).trim()
       state.gitExe = path || ''
     } catch (error) {
+      // 解析失败缓存空串：脚本侧 $git 回退裸 git 走 PATH，真正失败在执行时暴露
       state.gitExe = ''
     }
     return state.gitExe
@@ -614,6 +622,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
         // probeHomeScript 仅 posix 侧存在，本方法只在 POSIX 运行时被触达
         probed = (await runShell((scripts as PosixScripts).probeHomeScript(), { stdoutMaxBytes: 4096 })).trim()
       } catch (error) {
+        // 探测失败按空串继续：三档选择退到进程 env/homedir（resolvePosixHomeBase）
         probed = ''
       }
       state.posixHomeBase = await resolvePosixHomeBase(
@@ -649,6 +658,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
       const homeDir = await homeDirFor(probeRoot)
       if (homeDir) container = homeDir.slice(0, homeDir.length - 65)
     } catch (error) {
+      // 推导失败返回 null 且不缓存（下次调用自然重试，见函数头注释）
       container = null
     }
     if (container) state.homeContainer = container
@@ -692,6 +702,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
   // 回工作区名。best-effort（失败不阻断主流程），旧 store 在 resolveStore
   // 再次被调用（重启后首个 init/快照/管理列表）时自然补写，存量自愈。
   function persistRootHint(store: StoreInfo, root: string): void {
+    // best-effort：root.txt 只是展示元数据，写失败不阻断主链（下次 resolveStore 自愈重写）
     writeTextViaShell(store.dir + SEP + 'root.txt', root).catch(() => {})
   }
 
@@ -705,6 +716,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
     try {
       homeDir = await homeDirFor(root)
     } catch (error) {
+      // 解析失败按「无 home」处理：直接走项目内降级 store（功能优先）
       homeDir = null
     }
     if (homeDir) {
@@ -715,6 +727,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
         persistRootHint(store, root)
         return store
       } catch (error) {
+        // 已 recordError 告警，落回项目内降级 store 继续（见函数头注释）
         recordError('recall home store unavailable, falling back to workspace: ' + String(error))
       }
     }
@@ -740,6 +753,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
     try {
       homeDir = await homeDirFor(root)
     } catch (error) {
+      // 解析失败按无 home：沿用降级 store，下轮重试（节流已记）
       homeDir = null
     }
     if (!homeDir) return store
@@ -756,6 +770,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
       console.error('recall store upgraded to home:', root)
       return upgraded
     } catch (error) {
+      // 迁移失败保留降级 store 继续服务；5min 节流（HOME_RETRY_MS）避免白试
       recordError('recall home upgrade failed: ' + String(error))
       return store
     }
@@ -786,6 +801,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
     try {
       await runShell(scripts.renameFileCmd(tmp, file), { stdoutMaxBytes: 4096 })
     } catch (error) {
+      // ENOENT 容忍的安全论证见函数头注释（tmp 被并发写者消费 = 写语义已达成）
       const basename = tmp.slice(tmp.lastIndexOf(SEP) + 1)
       if (isTmpConsumedError(error, basename)) {
         console.error('recall writeTextViaShell: ' + basename + ' 已被并发写者 rename 消费，视同成功')
@@ -823,9 +839,10 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
       const out = scripts.stripBom(await runShell(scripts.ensureGitScript(store, gitExe, config.baseExcludes), { stdoutMaxBytes: 4096 }))
       state.gitReady.add(store.git)
       const m = out.match(/GIT_OK\s+(\d+)/)
-      state.gcLastAt.set(store.git, m ? parseInt(m[1], 10) * 1000 : Date.now())
+      state.gcLastAt.set(store.git, m ? parseInt(m[1] ?? '', 10) * 1000 : Date.now())
       return { ok: true }
     } catch (error) {
+      // 失败按未就绪返回（不抛）：已 recordError 告警，调用侧照常发命令、由命令自身报错
       recordError('recall ensureGit failed: ' + String(error))
       return { ok: false, error: String(error) }
     }
@@ -847,6 +864,7 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
     if (legacyCleaned.has(root)) return
     legacyCleaned.add(root)
     runShell(scripts.legacyRmScript(root + SEP + '.dsh-recall-snapshots'), { timeoutMs: 120000, stdoutMaxBytes: 4096 }).catch(() => {})
+    // 清理失败不重试、不告警：残留只占磁盘无功能影响（理由见上方 legacyCleaned 注释）
   }
 
   return { state, isWin, scripts, recordError, runShell, runShellMeta, writeTextViaShell, resolveRoot, resolveGit, homeDirFor, resolveHomeContainer, resolveStore, storeFromDir, tryUpgradeToHome, ensureGit, cleanupLegacy, cleanupAfterGitFailure }

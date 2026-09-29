@@ -573,6 +573,14 @@ export function lineageReadCmd(dir: string): string {
   return 'cat ' + psq(dir + '/lineage.json') + ' 2>/dev/null || true'
 }
 
+// 通用小文件读取（A3 引入）：与 pwsh 版同名同语义——任意小文件走同一形态，
+// 缺席静默回空串（调用侧按「空 = 不存在或为空」处理）。POSIX 侧 `|| true`
+// 天然把缺席的退出码压成 0；win32 侧没有这个便利，必须用 Test-Path 分支
+// 显式构造（动机与实弹经过见 pwsh 版同名注释与 compat-audit I41）。
+export function fileReadCmd(file: string): string {
+  return 'cat ' + psq(file) + ' 2>/dev/null || true'
+}
+
 // 旧版项目内 blobs 目录清理（仅 home 存储可用时调用）
 export function legacyRmScript(path: string): string {
   return 'rm -rf -- ' + psq(path)

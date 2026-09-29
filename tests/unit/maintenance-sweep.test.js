@@ -36,7 +36,8 @@ function makeEnv({ liveIds = [], diskRecords = [], queryMissing = false, listThr
     scripts: { purgeTagsScript: (store, git, tags) => 'PURGE ' + tags.join(','), gcScript: () => 'GC' },
     recordError: () => {},
   }
-  const snaps = { saveIndex: async () => {} }
+  // A3：格式守卫放行（拒写矩阵在 store-format.test.js 钉；此处只关心 sweep 判定）
+  const snaps = { saveIndex: async () => {}, guardStoreFormat: async () => true }
   const ctx = {
     sessions: { get: (id) => (liveIds.includes(id) ? { id } : null) },
     get: (name) => {

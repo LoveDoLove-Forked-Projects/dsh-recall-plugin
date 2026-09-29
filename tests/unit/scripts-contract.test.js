@@ -304,6 +304,16 @@ describe('关键模板结构断言', () => {
     expect(posixSnap).not.toContain('"\\("')
   })
 
+  it('fileReadCmd：缺席必须收成退出码 0（win32 靠 Test-Path 分支，POSIX 靠 || true）', () => {
+    // -ErrorAction SilentlyContinue 只吞报错文本，PowerShell 进程退出码仍是 1
+    // （pwsh 与 Windows PowerShell 5.1 双版本实测）——runShell 的退出码门禁
+    // 会把「文件缺席」当执行失败抛出，调用方再分不清缺席与读失败：A3 的格式
+    // 守卫据此把还没有 marker 的正常 store 误判成「标记损坏」并永久拒写
+    // （2026-09-30 实弹发现，见 compat-audit I41）。两侧都必须显式收成成功。
+    expect(pwsh.fileReadCmd('C:\\store\\format')).toContain('if (Test-Path -LiteralPath ')
+    expect(posix.fileReadCmd('/store/format')).toContain('|| true')
+  })
+
   it('gc 失败可见：pwsh 模板让 git gc 非零退出变成脚本失败（posix 靠 set -e）', () => {
     // pwsh 对原生命令非零退出不抛（EAP 不作用于 native）：不查 $LASTEXITCODE 就会
     // 带着失败继续写 gc.stamp、输出 GC_OK、以 0 退出，runShell 只看进程退出码，

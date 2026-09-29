@@ -281,7 +281,7 @@
 > GitHub Release `v2.4.1`，tag commit `4761999`）；发布前终审补 P1——settings 接线拆出 `src/host/settings-bridge.ts`
 > 并加 5 例 CI 回归钉（c3cc8a7 旧面解包回归的唯一自动化防线，`32d7c82`）。发布后 `check:upgrade` 三层全绿
 > （check:dsh 四层一致 / probe 46/46 / verify:host 双 pass），单测 430/430。遗留记账：M5-6② 附件回填待图片模型
-> 环境补验（官方 API 面已核验、代码未动）；预热 IIFE 加固另立 `docs/plans/pending/plan-warmup-unhandled-rejection.md`。
+> 环境补验（官方 API 面已核验、代码未动）；预热 IIFE 加固已实施并归档（`docs/plans/completed/plan-warmup-unhandled-rejection.md`，2026-09-30 随质量加固批次实弹复现 fatal 后修复）。
 >
 > **0.1.6-alpha.2 核验（2026-09-18）**：**npm 已发布**（dist-tag `alpha` 指向本版，tag commit `ddefc45`；`latest`
 > 仍 0.1.5-rc.1、`next` 仍 0.1.5-rc.2），`npm install -g @deepseek-ai/dsh@alpha` 全局实装（dsh-settings 随装
@@ -1337,6 +1337,26 @@
   插件端点请求须落到 `/dsh/api/recall/*`。**2026-09-24 实弹记录**（0.1.7-rc.1，`node` 子路径代理 +
   `--trusted-host`）：带前缀 `POST /dsh/api/recall/status` → 200（`{"ok":true,…}`）、根绝对
   `POST /api/recall/status` → 404（代理未映射），修复后源码产出的 URL 经代理实测 200。
+
+
+### I41 PowerShell 静默错误仍置退出码 1：读缺席文件必须显式收成成功（2026-09-30 实弹）
+
+- **依赖的官方行为**：dsh 的 shell 执行面（`ShellExecutor.execute` → `ShellExecution.result()`）以**进程退出码**判定成败，
+  非零即视为执行失败抛给调用方（既有约定，见 I14/I38）；这条判定对「命令自己吞掉了报错」的情形同样生效。
+- **环境事实（win32）**：`Get-Content -LiteralPath <缺失路径> -Raw -Encoding UTF8 -ErrorAction SilentlyContinue`
+  **退出码为 1**——`-ErrorAction SilentlyContinue` 只吞掉错误*文本*，不改进程退出码（pwsh 7 与 Windows PowerShell 5.1
+  实测同款，静默读目录占位同样置 1）。POSIX 侧无此问题（`cat … 2>/dev/null || true` 天然归零）。
+- **插件对策**：`fileReadCmd`（A3 起通用小文件读取，`src/host/scripts.pwsh.ts`）用 `if (Test-Path -LiteralPath <f>) { Get-Content … }`
+  分支让缺席路径以成功的末条命令收尾（退出码 0、无输出），与 POSIX 版逐字同语义；`tests/unit/scripts-contract.test.js`
+  有文本钉（两侧形态各一条断言）防回归。
+- **失效症状（修复前实证）**：A3 格式守卫首次调用即把**没有任何 marker 的正常 store** 判成「读不到」（`judgeStoreFormat`
+  的 `unreadable` 分支只认 null），启动日志出现 `recall store format blocked: 磁盘格式标记不可读或内容非法…`；
+  由于守卫同时挡在 `captureSnapshot` 与 `saveIndex` 上，补戳永远写不下去 ⇒ **快照、撤回、列表载入全停且不可自愈**
+  （win32 专有；POSIX 正常）。同一坑还会让 A2 的 intent journal 读取把「文件不存在」与「读失败」混为一谈。
+- **复查动作**：dsh 升级或 PowerShell 大版本变化后，跑 `npx vitest run tests/unit/scripts-contract.test.js`（文本钉）
+  与一次 win32 实弹冒烟（首次快照后检查 store 目录出现 `format=1`）；若 PowerShell 未来改掉「静默错误置 1」的行为，
+  文本钉会提示可以简化回单命令形态。细节与实证见 [plans/completed/plan-quality-hardening.md](plans/completed/plan-quality-hardening.md)
+  的「活体冒烟」节与 [plans/completed/smoke-checklist-records.md](plans/completed/smoke-checklist-records.md) 的 2026-09-30 节缺陷 1。
 
 
 ## 与 E1 verify-host 的对应关系

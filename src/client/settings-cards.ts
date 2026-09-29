@@ -45,6 +45,8 @@ export function buildSettingsCards(React: ReactApi, util: UtilApi, sessionsSvc: 
   const { ConfigForm } = buildConfigForm(React, util, SectionToggle)
   const { ExcludeFilesSection } = buildExcludeCards(React, util)
   const { ManageCard } = buildSnapshotManager(React, util, sessionsSvc, workspacesSvc, uiWorkspaceSvc)
+  // 分区标题走词表（A4）：外壳只负责装配，不该有自己的一份文案
+  const { t } = util
 
   // 「插件配置」分区里的撤回设置块（settings.plugin.item keyed slot，key =
   // Host 端注册的 settings namespace 'dsh-recall'）。用户实测反馈两轮收敛：
@@ -54,19 +56,23 @@ export function buildSettingsCards(React: ReactApi, util: UtilApi, sessionsSvc: 
   // （排除配置/快照管理仍是重内容，默认折叠、展开后保持挂载不丢草稿）。
   function RecallSettingsCard(): import('react').ReactNode {
     const [sections, setSections] = React.useState({ exclude: false, manage: false })
+    // 语言落地计数：ConfigForm 换语言后回调一次，外壳跳过自身文案的旧语言
+    // 快照（两个分区折叠头在 ConfigForm 之外渲染——实弹发现半截切换）
+    const [, setLocaleTick] = React.useState(0)
+    const notifyLocale = React.useCallback(() => setLocaleTick((n) => n + 1), [])
     function toggle(key: string): void {
       setSections((prev) => Object.assign({}, prev, { [key]: !(prev as Record<string, boolean>)[key] }))
     }
     return React.createElement('li', { className: 'dsh-recall-settings' },
       React.createElement('div', { className: 'dsh-recall-settings-body' },
-        React.createElement(ConfigForm),
-        React.createElement(SectionToggle, { title: '排除配置（exclude.txt）', open: sections.exclude, onToggle: () => toggle('exclude') }),
+        React.createElement(ConfigForm, { onLocaleApplied: notifyLocale }),
+        React.createElement(SectionToggle, { title: t('section.exclude'), open: sections.exclude, onToggle: () => toggle('exclude') }),
         // section-body 只做纵向间距与展开入场动画，不带描边/底色：外层卡片框
         // 去掉后内容区再套一层框等于把「去包裹」加回来（用户实测反馈）。「高级：
         // 基础排除表」不包——它在 cfg-grid 内本就走通栏，且 label 列对齐依赖
         // grid item 身份，包容器会破坏跨行对齐。
         sections.exclude ? React.createElement('div', { className: 'dsh-recall-section-body' }, React.createElement(ExcludeFilesSection)) : null,
-        React.createElement(SectionToggle, { title: '快照管理', open: sections.manage, onToggle: () => toggle('manage') }),
+        React.createElement(SectionToggle, { title: t('section.manage'), open: sections.manage, onToggle: () => toggle('manage') }),
         sections.manage ? React.createElement('div', { className: 'dsh-recall-section-body' }, React.createElement(ManageCard)) : null
       )
     )

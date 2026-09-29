@@ -78,11 +78,26 @@ describe('enforceLimits（工厂级执行链路）', () => {
       runShell: async (cmd) => { if (String(cmd).startsWith('PURGE ')) { purged.push(...String(cmd).slice(6).split(' ')) } return '' },
       recordError: (t) => { state.lastError = t },
     }
-    const snaps = { saveIndex: async (root) => { saved.push(root) } }
+    // A3：格式守卫放行（拒写矩阵在 store-format.test.js 钉；此处只关心上限链路）
+    const snaps = { saveIndex: async (root) => { saved.push(root) }, guardStoreFormat: async () => true }
     const ctx = { sessions: { get: () => null }, get: () => null }
     const maint = createMaintenance(ctx, rt, snaps, { maxSnapshotsPerWorkspace: maxLimit })
     return { state, rt, snaps, maint, purged, saved }
   }
+
+  it('格式拒写（A3 守卫 false）→ 不 purge tag（避免删 tag 后索引写被拒的失配态）', async () => {
+    const { state, purged, maint, snaps } = fakeSetup(1)
+    state.stores.set('R1', { git: 'G1', dir: '/s' })
+    state.snapshots.set('a', { root: 'R1', time: 1 })
+    state.snapshots.set('b', { root: 'R1', time: 2 })
+    snaps.guardStoreFormat = async () => false
+
+    const dropped = await maint.enforceLimits()
+
+    expect(dropped).toBe(0)
+    expect(purged).toEqual([])
+    expect(state.snapshots.has('a')).toBe(true)
+  })
 
   it('超限 → purge 最旧 tag + 内存删除 + saveIndex', async () => {
     const { state, purged, saved, maint } = fakeSetup(2)

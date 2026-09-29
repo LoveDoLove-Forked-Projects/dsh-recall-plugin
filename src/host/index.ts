@@ -24,6 +24,7 @@ import { createMaintenance } from './maintenance.js'
 import { createSessionInfo, titleFromEvents, messageTextFromEvents } from './session-info.js'
 import { createRoutesCore } from './routes-core.js'
 import { createRoutesManage } from './routes-manage.js'
+import { createIntentJournal } from './intent-journal.js'
 import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as E from './errors.js'
 import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
@@ -136,7 +137,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // Promise<void> 仅为满足类型（运行语义不变：下一条任务只依赖排队关系）。
   function enqueue<T>(task: () => Promise<T>): Promise<T> {
     const run = state.queue.then(task)
-    state.queue = run.catch(() => {}) as Promise<void>
+    state.queue = run.catch(() => {}) as Promise<void> // 就地消化失败（不堵队，理由见上方注释）
     return run
   }
 
@@ -148,7 +149,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     const workers = Array.from({ length: Math.min(limit, tasks.length) }, async () => {
       while (index < tasks.length) {
         const task = tasks[index++]
-        await task()
+        if (task) await task()
       }
     })
     await Promise.all(workers)
@@ -167,7 +168,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // 「未来版本改名 / agent 服务未装配」，失败视为「不忙」（fail-open）。
   function agentBusy(sessionId: string | null, root: string | null): boolean {
     let reg = null
-    try { reg = ctx.agents } catch (error) { return false }
+    try { reg = ctx.agents } catch (error) { return false } // 服务缺席按不忙（fail-open，见上方注释）
     if (!reg) return false
     try {
       if (typeof reg.list === 'function') {
@@ -330,6 +331,38 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     return records
   }
 
+  // ---- A2 操作意图 journal（崩溃恢复 + U4 留痕）----
+  // 恢复期动作经 deps 注入既有机制，不在 journal 模块复制实现：diff 复用
+  // snaps.diffFor（幂等判定）、reset 复用 H1 的 rescueScript + RESCUE_OK
+  // 哨兵、护栏复用 agentBusy（root 单参调用：sessionId 传 null 即「跨会话
+  // 同工作区」判定）。
+  const intentJournal = createIntentJournal({
+    runShell: rt.runShell,
+    writeTextViaShell: rt.writeTextViaShell,
+    scripts: rt.scripts,
+    isWin: rt.isWin,
+    recordError: rt.recordError,
+    workspaceMatchesTag: async (messageId) => {
+      // diff 无差异 = 工作区已与 snap-<messageId> 一致（回退实际已完成）。
+      // diffFor 返回 null（快照不在内存索引）按「未完成」保守进救援判定。
+      const d = await snaps.diffFor(messageId)
+      return Boolean(d && d.total === 0 && d.changes.length === 0)
+    },
+    resetToSafety: async (store, safetyId, root) => {
+      // 与 rescueRollback 同款复位：rescueScript（reset --hard 完整 tag 名）
+      // + RESCUE_OK 哨兵校验；失败按 false 交 journal 记录（保留记录、下次
+      // 启动重试），不在这里编排手动命令——逃生门在撤回结果面板里。
+      try {
+        const out = await rt.runShell(rt.scripts.rescueScript(root, store, state.gitExe || '', 'snap-' + safetyId), { timeoutMs: 600000, stdoutMaxBytes: 65536 })
+        return String(out || '').indexOf('RESCUE_OK') >= 0
+      } catch (error) {
+        // 复位命令失败：交 journal 统一记录（fail-loud），此处不重复告警
+        return false
+      }
+    },
+    agentBusy: (root) => agentBusy(null, root),
+  })
+
   // ---- 端点表组装：核心路由 + 管理路由，合并进单一 endpoints 对象，
   // 由下方 connection exact 路由逐端点注册（端点名 = /api/recall/ 后第一段，
   // 无跨域命名冲突）。
@@ -342,7 +375,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     // setSource 会重绑定 readSettings——按值捕获的副本停在旧闭包（入口
     // config），config-reset 会按旧值「恢复默认」。活绑定让消费者每次调用
     // 都取到当前闭包。
-    applyResolvedConfig, readSettings: () => readSettings(), DEFAULTS, rescueRollback, E,
+    applyResolvedConfig, readSettings: () => readSettings(), DEFAULTS, rescueRollback, intentJournal, E,
   }
   const endpoints = {
     ...createRoutesCore(deps),
@@ -354,7 +387,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // dsh-desktop-host 用 createSharedFetchHandler('/api') 直接分发——客户端的
   // 请求路径 /api/recall/<name> 与方法 POST 在两种环境完全一致。
   const handleRecall = async (request: Request): Promise<Response> => {
-    const name = new URL(request.url).pathname.replace(/^\/api\/recall\/?/, '').split('/')[0]
+    const name = new URL(request.url).pathname.replace(/^\/api\/recall\/?/, '').split('/')[0] ?? ''
     const endpoint = (endpoints as Record<string, (args: unknown) => Promise<unknown>>)[name]
     if (!endpoint) {
       // exact 路由未命中时宿主直接 404；本分支只在 pathname 形态异常时兜底
@@ -366,6 +399,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
       const args = text.trim() ? JSON.parse(text) : {}
       return jsonResponse(await endpoint(args))
     } catch (error) {
+      // 端点抛错统一转错误响应体（errBody 归一 code/message，不落诊断）
       return jsonResponse(errBody(error))
     }
   }
@@ -406,7 +440,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
       .then(() => maint.maybeMaintain(session.id))
       // PF-6：不清 items 只标 stale——列表先按旧数据应答、后台补新（见 listCache 注释）
       .then(() => { listCache.stale = true })
-      .catch((error) => rt.recordError('recall snapshot error: ' + String(error)))
+      .catch((error) => rt.recordError('recall snapshot error: ' + String(error))) // 事件触发不阻塞宿主，失败只进错误缓冲
   })
 
   // 启动预热：所有已存在工作区解析存储、重建索引与孤儿快照，并清理旧版
@@ -423,7 +457,7 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
       try {
         await rt.runShell(rt.scripts.UTF8_PRELUDE, { timeoutMs: 10000, stdoutMaxBytes: 4096 })
         shellReady = true
-      } catch { await new Promise((resolve) => setTimeout(resolve, 500)) }
+      } catch { await new Promise((resolve) => setTimeout(resolve, 500)) } // 未就绪：500ms 后重试（20 次窗口，理由见上方注释）
     }
     if (!shellReady) return
     const warmupRoots = new Map()
@@ -454,8 +488,22 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
         .then((store) => rt.ensureGit(cwd, store!))
         .then(() => snaps.loadIndex(cwd, sessionId))
         .then(() => snaps.rebuildOrphans(cwd, sessionId))
+        // A2：中断回退的续做（判定与救援编排见 intent-journal.js）。A3 拒写
+        // 态下跳过——恢复要 reset 工作区，fail-closed 同样适用
+        .then(async () => {
+          const st = state.stores.get(cwd)
+          if (st && await snaps.guardStoreFormat(st)) await intentJournal.recover(st)
+        })
         .then(() => rt.cleanupLegacy(cwd))
-        .catch(() => {})
+        .catch(() => {}) // 预热链失败整体吞掉（含 store 非空收口注释的情形；不刷启动噪音）
     }
-  })()
+  })().catch((error) => {
+    // 预热整体自吞 + 留诊断（不写 recordError：预热是纯优化，宿主退出期/启动竞态
+    // 都会命中，写进用户可见的「最近错误」只会是噪音——那条通道只收用户可行动的
+    // 环境失败）。为什么必须接这个 catch：宿主可能在预热途中卸载（headless 打印
+    // 帮助后立即退出、HMR、门禁 dispose），此刻 ctx.sessions 抛「inactive context」，
+    // 未接的 rejection 会被 cordis 加载器记成 fatal load failure 而打断宿主退出
+    // （2026-09-30 headless 实弹；详见 plan-warmup-unhandled-rejection）。
+    console.error('recall warmup skipped:', error)
+  })
 }

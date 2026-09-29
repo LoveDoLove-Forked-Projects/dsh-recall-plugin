@@ -55,6 +55,7 @@ function newSettingsNs(ctx: HostContext, settings: SettingsService | null | unde
   try {
     return resolveSettingsNs(ctx, settings)
   } catch (error) {
+    // 解析抛错按未命中新面：交回旧三分支注册路径兜底
     return null
   }
 }
@@ -102,6 +103,7 @@ export function installSettingsNamespace(deps: SettingsBridgeDeps): void {
       })
     }
   } catch (error) {
+    // 注册失败已告警；设置面降级不可用，快照/撤回主链不受影响
     recordError('recall settings namespace skipped: ' + String(error))
   }
 }

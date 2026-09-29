@@ -1,7 +1,7 @@
 # 竞品评估优化计划：交互补强与可靠性钉子（第三轮竞品改进）
 
 > 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：待实施
-> 调研底稿：2026-09-04 三竞品评估（SiriLee/dsh-rewind、Anionex/dsh-turn-rewind、Renzic-Stone/DSH-EasyRewrite，仓库快照 `%TEMP%\dsh-compare\`）。
+> 调研底稿：2026-09-04 三竞品评估（DSH-EasyRewrite 与另外两个同类插件，仓库快照 `%TEMP%\dsh-compare\`）。
 > 七项相互独立，可按需挑选；实施顺序建议见文末汇总表。前两轮竞品改进见 [plan-competitor-improvements.md](../completed/plan-competitor-improvements.md) 与 [plan-competitor-fixes.md](../completed/plan-competitor-fixes.md)。
 
 ## 背景：评估结论摘要
@@ -12,8 +12,8 @@
 
 | 竞品 | 核心机制 | 值得借鉴 | 必须规避 |
 |---|---|---|---|
-| dsh-rewind | marker + surfaceOp.replace 同窗口 in-place 回退 | crash-safety 测试场景、restore journal 留痕 | **依赖 harness 内部语义**（surfaceOp 等，合规清单 #8 禁区） |
-| dsh-turn-rewind | Change Ledger + agent/pre-step turn checkpoint | 「只回溯消息不碰文件」三模式、plan TTL 过期保护 | engine.ts 1090 行巨石文件、inspect/plan/apply 重复 capture |
+| 同类插件（遮蔽式） | marker + surfaceOp.replace 同窗口 in-place 回退 | crash-safety 测试场景、restore journal 留痕 | **依赖 harness 内部语义**（surfaceOp 等，合规清单 #8 禁区） |
+| 同类插件（台账式） | Change Ledger + agent/pre-step turn checkpoint | 「只回溯消息不碰文件」三模式、plan TTL 过期保护 | engine.ts 1090 行巨石文件、inspect/plan/apply 重复 capture |
 | DSH-EasyRewrite | client 算边界 + sessions.fork + 归档（与本项目同路线） | 草稿持久化备份、版本翻页器交互 | client.src.js 1900 行无类型、**localStorage 版本树双源状态**、无 CI 无测试 |
 
 路线决策：**坚守 fork 路线不动摇**（surface 替换体验更优雅但押注未公开契约，issue #9 已实证静默失败风险）；交互创意用本项目的架构纪律（host 单一事实源、TS、门禁）重新实现。
@@ -23,11 +23,11 @@
 | 项 | 主题 | 来源 | 优先级 | 前置依赖 |
 |---|---|---|---|---|
 | U1 | 撤回场景草稿保护 | EasyRewrite | 高 | 探针先行（InputHub 读取 API） |
-| U2 | execute scope：仅回退对话模式（**已拆出** → [plan-session-only.md](../completed/plan-session-only.md)，已实施） | dsh-turn-rewind | 高 | 无 |
-| U3 | crash-safety 测试补强 | dsh-rewind | 高 | 先核对现有覆盖 |
+| U2 | execute scope：仅回退对话模式（**已拆出** → [plan-session-only.md](../completed/plan-session-only.md)，已实施） | 同类插件（台账式） | 高 | 无 |
+| U3 | crash-safety 测试补强 | 同类插件（遮蔽式） | 高 | 先核对现有覆盖 |
 | S1 | settings-cards.ts 预防性拆分 | 引以为戒 | 中 | 无（U1/U5 的前置） |
-| U5 | preview TTL 过期保护 | dsh-turn-rewind | 中 | S1 |
-| U4 | 还原过程 journal 留痕 | dsh-rewind | 低 | 无（建议随 U2 顺带） |
+| U5 | preview TTL 过期保护 | 同类插件（台账式） | 中 | S1 |
+| U4 | 还原过程 journal 留痕（**已拆出** → [plan-quality-hardening.md](../completed/plan-quality-hardening.md) A2，扩展为崩溃恢复 + 留痕双职能） | 同类插件（遮蔽式） | 低 | 无（建议随 U2 顺带） |
 | U6 | 版本翻页器 | EasyRewrite | 调研先行 | 探针核验官方恢复会话 API |
 
 ---
@@ -74,7 +74,7 @@
 
 ### 目标
 
-确认面板支持二选一：「回退文件与对话」（默认，现状）／「仅回退对话」——文件保持当前状态，只 fork 回退对话。覆盖「只想重来对话、保留文件改动」场景（对生成结果不满意的追问调整），dsh-turn-rewind 三模式弹窗已验证该需求真实存在。
+确认面板支持二选一：「回退文件与对话」（默认，现状）／「仅回退对话」——文件保持当前状态，只 fork 回退对话。覆盖「只想重来对话、保留文件改动」场景（对生成结果不满意的追问调整），同类插件（台账式） 三模式弹窗已验证该需求真实存在。
 
 ### 任务分解
 
@@ -105,7 +105,7 @@
 
 ### 目标
 
-把「崩溃窗口期」场景钉进单测。现状可靠性机制（tmp+rename 原子写、H1 救援、孤儿重建、熔断）的单测多为纯逻辑验证，缺「进程在 X 步骤崩溃后重启」的钉子——dsh-rewind 专门有断电/半写/中断恢复测试，是四者中最值得抄的工程实践。
+把「崩溃窗口期」场景钉进单测。现状可靠性机制（tmp+rename 原子写、H1 救援、孤儿重建、熔断）的单测多为纯逻辑验证，缺「进程在 X 步骤崩溃后重启」的钉子——同类插件（遮蔽式） 专门有断电/半写/中断恢复测试，是四者中最值得抄的工程实践。
 
 ### 任务分解
 
@@ -132,7 +132,7 @@
 
 ### 目标
 
-[src/client/settings-cards.ts](../../../src/client/settings-cards.ts) 现 748 行，逼近 800 行红线；U1（draftBackup 表单项）与 U5（previewTtl 表单项）都会再推高——**先拆再加**，避免带着利息超限（dsh-turn-rewind engine.ts 1090 行、EasyRewrite client.src.js 1900 行是前车之鉴）。
+[src/client/settings-cards.ts](../../../src/client/settings-cards.ts) 现 748 行，逼近 800 行红线；U1（draftBackup 表单项）与 U5（previewTtl 表单项）都会再推高——**先拆再加**，避免带着利息超限（同类插件（台账式） engine.ts 1090 行、EasyRewrite client.src.js 1900 行是前车之鉴）。
 
 ### 任务分解
 
@@ -169,7 +169,7 @@
 
 ### 目标
 
-execute 拒绝「距 preview 过久」的执行——STALE 树指纹防**内容漂移**，但 preview 面板挂起数小时后执行，文件没变就不报 STALE，而会话上下文可能已经历多轮，纯**时间维度**过期目前无防线。dsh-turn-rewind 的 `planTtlMs`（15min）已验证此设计。
+execute 拒绝「距 preview 过久」的执行——STALE 树指纹防**内容漂移**，但 preview 面板挂起数小时后执行，文件没变就不报 STALE，而会话上下文可能已经历多轮，纯**时间维度**过期目前无防线。同类插件（台账式） 的 `planTtlMs`（15min）已验证此设计。
 
 ### 任务分解
 
@@ -193,15 +193,17 @@ execute 拒绝「距 preview 过久」的执行——STALE 树指纹防**内容�
 
 ## U4 还原过程 journal 留痕（可选，低优先级）
 
+> **已拆出** → [plan-quality-hardening.md](../completed/plan-quality-hardening.md) A2（2026-09-29）：扩展为 intent journal 崩溃恢复 + 留痕双职能；本节的「写失败 recordError 告警、不阻断回退主流程」两条纪律被其沿用（2026-09-30 已随该计划实弹验收）。
+
 ### 目标
 
-execute 文件回退过程留痕：H1 救援覆盖主路径，但**救援也失败**时用户只拿到一段手动命令，无从知道「到底恢复到哪一步」。dsh-rewind 的 restore journal 把还原逐步记录，可给出精确的中断点。
+execute 文件回退过程留痕：H1 救援覆盖主路径，但**救援也失败**时用户只拿到一段手动命令，无从知道「到底恢复到哪一步」。同类插件（遮蔽式） 的 restore journal 把还原逐步记录，可给出精确的中断点。
 
 ### 任务分解
 
 1. store 目录追加式 `journal-<ts>.log`：安全快照 tag、reset 开始/结束、验证结果、救援动作各记一行。
 2. 救援失败的手动命令提示中附 journal 路径。
-3. **写失败 `recordError` 告警**（不静默——规避 dsh-rewind journal best-effort 的弱点）；journal 写入不阻断回退主流程。
+3. **写失败 `recordError` 告警**（不静默——规避 同类插件（遮蔽式） journal best-effort 的弱点）；journal 写入不阻断回退主流程。
 4. 生命周期：随 store 删除自然清理，不额外治理。
 
 **值得做的时机**：下次动 execute 主链路（U2）时顺带，不单独开工。

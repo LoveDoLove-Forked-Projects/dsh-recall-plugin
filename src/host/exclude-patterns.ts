@@ -52,7 +52,10 @@ export function buildArtifactRootSegment(root: unknown, base: unknown, isWin: bo
   const pool = isWin ? names.map((n) => n.toLowerCase()) : names
   for (const seg of segs) {
     const i = pool.indexOf(isWin ? seg.toLowerCase() : seg)
-    if (i >= 0) return names[i]
+    // 命中值落局部再判空（A6）：indexOf 命中与索引读取分两步，才符合
+    // noUncheckedIndexedAccess 下的显式判空纪律。
+    const hit = i >= 0 ? names[i] : undefined
+    if (hit !== undefined) return hit
   }
   return null
 }
@@ -61,6 +64,9 @@ export function buildArtifactRootSegment(root: unknown, base: unknown, isWin: bo
  * 面向用户的停用说明（init 与 snapshot-info 共用，保证两处文案逐字一致）。
  * 遵守诊断文案纪律：≤140 字符、不嵌长路径（只嵌命中的段名）、给出可行动的出口。
  * 出口就是排除表本身——它是设置页可编辑字段，删掉对应项即恢复该目录的快照。
+ *
+ * A4 起这是**回落文案**：两个端点同时下发命中段名（artifactSeg），client 优先
+ * 按段名本地取词（notice.buildRoot），本函数保留一个版本周期供旧 client 展示。
  */
 export function buildRootNotice(segment: string): string {
   return '当前工作区位于构建产物目录（路径段 ' + segment + '），已跳过项目快照；如需在此目录使用撤回，请在插件设置里从「基础排除表」移除该项。'

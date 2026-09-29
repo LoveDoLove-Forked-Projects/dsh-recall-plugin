@@ -21,14 +21,23 @@ export interface SectionToggleProps {
   divider?: boolean
 }
 
+// ConfigForm 的 props 契约（可选回调）：语言落地时回调设置外壳——外壳的
+// 分区折叠头在 ConfigForm 之外渲染（settings-cards.ts），不重渲染就停在
+// 挂载时刻的语言（实弹发现：卡片字段已切 English，而「排除配置/快照管理」
+// 两个折叠头仍是中文，直到离开再回到该页重新挂载才跟上）
+export interface ConfigFormProps {
+  onLocaleApplied?: () => void
+}
+
 export function buildConfigForm(
   React: ReactApi,
   util: UtilApi,
   SectionToggle: (props: SectionToggleProps) => import('react').ReactNode
-): { ConfigForm: () => import('react').ReactNode } {
-  const { api, bytesToMb } = util
+): { ConfigForm: import('react').FunctionComponent<ConfigFormProps> } {
+  const { api, bytesToMb, t, setLocalePref } = util
 
-  // 插件配置表单草稿形状（display 层：数字字段为字符串、排除表为换行文本）
+  // 插件配置表单草稿形状（display 层：数字字段为字符串、排除表为换行文本、
+  // locale 为三值字符串）
   interface ConfigDraft {
     gcSnaps: string
     gcHours: string
@@ -39,13 +48,14 @@ export function buildConfigForm(
     snapshotEnabled: boolean
     archiveOriginal: boolean
     retentionDays: string
+    locale: string
     [key: string]: string | boolean
   }
 
   // 插件配置表单：值经 Host 的 settings namespace「dsh-recall」读写，保存即
   // 持久化并热生效。只提交相对基线修改过的字段，避免一次保存把全部字段
   // 标成「用户覆盖」。
-  function ConfigForm(): import('react').ReactNode {
+  function ConfigForm(props: ConfigFormProps): import('react').ReactNode {
     const [baseline, setBaseline] = React.useState<ConfigDraft | null>(null)
     const [draft, setDraft] = React.useState<ConfigDraft | null>(null)
     const [envLocks, setEnvLocks] = React.useState<Record<string, boolean>>({})
@@ -70,17 +80,22 @@ export function buildConfigForm(
             snapshotEnabled: v.snapshotEnabled !== false,
             archiveOriginal: v.archiveOriginal !== false,
             retentionDays: String(v.retentionDays == null ? '' : v.retentionDays),
+            locale: typeof v.locale === 'string' && v.locale ? v.locale : 'auto',
           }
+          // 语言随读到的配置落地（设置页立即按新语言渲染）；老 Host 的 values
+          // 无 locale 字段时回落 auto（按 navigator.language 解析）
+          setLocalePref(next.locale)
+          if (props.onLocaleApplied) props.onLocaleApplied()
           setDraft(next)
           setBaseline(next)
           setEnvLocks(res.envLocks || {})
           setOverridden(res.overridden || {})
           setWritable(res.writable !== false)
         } else {
-          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || '无法读取配置', error: true })
+          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || t('config.msg.loadFailed'), error: true })
         }
       }).catch((e) => setState({ busy: false, message: String(e), error: true }))
-    }
+    } // ↑ 读取异常落错误态（与响应 ok=false 同显式面，用户可见可重试）
 
     React.useEffect(() => { load() }, [])
 
@@ -91,33 +106,37 @@ export function buildConfigForm(
     function save(): void {
       if (state.busy || !draft || !baseline) return
       const patch: Record<string, string | boolean> = {}
-      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'retentionDays']) {
-        if (draft[key] !== baseline[key]) patch[key] = draft[key]
+      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'retentionDays', 'locale']) {
+        // 按值判空再纳补丁（A6）：draft 是宽松载荷加载来的全量草稿，索引读取
+        // 在类型层可能 undefined；未定义的键与基线无从比较，直接跳过（等价于
+        // 原实现里「undefined !== 基线值」的隐式行为，只是不再依赖隐式）。
+        const value = draft[key]
+        if (value !== undefined && value !== baseline[key]) patch[key] = value
       }
       if (!Object.keys(patch).length) {
-        setState({ busy: false, message: '没有修改', error: false })
+        setState({ busy: false, message: t('config.msg.noChange'), error: false })
         return
       }
       const clean: Record<string, unknown> = {}
       if (patch.gcSnaps !== undefined) {
         const n = parseInt(String(patch.gcSnaps), 10)
-        if (!Number.isFinite(n) || n < 1) { setState({ busy: false, message: '快照条数阈值必须是 >= 1 的整数', error: true }); return }
+        if (!Number.isFinite(n) || n < 1) { setState({ busy: false, message: t('config.err.gcSnaps'), error: true }); return }
         clean.gcSnaps = n
       }
       if (patch.gcHours !== undefined) {
         const n = parseInt(String(patch.gcHours), 10)
-        if (!Number.isFinite(n) || n < 1) { setState({ busy: false, message: 'gc 小时阈值必须是 >= 1 的整数', error: true }); return }
+        if (!Number.isFinite(n) || n < 1) { setState({ busy: false, message: t('config.err.gcHours'), error: true }); return }
         clean.gcHours = n
       }
       if (patch.maxFileBytes !== undefined) {
         // display 层是 MB 小数，持久化仍是字节：model 侧不变，往返零改动
         const mb = Number(patch.maxFileBytes)
-        if (!Number.isFinite(mb) || mb < 0.01) { setState({ busy: false, message: '文件大小上限至少 0.01 MB', error: true }); return }
+        if (!Number.isFinite(mb) || mb < 0.01) { setState({ busy: false, message: t('config.err.maxFileBytes'), error: true }); return }
         clean.maxFileBytes = Math.round(mb * 1048576)
       }
       if (patch.maxSnapshotsPerWorkspace !== undefined) {
         const n = parseInt(String(patch.maxSnapshotsPerWorkspace), 10)
-        if (!Number.isFinite(n) || n < 0) { setState({ busy: false, message: '快照总量上限必须是 >= 0 的整数（0 表示不限制）', error: true }); return }
+        if (!Number.isFinite(n) || n < 0) { setState({ busy: false, message: t('config.err.maxSnapshots'), error: true }); return }
         clean.maxSnapshotsPerWorkspace = n
       }
       if (patch.refillDraft !== undefined) clean.refillDraft = Boolean(patch.refillDraft)
@@ -125,24 +144,35 @@ export function buildConfigForm(
       if (patch.archiveOriginal !== undefined) clean.archiveOriginal = Boolean(patch.archiveOriginal)
       if (patch.retentionDays !== undefined) {
         const n = parseInt(String(patch.retentionDays), 10)
-        if (!Number.isFinite(n) || n < 0) { setState({ busy: false, message: '保留天数必须是 >= 0 的整数（0 表示不启用）', error: true }); return }
+        if (!Number.isFinite(n) || n < 0) { setState({ busy: false, message: t('config.err.retentionDays'), error: true }); return }
         clean.retentionDays = n
+      }
+      // locale：选项由 select 固定枚举，非法值理论上不可达；仍收窄到三值
+      //（直调 API / 脏 payload 时由 Host 侧白名单再拒一次）
+      if (patch.locale !== undefined) {
+        const v = String(patch.locale)
+        if (v !== 'auto' && v !== 'zh' && v !== 'en') { setState({ busy: false, message: t('config.err.locale'), error: true }); return }
+        clean.locale = v
       }
       if (patch.baseExcludes !== undefined) {
         clean.baseExcludes = String(patch.baseExcludes).split('\n').map((l) => l.trim()).filter(Boolean)
       }
-      setState({ busy: true, message: '保存中…', error: false })
+      setState({ busy: true, message: t('config.msg.saving'), error: false })
       api<ConfigSetResponse>('config-set', { patch: clean }).then((res) => {
         if (res && res.ok) {
-          setState({ busy: false, message: '已保存并即时生效', error: false })
+          // 语言补丁先本地落地再报成功：否则「已保存并即时生效」用切换前的
+          // 旧语言渲染（实弹发现：卡片已英文、提示仍中文——提示是保存时刻
+          // 取词的字符串，落地顺序决定它跟哪一边）
+          if (clean.locale !== undefined) setLocalePref(clean.locale)
+          setState({ busy: false, message: t('config.msg.saved'), error: false })
           load()
         } else {
-          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || '保存失败', error: true })
+          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || t('config.msg.saveFailed'), error: true })
         }
       }).catch((e) => setState({ busy: false, message: String(e), error: true }))
-    }
+    } // ↑ 保存异常落错误态（显式面同上，失败可重试）
 
-    function numRow(key: string, label: string, hint: string, opts?: { min?: number; step?: number; suffix?: string }): import('react').ReactNode {
+    function numRow(key: string, label: string, hint: string, opts?: { min?: number; step?: number; suffixKey?: string }): import('react').ReactNode {
       const locked = Boolean(envLocks && envLocks[key])
       const changed = Boolean(draft && baseline && draft[key] !== baseline[key])
       return React.createElement('div', { className: 'dsh-recall-cfg-row', key: key },
@@ -166,10 +196,10 @@ export function buildConfigForm(
             step: opts && opts.step,
             onChange: (e: import('react').ChangeEvent<HTMLInputElement>) => edit(key, e.target.value),
           }),
-          opts && opts.suffix ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, opts.suffix) : null,
-          changed && !locked ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, '已修改') : null,
-          overridden && overridden[key] !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, '已覆盖') : null,
-          locked ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-locked' }, '环境变量锁定') : null
+          opts && opts.suffixKey ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, t(opts.suffixKey)) : null,
+          changed && !locked ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, t('config.tag.modified')) : null,
+          overridden && overridden[key] !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, t('config.tag.overridden')) : null,
+          locked ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-locked' }, t('config.tag.locked')) : null
         ),
         React.createElement('div', { className: 'dsh-recall-cfg-hint' }, hint)
       )
@@ -200,30 +230,58 @@ export function buildConfigForm(
             disabled: !writable,
             onClick: () => edit(key, !on),
           }, React.createElement('span', { className: 'dsh-recall-cfg-switch-thumb' })),
-          changed ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, '已修改') : null,
-          overridden && overridden[key] !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, '已覆盖') : null
+          changed ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, t('config.tag.modified')) : null,
+          overridden && overridden[key] !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, t('config.tag.overridden')) : null
         ),
         React.createElement('div', { className: 'dsh-recall-cfg-hint' }, hint)
       )
     }
 
+    // 语言行：三值下拉（auto/zh/en）。与数字/滑钮行同构（label + 控件行 +
+    // 说明），但控件是原生 select——选项值即配置值，无表单校验面（非法值只
+    // 能来自直调 API，Host 侧白名单再拒一次）；两个语言自名（中文 / English）
+    // 用本族语写法不做翻译，auto 项走词表（它的语义是「跟随系统」不是语言名）
+    function localeRow(): import('react').ReactNode {
+      const changed = Boolean(draft && baseline && draft.locale !== baseline.locale)
+      return React.createElement('div', { className: 'dsh-recall-cfg-row', key: 'locale' },
+        React.createElement('span', { className: 'dsh-recall-cfg-label', id: 'dsh-recall-cfg-label-locale' }, t('config.locale.label')),
+        React.createElement('div', { className: 'dsh-recall-cfg-line' },
+          React.createElement('select', {
+            id: 'dsh-recall-cfg-locale',
+            'aria-labelledby': 'dsh-recall-cfg-label-locale',
+            className: 'dsh-recall-cfg-select',
+            value: draft ? draft.locale : 'auto',
+            disabled: !writable,
+            onChange: (e: import('react').ChangeEvent<HTMLSelectElement>) => edit('locale', e.target.value),
+          },
+            React.createElement('option', { value: 'auto' }, t('config.locale.auto')),
+            React.createElement('option', { value: 'zh' }, '中文'),
+            React.createElement('option', { value: 'en' }, 'English')
+          ),
+          changed ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, t('config.tag.modified')) : null,
+          overridden && overridden.locale !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, t('config.tag.overridden')) : null
+        ),
+        React.createElement('div', { className: 'dsh-recall-cfg-hint' }, t('config.locale.hint'))
+      )
+    }
+
     function resetDefaults(): void {
       if (state.busy || !writable) return
-      setState({ busy: true, message: '恢复默认中…', error: false })
+      setState({ busy: true, message: t('config.msg.resetting'), error: false })
       api<ConfigResetResponse>('config-reset', {}).then((res) => {
         if (res && res.ok) {
           load()
-          setState({ busy: false, message: '已恢复默认值', error: false })
+          setState({ busy: false, message: t('config.msg.resetDone'), error: false })
         } else {
-          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || '恢复默认失败', error: true })
+          setState({ busy: false, message: (res && ((res as { message?: string }).message || (res as { error?: string }).error)) || t('config.msg.resetFailed'), error: true })
         }
       }).catch((e) => setState({ busy: false, message: String(e), error: true }))
-    }
+    } // ↑ 恢复默认异常落错误态（显式面同上）
 
     // draft/baseline 同生同灭（初始同 null、load() 同时赋值）——一并收窄，
     // 渲染区不再需要对 baseline 非空断言
     if (!draft || !baseline) {
-      return React.createElement('div', { className: 'dsh-recall-ex-note' }, state.message || '正在读取配置…')
+      return React.createElement('div', { className: 'dsh-recall-ex-note' }, state.message || t('config.msg.loading'))
     }
 
     return React.createElement('div', { className: 'dsh-recall-ex-card' },
@@ -232,46 +290,50 @@ export function buildConfigForm(
       // max-content 由全表单最长标签决定（跨行对齐），第二列同理（说明列起点
       // 逐行齐平）。此前每行是独立 grid 容器，max-content 各算各的，实测参差。
       React.createElement('div', { className: 'dsh-recall-cfg-grid' },
-      // V5 表单分组：9 字段平铺 → 「快照行为 / 自动治理」两组语义分组小标题，
-      // 降低认知负担；「高级：基础排除表」沿用 SectionToggle 折叠，不重复加标题。
-      React.createElement('div', { className: 'dsh-recall-cfg-group' }, '快照行为'),
-      boolRow('snapshotEnabled', '启用快照', '关闭后不再新建快照；已有快照仍可撤回'),
-      boolRow('refillDraft', '回填输入框', '撤回后把消息文本回填输入框，便于改完重发'),
-      boolRow('archiveOriginal', '归档原会话', '原会话归档隐藏，可从归档找回；关闭则留在列表便于对照'),
-      React.createElement('div', { className: 'dsh-recall-cfg-group' }, '自动治理'),
-      // 单位后缀统一挂输入框右侧（与状态标签同基线），不再只藏在说明文字里
-      numRow('gcSnaps', 'gc 触发条数', '每积累多少条快照触发一次 gc', { suffix: '条', min: 1, step: 1 }),
-      numRow('gcHours', 'gc 触发小时', '距上次 gc 超过多少小时触发，与条数先到先触发', { suffix: '小时', min: 1, step: 1 }),
-      numRow('maxFileBytes', '文件大小上限', '超过该大小的文件不进快照、不被回退触碰', { suffix: 'MB', min: 0.01, step: 0.5 }),
-      numRow('maxSnapshotsPerWorkspace', '快照总量上限', '每工作区保留的最大快照数，超限删除最旧的；0 表示不限制', { suffix: '条', min: 0, step: 1 }),
-      numRow('retentionDays', '快照保留天数', '超期快照自动删除最旧的；0 表示不启用', { suffix: '天', min: 0, step: 1 }),
+      // V5 表单分组：9 字段平铺 → 「快照行为 / 自动治理 / 界面」三组语义分组
+      // 小标题，降低认知负担；「高级：基础排除表」沿用 SectionToggle 折叠，
+      // 不重复加标题。
+      React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.snapshot')),
+      boolRow('snapshotEnabled', t('config.snapshotEnabled.label'), t('config.snapshotEnabled.hint')),
+      boolRow('refillDraft', t('config.refillDraft.label'), t('config.refillDraft.hint')),
+      boolRow('archiveOriginal', t('config.archiveOriginal.label'), t('config.archiveOriginal.hint')),
+      React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.auto')),
+      // 单位后缀统一挂输入框右侧（与状态标签同基线），不再只藏在说明文字里；
+      // 传词表键而非字面量——单位词也是语言事实（条/小时 vs snapshots/hours）
+      numRow('gcSnaps', t('config.gcSnaps.label'), t('config.gcSnaps.hint'), { suffixKey: 'config.gcSnaps.suffix', min: 1, step: 1 }),
+      numRow('gcHours', t('config.gcHours.label'), t('config.gcHours.hint'), { suffixKey: 'config.gcHours.suffix', min: 1, step: 1 }),
+      numRow('maxFileBytes', t('config.maxFileBytes.label'), t('config.maxFileBytes.hint'), { suffixKey: 'config.maxFileBytes.suffix', min: 0.01, step: 0.5 }),
+      numRow('maxSnapshotsPerWorkspace', t('config.maxSnapshotsPerWorkspace.label'), t('config.maxSnapshotsPerWorkspace.hint'), { suffixKey: 'config.maxSnapshotsPerWorkspace.suffix', min: 0, step: 1 }),
+      numRow('retentionDays', t('config.retentionDays.label'), t('config.retentionDays.hint'), { suffixKey: 'config.retentionDays.suffix', min: 0, step: 1 }),
+      React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.ui')),
+      localeRow(),
       // 操作区在「基础排除表」折叠头之前：按钮服务整个表单（含折叠区之外的字段），
       // 排在折叠头之后会被误读为折叠区内容、折叠时像漏收起（用户实测反馈）；
       // 因此也不把按钮藏进折叠分支——否则折叠基础排除表后将无法保存。
       React.createElement('div', { className: 'dsh-recall-panel-actions' },
-        state.message ? React.createElement('span', { role: 'status', 'aria-live': 'polite', className: 'dsh-recall-ex-status' + (state.error ? ' dsh-recall-ex-status-error' : ' dsh-recall-ex-status-success') }, (state.error ? '错误：' : '') + state.message) : null,
-        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', disabled: state.busy || !writable, onClick: () => setDraft(baseline ? Object.assign({}, baseline) : null) }, '放弃修改'),
+        state.message ? React.createElement('span', { role: 'status', 'aria-live': 'polite', className: 'dsh-recall-ex-status' + (state.error ? ' dsh-recall-ex-status-error' : ' dsh-recall-ex-status-success') }, (state.error ? t('common.errorPrefix') : '') + state.message) : null,
+        React.createElement('button', { type: 'button', className: 'dsh-recall-btn', disabled: state.busy || !writable, onClick: () => setDraft(baseline ? Object.assign({}, baseline) : null) }, t('common.discard')),
         React.createElement('button', {
           type: 'button',
           className: 'dsh-recall-btn',
           disabled: state.busy || !writable,
-          title: '把所有字段恢复到插件出厂默认值',
+          title: t('config.reset.title'),
           onClick: resetDefaults
-        }, '恢复默认'),
+        }, t('config.reset')),
         // 「保存」是表单唯一主动作，升主色实心按钮；放弃修改/恢复默认维持次级
         // 灰底（同排按钮只有一个视觉焦点，配色令牌经官方主题产物核验，见 css.ts）
-        React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-primary', disabled: state.busy || !writable, onClick: save }, '保存'),
-        !writable ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, '只读设置源') : null
+        React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-primary', disabled: state.busy || !writable, onClick: save }, t('common.save')),
+        !writable ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, t('config.tag.readonly')) : null
       ),
       // divider：本条是折叠分区列表的首项，上方分界线把「字段表单」与「折叠
       // 分区」分开（否则保存按钮行紧贴折叠头，读起来像同一组字段）
-      React.createElement(SectionToggle, { title: '高级：基础排除表', open: showAdvanced, onToggle: () => setShowAdvanced((v) => !v), divider: true }),
+      React.createElement(SectionToggle, { title: t('config.advanced.title'), open: showAdvanced, onToggle: () => setShowAdvanced((v) => !v), divider: true }),
       showAdvanced ? React.createElement('div', { className: 'dsh-recall-cfg-row', key: 'baseExcludes' },
         // V4：标签上提（与 numRow 同法）；cfg-line 只剩 tags，textarea/hint 通栏
-        React.createElement('span', { className: 'dsh-recall-cfg-label', id: 'dsh-recall-cfg-label-baseExcludes' }, '基础排除表'),
+        React.createElement('span', { className: 'dsh-recall-cfg-label', id: 'dsh-recall-cfg-label-baseExcludes' }, t('config.baseExcludes.label')),
         React.createElement('div', { className: 'dsh-recall-cfg-line' },
-          draft.baseExcludes !== baseline.baseExcludes ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, '已修改') : null,
-          overridden && overridden.baseExcludes !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, '已覆盖') : null
+          draft.baseExcludes !== baseline.baseExcludes ? React.createElement('span', { className: 'dsh-recall-cfg-tag dsh-recall-cfg-tag-modified' }, t('config.tag.modified')) : null,
+          overridden && overridden.baseExcludes !== undefined ? React.createElement('span', { className: 'dsh-recall-cfg-tag' }, t('config.tag.overridden')) : null
         ),
         // textarea/hint 加 cfg-span 通栏：折叠区在共享 grid 内展开时，内容若只占
         // 第二列，左侧标签列会成为竖直死区（实测 textarea 被挤窄）；通栏后与
@@ -286,7 +348,7 @@ export function buildConfigForm(
           disabled: !writable,
           onChange: (e: import('react').ChangeEvent<HTMLTextAreaElement>) => edit('baseExcludes', e.target.value),
         }),
-        React.createElement('div', { className: 'dsh-recall-cfg-hint dsh-recall-cfg-span' }, '各工作区共享的内置规则；gitignore 语法，每行一条；优先级低于「排除配置」的 exclude.txt')
+        React.createElement('div', { className: 'dsh-recall-cfg-hint dsh-recall-cfg-span' }, t('config.baseExcludes.hint'))
       ) : null
       )
     )

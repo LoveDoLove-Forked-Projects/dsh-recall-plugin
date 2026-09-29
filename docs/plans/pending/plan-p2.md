@@ -16,7 +16,7 @@
 ### 任务分解
 
 1. **Esc 关闭**（[src/client/recall-node.ts](../../../src/client/recall-node.ts) `recallPanel`，L86 起）
-   - 面板挂载时 `document.addEventListener('keydown', handler, true)`（**capture 阶段**，先于 composer 的全局快捷键拿到 Esc——dsh-rewind 实证必须 capture 才能从输入框偷键），卸载时移除（React 卸载成对清理，AGENTS.md 半 UI 约束）。
+   - 面板挂载时 `document.addEventListener('keydown', handler, true)`（**capture 阶段**，先于 composer 的全局快捷键拿到 Esc——同类插件 实证必须 capture 才能从输入框偷键），卸载时移除（React 卸载成对清理，AGENTS.md 半 UI 约束）。
    - Esc 仅在面板打开（stage 为 confirm）时拦截；done/error 阶段不拦（让用户正常关闭）。
 2. **Enter 确认**
    - confirm 阶段 Enter 触发 `executeRecall`；焦点管理从简——不做完整 focus trap，Enter 直接绑在面板 keydown 上，与按钮 onClick 走同一函数。
@@ -33,15 +33,17 @@
 
 ## P2-2 FORMAT / SECURITY 文档
 
+> FORMAT 半已实施 → [plan-quality-hardening.md](../completed/plan-quality-hardening.md) A7（2026-09-29，提前实施并扩范围到 intent journal / format marker / stamp 文件；产物 [format.md](../../format.md)）；SECURITY 半（威胁模型审视）仍属本计划。
+
 **值得做的时机**：存储格式或 API 面将要稳定时（P1-2/P1-3 落地后）。
 
 ### 目标
 
-公开存储格式说明与威胁模型审视，对标 turn-rewind 的 FORMAT.md/SECURITY.md。
+公开存储格式说明与威胁模型审视，对标 同类插件 的 FORMAT.md/SECURITY.md。
 
 ### 任务分解
 
-1. **docs/FORMAT.md**：影子仓库布局（`~/.dsh/dsh-recall-snapshots/<SHA256>/`、git/、index.json）、tag 命名（`snap-<messageId>`、`pre-rollback-<timestamp>`）、index.json 条目 schema（含 P1-2 的 feedback 扩展）、降级存储布局、exclude.txt 语义与优先级。素材全部来自 AGENTS.md「存储布局」节，扩写为用户可读文档。
+1. **docs/FORMAT.md**（已由 A7 交付为 `docs/format.md`，条目保留供历史对照）：影子仓库布局（`~/.dsh/dsh-recall-snapshots/<SHA256>/`、git/、index.json）、tag 命名（`snap-<messageId>`、`pre-rollback-<timestamp>`）、index.json 条目 schema（含 P1-2 的 feedback 扩展）、降级存储布局、exclude.txt 语义与优先级。素材全部来自 AGENTS.md「存储布局」节，扩写为用户可读文档。
 2. **docs/SECURITY.md（威胁模型审视，先审后写）**：
    - `/api/recall/*` 是同源 HTTP 端点，浏览器内任意脚本可直调——逐端点过一遍：
      - `execute`（破坏性）：现有防线 = preview 确认在 client、安全快照兜底、（P0 后）agent 忙检查、（P0-3 后）STALE 校验。评估：恶意脚本调 execute 回退到任意有快照的消息——危害=文件状态回退（有 safety tag 可恢复），可接受？或需加 sessionId 绑定校验？
@@ -62,7 +64,7 @@
 
 ### 目标
 
-npm 发布免本地 NPM_TOKEN，走 GitHub Actions OIDC（dsh-rewind 已实证该流程，含 `--provenance`）。
+npm 发布免本地 NPM_TOKEN，走 GitHub Actions OIDC（同类插件 已实证该流程，含 `--provenance`）。
 
 ### 任务分解
 
@@ -114,7 +116,7 @@ npm 发布免本地 NPM_TOKEN，走 GitHub Actions OIDC（dsh-rewind 已实证�
 
 ### 目标
 
-对齐 dsh-rewind 的 `check-dsh-version.mjs`：对比 npm 最新 dsh 版本与本项目 peer/兼容性假设，提醒扩范围或重新核验。
+对齐 同类插件 的 `check-dsh-version.mjs`：对比 npm 最新 dsh 版本与本项目 peer/兼容性假设，提醒扩范围或重新核验。
 
 ### 任务分解
 

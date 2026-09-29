@@ -45,6 +45,13 @@ function makeDeps(opts = {}) {
       },
       resolveCutSeq: async () => opts.cutSeq ?? 5,
       resolveStaleQueueItemIds: async () => opts.staleQueueItemIds ?? [],
+      // A3：格式守卫放行（拒写矩阵在 store-format.test.js 钉；此处关心 scope 链路）
+      guardStoreFormat: async () => true,
+    },
+    // A2：意图 journal 桩（三针空操作；中断恢复行为在 intent-journal.test.js 钉）
+    intentJournal: {
+      begin: async () => {}, advance: async () => {}, clear: async () => {},
+      read: async () => null, file: () => '/store/recall-intent.json', recover: async () => false,
     },
     state,
     cfg: { baseExcludes: [] },

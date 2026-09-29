@@ -119,8 +119,15 @@ All options can be edited visually in the "**Settings → Plugin Config → Reca
 | `refillDraft` | true | Refill the recalled message (text and attachments) into the input box after a recall |
 | `snapshotEnabled` | true | Master snapshot switch (off = no new snapshots; existing snapshots remain recallable) |
 | `archiveOriginal` | true | Archive the original session after a recall (off = the original session stays in the session list) |
+| `locale` | auto | UI language: `auto` follows the system (`navigator.language` starting with `zh` → Chinese, otherwise English), `zh` / `en` pin it explicitly. See "UI language" below |
 
 The settings card also offers "Restore defaults" (one-click reset of all fields) and a "Recent errors" viewer/clearer.
+
+### UI language
+
+Every UI surface the plugin draws itself (recall button and confirmation panel, toasts, the three settings cards, the snapshot manager tree, recent errors) is bilingual and driven by `locale` — switch it in the "Interface" group of the config card; saving applies immediately (the settings page switches at once, chat-side wording follows on the next page reload).
+
+Two explicit v1 limits: (1) field descriptions rendered by the host's own settings form (i.e. the `Schema.description()` texts) stay in Chinese — the plugin cannot localize those; the plugin's own config card is unaffected. (2) For host-side errors that carry dynamic detail (a failed rollback's rescue outcome, a specific validation reason, a raw exception), the panel and "Recent errors" show the host text verbatim instead of a localized short phrase — we prefer mixed-language output over swallowing the detail you need to troubleshoot.
 
 ## Snapshot Maintenance & Cleanup
 
@@ -154,6 +161,8 @@ When each user message is sent (before the agent touches any files), the workspa
   git --git-dir="<store>\git\.git" ls-tree -r --name-only snap-<messageID>
   ```
 
+- The format and version-compatibility rules for every file in the store directory (index, recall chain, format marker, intent journal, etc.) live in [docs/format.md](docs/format.md).
+
 ## Local Development (without publishing)
 
 Point the profile's dependency for this package at your clone via `link:`; DSH loads the built `lib/` artifacts from the workspace (source lives in `src/`), so run `npm run build` after editing `src/`, then restart DSH — no copying or publishing needed:
@@ -172,11 +181,12 @@ Note: all source lives in `src/` (host in `src/host/`, browser side in `src/clie
 
 ### Tests
 
-- `npm test`: pure-logic unit tests (vitest, 34 files / 436 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
+- `npm test`: pure-logic unit tests (vitest, 37 files / 476 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, the disk-format guard, the recall intent journal, i18n dictionaries plus a missing-key scan, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
+- `npm run test:client`: client component tests (vitest + jsdom, 6 files / 82 cases, runs in CI) — the recall node main chain (preview→execute→fork→refill), snapshot-manager tree and delete flows, config/exclude card error paths, the logger switch matrix, and the zh/en rendering chains; assertions pin behaviour and structure only (className / aria / request payloads), never literal copy;
 - `npm run test:probe`: official-API field probes (requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` and the fork-cut anchors of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, the shell execution seam (`execute`/`ShellExecution.result`), the settings surface (`SettingsForms`/profile entry id/volatile gate) plus `loader/volatile-update` and the `Fiber.entry` shape, and goes red on violation;
 - `npm run verify:host`: assembly gate (requires a local dsh installation) — boots the plugin with a real cordis context in two passes (legacy settings stub and a modern-face-only stub), asserting inject declarations, endpoint registration, Config schema, teardown cleanliness and settings-face dispatch, catching assembly regressions before release;
 - `npm run build`: full host+client build (mandatory after any `src/` change); `npm run check:dsh`: dsh version inspection (pre-release).
-- CI (GitHub Actions) runs `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + unified artifact-freshness check (`npm run build && git diff --exit-code lib/`; probes and the assembly gate only run on machines with dsh).
+- CI (GitHub Actions) runs `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + `npm run test:client` + unified artifact-freshness check (`npm run build && git diff --exit-code lib/`; probes and the assembly gate only run on machines with dsh).
 
 ## License
 

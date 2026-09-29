@@ -6,11 +6,12 @@
     "allowJs": false,
     "checkJs": false,
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noEmit": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
     "types": ["node"],
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/**/*", "tests/types/**/*"]
+  "include": ["src/**/*", "tests/types/**/*", "tests/client/**/*"]
 }

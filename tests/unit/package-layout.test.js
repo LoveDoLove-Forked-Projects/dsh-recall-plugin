@@ -6,7 +6,7 @@
  * - 仓库开发文件绝不进包（AGENTS.md / docs/（含 docs/reference 镜像）/ tests/ / scripts/——
  *   AGENTS.md 已在 .gitignore 中确认不进 npm，这里从 pack 输出侧再兜一道；
  *   scripts/ 是 P2-5 起的发布前巡检脚本，同样不是运行时产物）。
- * 借鉴 turn-rewind 的 package-layout 思路，用 node:child_process 跑产物断言，
+ * 借鉴同类插件的 package-layout 思路，用 node:child_process 跑产物断言，
  * 比 CI shell 步骤更可移植（跨平台跑同一份逻辑）。
  */
 
@@ -51,7 +51,7 @@ describe('npm 发布包内容', () => {
     const required = [
       'lib/index.js', 'lib/client.js', 'lib/config.js', 'lib/store.js',
       'lib/snapshots.js', 'lib/maintenance.js', 'lib/scripts.pwsh.js',
-      'lib/scripts.posix.js', 'cordis.patch.yml', 'README.md', 'LICENSE',
+      'lib/scripts.posix.js', 'lib/intent-journal.js', 'cordis.patch.yml', 'README.md', 'LICENSE',
       'package.json', 'assets/icon.svg',
     ]
     for (const rel of required) expect(files, 'pack 缺少 ' + rel).toContain(rel)

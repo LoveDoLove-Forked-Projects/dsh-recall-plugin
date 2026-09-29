@@ -65,7 +65,7 @@ export function createSessionInfo(ctx: SessionInfoCtx): SessionInfoApi {
     try {
       const live = ctx.sessions.get(sessionId)
       if (live) text = messageTextFromEvents(live.events, messageId)
-    } catch (error) { text = null }
+    } catch (error) { text = null } // 读取抛错按无文本且不缓存（下次刷新重试）
     if (text !== null) messageTexts.set(key, text)
     return text
   }
@@ -77,7 +77,7 @@ export function createSessionInfo(ctx: SessionInfoCtx): SessionInfoApi {
     try {
       const live = ctx.sessions.get(sessionId)
       if (live) t = titleFromEvents(live.events)
-    } catch (error) { t = null }
+    } catch (error) { t = null } // 读取抛错按无标题且不缓存（下次刷新重试）
     if (t !== null) sessionTitles.set(sessionId, t)
     return t
   }

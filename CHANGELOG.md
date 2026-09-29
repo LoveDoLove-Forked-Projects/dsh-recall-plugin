@@ -2,6 +2,34 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+质量加固专项批次（[docs/plans/completed/plan-quality-hardening.md](docs/plans/completed/plan-quality-hardening.md) A1–A8，八项分四波：质量基建 → 数据安全 → 测试基建 → i18n）。发版时按语义化版本编号（含新功能，预期 minor）。2026-09-30 该计划连同 `plan-warmup-unhandled-rejection` 已归档到 `docs/plans/completed/`（活体冒烟第九节 R-1〜R-6 全过）。
+
+### 新增
+
+- **i18n 双语层（A4）**：插件自绘界面全双语（撤回按钮与确认面板、toast、设置三张卡、快照树、最近错误），由新配置项 `locale`（`auto` / `zh` / `en`，默认 `auto` 按 `navigator.language` 判）控制，配置卡片新增「界面」分组的下拉、保存即生效。实现分三层：`src/client/locales/`（zh 事实源 + en + 纯逻辑 `t/translate/resolveLocale`，缺 key 依次回落 zh、key 本身）；host 文案键控化（错误响应按 `code` 查 `err.*`、最近错误按 `kind` 渲染、构建产物 root 停用提示改下发命中段名 `artifactSeg` 由 client 本地取词，旧中文字段保留一周期）；`tests/unit/locales-parity.test.js` 钉两语言 key 集合 / 占位符集合一致 + 静态扫描 client 源码里的字面量 key 漏配，`tests/client/i18n.test.ts` 钉 zh/en 两条渲染链与语言下拉的保存载荷。v1 明示限制（README「界面语言」节）：宿主官方设置表单自己渲染的 `Schema.description()` 仍是中文；带动态细节的 host 错误（回退失败的救援结果、具体校验原因、原始异常）原样展示 host 原文，不套本地化短句。
+- **磁盘格式版本守卫（A3）**：影子仓库新增 per-store `format` marker（`SUPPORTED_FORMAT = 1`，缺席视为 1），读到更高版本或内容损坏时**拒写放行读**（fail-closed）——快照、撤回、tag 清理、索引落盘全短路并 `recordError`，快照列表 / 状态查询等只读路径不受影响，新错误码 `FORMAT_BLOCKED`（client 有对应文案）；marker 补戳挂在索引落盘路径（稳态零额外进程），读取带短确认缓存且只缓 affirmative 结果。配套通用 `fileReadCmd`（契约 + 双平台模板），替 A2 与后续小文件读取省掉逐个特化命令。
+- **操作意图 journal 与崩溃恢复（A2，吸收 U4）**：撤回的 both 链「安全快照 → reset → 救援」中途断电时，安全快照 tag 已在磁盘却无任何记录指向它——新增 `src/host/intent-journal.ts`：execute 动磁盘前先写 `recall-intent.json`（messageId / safetyId / safetyOk / phase），回退成功即清；启动预热与 init 端点两处挂 `recover`：先做幂等判定（工作区与目标 tag 一致即只清记录不 reset），需救援时复用 H1 救援路径自动 reset 回安全快照并 `recordError` 留痕，`agentBusy` 忙时延后到下次 init。救援失败提示同时附上意图文件路径（U4 验收语义：中断点可查）。
+- **client UI 测试体系（A1）**：vitest + jsdom 独立配置（`npm run test:client`，CI 新增同步骤），`tests/client/` 6 文件 82 例——撤回节点主链（25）、快照管理（17）、配置卡片（17）、排除卡片（13）、logger 开关（7）、i18n 双语链路（3）。断言纪律：只断行为与结构（className / aria / 调用次数 / fetch 载荷），不为文案字面量上锁（i18n 让路）。期间实测发现并修复一处真实缺陷（见「修复」）。
+- **client 命名空间 logger（A5）**：`src/client/log.ts` 的 `createLogger(ns)` 前缀 `[dsh-recall:<ns>]`，error/warn 恒输出、info/debug 由 `localStorage['dsh-recall.debug']`（`*` 或逗号分隔命名空间，每次调用重读）开关——现场排查无需重启；localStorage 不可用时静默降级。替换全部 5 处裸 `console.*`，装配完成补一行 info（「Host 活 Client 死」类症状可一眼确认）。
+- **`docs/format.md` 磁盘格式 spec（A7）**：逐文件固化存储布局与格式（tag 命名、index/lineage 的原子写与损坏语义差异、stamp 文件、format marker、意图 journal）、兼容纪律（读取侧字段可选化 / 未知字段忽略 / 高版本拒写），并写死「代码与本文漂移即 bug」约定；同时提前实施 plan-p2 的 FORMAT 半（SECURITY 半仍留 P2-2）。
+
+### 变更
+
+- **开启 `noUncheckedIndexedAccess`（A6）**：编译期堵索引越界，修 14 处（含 `Map.get(...)!.push` 类断言），顺带清掉无注释的既有非空断言；由 CI 既有 typecheck 步骤自动成门禁，不连带开其他严格 flag。
+- **catch 理由注释纪律（A8）**：协作规约新增「catch 必须附降级理由（为什么吞、为何安全、谁兜底）」，全 src 143 处 catch（host 99 + client 44）逐处审计补注；未发现「吞错 + 无 recordError + 无注释」的真问题；不设 CI 启发式门禁（误报高，靠规约 + review）。
+- 配置 schema 增至 10 字段（新增 `locale`，不列进 `cordis.patch.yml`——它按行覆盖、默认值随 schema 下发）；`init` 响应与 `config-get` 的 config 子集同步下发 `locale`（老 Host 缺字段时 client 按 `auto` 解析）。
+- 「最近错误」区按 host 的 `kind` 渲染本地化提示（原来的中文原文保留在条目 `title` 上），未分类错误仍原样展示 host message。
+
+### 修复
+
+- **win32 上磁盘格式守卫会把正常快照库锁死（严重，随本批次实弹掘出）**：新增的通用 `fileReadCmd` 用 `Get-Content -ErrorAction SilentlyContinue` 读文件，而 PowerShell 对**缺席文件**即使吞掉报错仍以退出码 1 收尾（pwsh / Windows PowerShell 5.1 双实测）——runShell 的退出码门禁把它当执行失败抛出，格式守卫便把一个还没有 `format` 标记的正常 store 判成「标记读不到」；由于守卫同时挡在快照捕获与索引落盘上，补戳永远写不下去，**快照、撤回、快照列表载入全部停摆且不可自愈**（POSIX 侧靠 `cat … || true` 无此问题）。修复＝读取命令改用 `Test-Path` 分支让缺席以成功收尾（与 POSIX 同语义），并补契约文本钉防回归；沉淀为 compat-audit **I41**。
+- **宿主退出期插件可能中断宿主（fatal load failure）**：启动预热是 fire-and-forget 的异步 IIFE，宿主在预热途中卸载（`dsh --profile headless --help` 打印帮助后立即退出、HMR、装配门禁 dispose）时访问 `sessions` 会抛「inactive context」，未接的 promise rejection 被 cordis 加载器记成 fatal。修复＝IIFE 整体接 catch 并保留诊断行（`recall warmup skipped: …`）；该项同时关闭了既有待办 [plan-warmup-unhandled-rejection](docs/plans/completed/plan-warmup-unhandled-rejection.md)。
+- **格式守卫的读失败文案不再指认「文件损坏」**：读失败（多为宿主启动早期 shell 未就绪）与标记内容非法此前共用一句「不可读或内容非法」，会把用户引向一个没有问题的文件；现按「高版本 → 请升级插件 / 内容非法 → 检查 format 文件 / 读不到 → 环境未就绪、下一条消息自动重试」三分。
+- **i18n 切换语言的三处半截生效（浏览器实弹掘出）**：① 英文确认句里「发送时状态」与「共 N 个文件将变更」两句拼接缺空格（`sent.1501 files`）；② 语言切换后设置卡片的两个分区折叠头（排除配置 / 快照管理）停在挂载时语言，要离开再回来才跟上；③ 保存成功提示用切换**前**的语言。修复＝英文词条补句首空格、配置表单在语言落地时回调设置外壳重渲染、语言补丁先本地落地再报成功；三处均补进 client 组件测试。
+- **回退失败时不再吞掉救援结果**：此前的码文案表把 `ROLLBACK_FAILED` 一律显示成「回退失败」四字，会盖掉 host 侧更有用的信息（「已自动恢复到安全快照，请重新预览后重试」或手动救援命令）。A4 起 `err.*` 词典只收 host 文案静态的错误码，`ROLLBACK_FAILED`（连同 `BAD_TYPE` / `SETTINGS_WRITE_FAILED` / `PARTIAL_DELETE` / `ERROR`）回落 host message 原文——中文用户看到的是更完整的救援结果与逃生命令，代价是英文界面下这几类错误可能中英混排（策略与理由见 README「界面语言」）。
+
 ## [2.4.6] - 2026-09-29
 
 ### 变更

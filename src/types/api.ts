@@ -6,7 +6,7 @@
 // errors.js 尚未 as const，这里内联 18 个码值并回链注释。
 
 import type { FeedbackKind, LineageEntry } from './payloads.js'
-import type { ResolvedConfig } from './config.js'
+import type { ResolvedConfig, LocalePref } from './config.js'
 import type { ErrorCode } from '../host/errors.js'
 
 export type { ErrorCode }
@@ -28,15 +28,20 @@ export interface InitNotice {
   gitMissing?: boolean
   homeFallback?: boolean
   // issue #18：工作区根自身是构建产物目录（路径段命中基础排除表），快照已停用；
-  // 值为已拼好的提示文案，client 直接展示（文案唯一来源见 exclude-patterns.ts）
+  // 值为已拼好的中文提示文案（exclude-patterns.buildRootNotice）。A4 起 client
+  // 优先按下面的 buildRootArtifactSeg 本地取词，此字段保留一个版本周期供旧
+  // client / 旧 Host 互操作（单向新增，读侧可选）
   buildRootNotice?: string
+  // A4：命中的路径段名（如 'target'），client 用它本地渲染 notice.buildRoot
+  buildRootArtifactSeg?: string
 }
 export interface InitResponse {
   ok: boolean
   root: string | null
   notice: InitNotice | null
-  // 仅受支持平台且有 root 时下发（unsupported 分支缺省）；client 读侧可选
-  config?: { refillDraft: boolean; archiveOriginal: boolean }
+  // 仅受支持平台且有 root 时下发（unsupported 分支缺省）；client 读侧可选。
+  // A4：locale 为界面语言偏好（老 Host 不下发 → client 按 auto 解析）
+  config?: { refillDraft: boolean; archiveOriginal: boolean; locale?: LocalePref }
 }
 
 // ---- snapshot-info ----
@@ -54,8 +59,10 @@ export interface SnapshotInfoResponse {
   kind?: FeedbackKind
   skipped?: string[]
   // issue #18：has=false 的「非失败」解释（当前只有构建产物 root 停用快照），
-  // 与 init 的 notice.buildRootNotice 同源同文案；client 在近消息上 toast 一次
+  // 与 init 的 notice.buildRootNotice 同源同文案；client 在近消息上 toast 一次。
+  // A4：client 优先按 artifactSeg 本地取词，notice 保留一个版本周期（同上）
   notice?: string
+  artifactSeg?: string
 }
 
 // ---- preview ----

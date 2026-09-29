@@ -31,7 +31,7 @@ export type Sentinel =
   | 'RECALL_CLEANUP'
   | CleanupStatus
 
-// 两套模板共享的 28 个函数签名 + 5 个共享常量。
+// 两套模板共享的 29 个函数签名 + 5 个共享常量。
 // 形参个数两侧不一时以多者为准（少参函数天然可赋值给多参类型）：diffScript
 // 即此例——pwsh 6 参（maxChanges 控制 TOTAL 截断）、posix 5 参（TSV 全量输出，
 // 截断由 JS 侧 slice），调用方恒传 6 参（snapshots.js MAX_CHANGES），故契约声明
@@ -78,6 +78,7 @@ export interface ScriptsCommon {
   // ---- 文件/索引读写 ----
   fileWriteStdinCmd(file: string): string
   renameFileCmd(src: string, dst: string): string
+  fileReadCmd(file: string): string
   indexReadCmd(dir: string): string
   lineageReadCmd(dir: string): string
   excludeReadCmd(file: string): string
