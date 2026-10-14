@@ -42,6 +42,19 @@
 > 撤回 UI 可渲染但执行必败，若官方把远程访问做成主场景需评估迁移到 Remote + remote-access 授权模型；② `conversation.chat.user.content` 为内容级 Factory——若官方
 > 要求 chat.node 贡献者不得直接渲染它或改签名，图片分支需再适配；③ 旧面 `renderMessageImages` 分支保留至 0.2.1-alpha.2 支持窗结束（peer 全窗口策略）。
 >
+> **2.4.11 发版核验（2026-10-15）**：插件 **2.4.11 已发布**（npm `latest`＝2.4.11；GitHub Release `v2.4.11` 非 draft/prerelease，tag 指向发版提交
+> `0375a3a` on `main`；发布提交三个：`a1be0f1` fix(client) → `9024a85` docs(compat) → `0375a3a` chore(release)）。发布前门禁全绿：`typecheck`、
+> 单测 **39 文件 499**、`test:client` **6 文件 93**、`test:probe` **53**、`build` 后 `lib/client.js` 指纹不变（sha256 `a3cfad7c88608f2b…`，170298 B）、
+> `verify:host`（inject=shell,sessions,agents、端点 13 项）、`check:dsh` 全部一致、`check:upgrade` 三层全绿。**产物一致**：本地 `npm pack` 与 registry
+> 下载包 shasum 同为 `29ea51b580df49eda3d41ca78e8adcd3ad5cae6b`（sha512 `M0Js2p/2LSzWZ…`），解包后 **24/24 文件逐字节一致**（差异 0，
+> `lib/client.js` 双侧 170298 B）。**本机实装（web profile，npm 模式）**：`pnpm add dsh-recall-plugin@2.4.11 --save-exact`（pin 2.4.11；pnpm 自动把
+> `dsh-recall-plugin@2.4.11` 追加进 profile `pnpm-workspace.yaml` 的 `minimumReleaseAgeExclude`，与历次发版同款），装载版本 2.4.11、`lib/client.js`
+> 170298 B、兼容矩阵含 `0.2.1-alpha.3: compatible`。**宿主启停冒烟**：`dsh web --no-open --port 3080` 启动后 stderr 出现插件自身
+> `recall shell dialect probe: pwsh`、**无任何 skip/compat 行**（另一条为第三方 `dsh-better-sidebar: pending`，既有现象），3080 正常监听；
+> 页面实测下发的插件产物含新面标记 `conversation.chat.user.content`、脱敏投影面 `conversation.user.text` 与旧面分支 `renderMessageImages`
+> （三标记齐备＝线上即双面构建）。发版前另有真宿主 + 浏览器实弹（同版本代码）四项通过，见本段上方与
+> [smoke-checklist-records](plans/completed/smoke-checklist-records.md) 2026-10-15 节。
+>
 > **0.2.1-alpha.2 核验（2026-10-09）——零破坏版本，无需改码，peer 窗口无需追加**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag `dsh-v0.2.1-alpha.2`，2026-10-09 发布、0.2.1 线第二个 alpha；`latest`/`next` 仍 0.2.0-rc.2），
 > `npm install -g @deepseek-ai/dsh@0.2.1-alpha.2` 全局实装（15 增 / 12 删 / 546 替换包、2 分钟；cordis 4.0.5-alpha.1 与
