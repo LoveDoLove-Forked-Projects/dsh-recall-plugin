@@ -440,12 +440,17 @@ export function buildRecallNode(
 
   function UserRecallNode(props: ChatNodeProps) {
     const node = props && props.node
-    // 图片渲染入口：官方 ChatNodeSeat 传给本 slot 的 props 契约只有
-    // renderMessageImages（内部经 conversation.message.images slot 渲染
-    // 官方 MessageImages，自带鉴权、缓存、失败重试与灯箱预览）。
-    // 契约里从不存在 loadImage（issue #9）：读该不存在的字段导致自研加载链
-    // 从未执行、用户消息图片永久无声空白。
+    // 图片渲染入口（双面探测，I2）：官方两代契约——
+    // - ≤0.2.1-alpha.2：只有 renderMessageImages（内部经 conversation.message.
+    //   images slot 渲染官方 MessageImages，自带鉴权/缓存/重试/灯箱）；契约里
+    //   从不存在 loadImage（issue #9：读不存在字段导致图片永久无声空白）。
+    // - ≥0.2.1-alpha.3：renderMessageImages 随该 slot 拆分下线，改由
+    //   conversation.chat.user.content Factory 承接，props 追加
+    //   renderFactorySlot 并正式下放 loadImage（官方 UserMessageNodeView 同法）。
+    // 运行时探测两分支，保住 peer 全窗口（0.1.2–0.2.x）行为一致。
     const renderMessageImages = props && props.renderMessageImages
+    const renderFactorySlot = props && props.renderFactorySlot
+    const loadImage = props && props.loadImage
     const sessionId = props && props.sessionId
     const data = (node && node.data ? node.data : {}) as { content?: unknown; time?: unknown }
     // node.id 是会话事件匹配时写入的真实消息 ID；node.key 是位置键，不能用于快照查询
@@ -743,11 +748,31 @@ export function buildRecallNode(
 
     const bubbleChildren: Array<ReturnType<typeof React.createElement>> = []
     // 图片在上、气泡在下：布局顺序对齐官方 UserStyleBubble
-    if (imageBlocks.length && typeof renderMessageImages === 'function') {
-      const render = renderMessageImages as (args: { images: Array<{ attachment: unknown }>; align: string }) => import('react').ReactNode
-      bubbleChildren.push(React.createElement(React.Fragment, { key: 'images' },
-        render({ images: imageBlocks, align: 'end' })
-      ))
+    if (imageBlocks.length) {
+      if (typeof renderMessageImages === 'function') {
+        // 旧面（≤0.2.1-alpha.2）：官方注入的渲染闭包
+        const render = renderMessageImages as (args: { images: Array<{ attachment: unknown }>; align: string }) => import('react').ReactNode
+        bubbleChildren.push(React.createElement(React.Fragment, { key: 'images' },
+          render({ images: imageBlocks, align: 'end' })
+        ))
+      } else if (typeof renderFactorySlot === 'function' && typeof loadImage === 'function') {
+        // 新面（≥0.2.1-alpha.3）：空 text/extraBlocks 时官方 UserContent 只渲染
+        // attachmentRow（showBubble=false），图片经 conversation.chat.user.images
+        // slot 走官方 MessageImages；文本仍由本插件下方气泡渲染、不重复出官方气泡
+        const render = renderFactorySlot as (name: string, input: unknown) => import('react').ReactNode
+        bubbleChildren.push(React.createElement(React.Fragment, { key: 'images' },
+          render('conversation.chat.user.content', {
+            content: {
+              text: '',
+              attachments: imageBlocks.map((b) => ({ type: 'image', image: { attachment: b.attachment } })),
+              extraBlocks: []
+            },
+            loadImage,
+            interactive: false,
+            facts: {}
+          })
+        ))
+      }
     }
     // 文件卡片与图片同属「附件在上、文本在下」的官方布局
     for (let i = 0; i < fileBlocks.length; i++) {
@@ -761,7 +786,21 @@ export function buildRecallNode(
         )
       ))
     }
-    if (text !== '') bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-bubble', key: 'text' }, text))
+    if (text !== '') {
+      if (typeof renderFactorySlot === 'function') {
+        // 新面（≥0.2.1-alpha.3）：文本经官方 user.text Factory 投影——继承官方
+        // 规则链（含 dsh-client-ui-secret-mask 的密钥打码，观察项①对齐）。
+        // facts 传空对象：官方 whitespace 规则读不到 flag 即禁用（显示与旧面
+        // 逐字一致），引用 chip 仅在显式 wire 格式下出现；interactive:false
+        // 保持只读（历史消息重绘不给引用动作）
+        const render = renderFactorySlot as (name: string, input: unknown) => import('react').ReactNode
+        bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-bubble', key: 'text' },
+          render('conversation.user.text', { text, facts: {}, interactive: false, ellipsis: false })
+        ))
+      } else {
+        bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-bubble', key: 'text' }, text))
+      }
+    }
     for (let i = 0; i < rest.length; i++) {
       bubbleChildren.push(React.createElement('pre', { className: 'dsh-recall-json', key: 'rest-' + i }, JSON.stringify(rest[i], null, 2)))
     }

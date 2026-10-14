@@ -43,14 +43,33 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
     const find = () => (has(chat.p, chat.f) ? chat : has(conv.p, conv.f) ? conv : null)
     const guard = () => Boolean(find())
 
-    probeIf(guard)('renderMessageImages 是官方字段（曾读不存在的 loadImage）', () => {
+    probeIf(guard)('图片渲染入口在位（旧面 renderMessageImages / 新面 PropsRenderFactories + loadImage）', () => {
       const { p, f } = find()
-      expect(read(p, f)).toMatch(/renderMessageImages/)
-      // 契约明确剔除 loadImage——`Omit<MessageImagesOwnerProps, 'loadImage'>`
-      // 是「渲染入口只有 renderMessageImages」的机器化表达；单匹配 loadImage
-      // 会被字面量误放行（字面量作为被 Omit 剔除的名字也存在），必须匹配整型。
-      // RenderMessageImages 类型定义现居 ui-conversation（chat 包仅 re-export）
-      expect(read(conv.p, conv.f)).toMatch(/Omit<MessageImagesOwnerProps,\s*'loadImage'>/)
+      const src = read(p, f)
+      // 两代契约任一在位即可——插件运行时双面探测（recall-node.ts）：
+      // ≤0.2.1-alpha.2：ChatNodeOwnerProps 只有 renderMessageImages，loadImage
+      // 被 Omit 剔除（issue #9 的原始钉子：契约里从不存在 loadImage）；
+      // ≥0.2.1-alpha.3：renderMessageImages 随 conversation.message.images
+      // 拆分下线，chat.node props 追加 renderFactorySlot（PropsRenderFactories）
+      // 并正式下放 loadImage。两面同时消失 = 官方第三次重排图片入口，必须重核
+      // 插件渲染分支。
+      const oldFace = /renderMessageImages/.test(src)
+      const newFace = /PropsRenderFactories/.test(src) && /loadImage/.test(src)
+      expect(oldFace || newFace).toBe(true)
+      if (newFace && !oldFace && has('dsh-client-ui-slots', '/lib/types/index.d.ts')) {
+        // 新面能力出处：renderFactorySlot 的类型定义与随附能力面
+        expect(read('dsh-client-ui-slots', '/lib/types/index.d.ts')).toMatch(/renderFactorySlot/)
+      }
+    })
+
+    probeIf(guard)('文本投影 Factory 在位（新面 ≥0.2.1-alpha.3：conversation.user.text，密钥脱敏链）', () => {
+      const { p, f } = find()
+      const newFace = /PropsRenderFactories/.test(read(p, f))
+      if (!newFace) return // 旧面：文本走纯字符串渲染，无 Factory 依赖（不误红）
+      // Factory 声明与输入契约（UserTextInput/UserTextDocumentInput）同源在位——
+      // 插件文本重绘经它继承官方规则链（dsh-client-ui-secret-mask 的密钥打码）
+      expect(read('dsh-client-ui-conversation', '/lib/types/client/contract/slots.d.ts')).toMatch(/'conversation\.user\.text'/)
+      expect(has('dsh-client-ui-conversation', '/lib/types/client/contract/user-text.d.ts')).toBe(true)
     })
 
     probeIf(guard)('node 字段存在（消息节点渲染 props 的官方命名）', () => {

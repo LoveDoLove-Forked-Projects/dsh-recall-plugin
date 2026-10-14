@@ -2,6 +2,20 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 兼容
+
+- **dsh 0.2.1-alpha.3 兼容（首个破坏性版本：chat.node 图片渲染入口换代）**（升级核查见 [docs/upgrade-assessments/dsh-0.2.1-alpha.3.md](docs/upgrade-assessments/dsh-0.2.1-alpha.3.md) 与 [docs/compat-audit.md](docs/compat-audit.md) 头部 0.2.1-alpha.3 段）：官方移除 `chat.node` 的 `renderMessageImages`、把 `conversation.message.images` 拆为 `conversation.chat.message.images` + `conversation.chat.user.images`，图片渲染改经 `renderFactorySlot`（`PropsRenderFactories`）+ `loadImage` 的 `conversation.chat.user.content` Factory——插件原图片重绘链在新版静默失效（用户消息图片无声空白，issue #9 的第二次形态，零报错）。
+- **修复为运行时双面探测**（`src/client/recall-node.ts`）：旧面（≤0.2.1-alpha.2）沿用 `renderMessageImages` 闭包；新面（≥0.2.1-alpha.3）经 `renderFactorySlot('conversation.chat.user.content', …)` 只渲染附件行（`content.text` 传空串保官方 `showBubble=false`，正文仍由插件自绘气泡、不重复出官方气泡），`loadImage` 原样透传——peer 全窗口（0.1.2–0.2.x）行为一致。
+- 探针改双面契约断言（`test:probe` 52/52），`test:client` +2（旧面闭包 / 新面 Factory 载荷与 `text:''` 契约要点 / 两入口双缺降级）；其余契约零漂移：`sessions.fork`（仅 `create` 加可选 `agentPreset`）/`updateQueue`/`setDraft`/`archiveSession` 均未动，事件集 60 → 62（仅增 `job/registered`/`job/settled`，零删除）。观察项：exact Fetch 路由明确「仅 owner Peer 可达」——远程非 owner 访问场景插件 API 403（本机 web/desktop 零影响）。
+- **密钥脱敏对齐（同日跟进）**：官方新增 `dsh-client-ui-secret-mask`（`userText.register` 规则 + `conversation.user.text.node` key=`secret`）只在官方文本投影层打码，插件自绘气泡原本绕过、密钥明文。文本行改经新面 `renderFactorySlot('conversation.user.text', { text, facts: {}, interactive: false, ellipsis: false })` 投影——仅继承脱敏（`facts` 空对象令官方 whitespace 折叠/裁剪规则读不到 flag 即禁用、显示与旧面逐字一致；引用 chip 仅在显式 wire 格式下出现）；旧面（≤0.2.1-alpha.2，无 `renderFactorySlot`）保持纯字符串渲染。探针 +1、`test:client` +1（**probe 53/53、client 93/93**）。
+
+### 文档
+
+- `docs/reference/` 镜像按 tag `dsh-v0.2.1-alpha.3` 重拉：13 源中 2 份差异（`05-publish.md` 的 `--from-default-profile` 重置语义；`11-cookbook-conversation-node.md` 的 `exclusive` 认领与 `groupTree` 位置表）。
+- `docs/dsh-contract.md` / `docs/compat-audit.md`（I2 重写）/ `AGENTS.md`（I2 行）/ README 双语兼容范围与徽章同步至 0.2.1-alpha.3。
+
 ## [2.4.10] - 2026-10-07
 
 ### 修复

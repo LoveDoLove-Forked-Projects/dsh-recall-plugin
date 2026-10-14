@@ -302,7 +302,7 @@ describe('撤回节点：execute 执行链', () => {
 })
 
 describe('撤回节点：消息渲染与复制', () => {
-  it('图片块经 renderMessageImages 渲染（走官方图片管线）', async () => {
+  it('图片块经 renderMessageImages 渲染（旧面 ≤0.2.1-alpha.2，走官方图片管线）', async () => {
     const calls: Array<{ images: Array<{ attachment: unknown }>; align: string }> = []
     const renderMessageImages = (args: { images: Array<{ attachment: unknown }>; align: string }) => { calls.push(args); return React.createElement('div', { className: 'img-slot' }) }
     const { container } = await mount({
@@ -316,6 +316,71 @@ describe('撤回节点：消息渲染与复制', () => {
     // 渲染函数每次 render 都会被调用（挂载 + 状态更新重渲染），断言载荷而非次数
     expect(calls.length).toBeGreaterThanOrEqual(1)
     expect(first(first(calls).images).attachment).toEqual({ attachmentId: 'att-1' })
+  })
+
+  it('图片块经 renderFactorySlot 渲染（新面 ≥0.2.1-alpha.3：user.content Factory）', async () => {
+    interface FactoryInput {
+      content: { text: string; extraBlocks: unknown[]; attachments: Array<{ type: string; image: { attachment: unknown } }> }
+      loadImage: unknown
+      interactive: boolean
+    }
+    const calls: Array<{ name: string; input: FactoryInput }> = []
+    // 同一探测面也被文本投影使用：按 factory 名区分返回，图片断言才不会被文本调用污染
+    const renderFactorySlot = (name: string, input: FactoryInput) => { calls.push({ name, input }); return React.createElement('div', { className: name === 'conversation.chat.user.content' ? 'img-factory' : 'text-projection' }) }
+    const loadImage = async () => 'blob:img'
+    const { container } = await mount({
+      props: {
+        renderFactorySlot,
+        loadImage,
+        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'hi' }, { type: 'image', attachment: { attachmentId: 'att-1' } }] } },
+      },
+    })
+
+    expect(qa(container, '.img-factory').length).toBe(1)
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    const call = first(calls)
+    // 空 text/extraBlocks 是契约要点：官方 UserContent 只在 showBubble 为真时渲染
+    // 文本气泡——插件正文由自己的 .dsh-recall-bubble 渲染，不能重复出一层
+    expect(call.name).toBe('conversation.chat.user.content')
+    expect(call.input.content.text).toBe('')
+    expect(call.input.content.extraBlocks).toEqual([])
+    expect(first(call.input.content.attachments)).toEqual({ type: 'image', image: { attachment: { attachmentId: 'att-1' } } })
+    expect(call.input.loadImage).toBe(loadImage)
+    expect(call.input.interactive).toBe(false)
+  })
+
+  it('文本经 user.text Factory 投影（新面：继承官方脱敏规则链）', async () => {
+    interface TextInput { text: string; facts: unknown; interactive: boolean; ellipsis: boolean }
+    const calls: Array<{ name: string; input: TextInput }> = []
+    const renderFactorySlot = (name: string, input: TextInput) => { calls.push({ name, input }); return React.createElement('span', { className: 'text-projection' }, input.text) }
+    const { container } = await mount({
+      props: {
+        renderFactorySlot,
+        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'sk-abc1234567890' }] } },
+      },
+    })
+
+    expect(qa(container, '.text-projection').length).toBe(1)
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    const call = first(calls)
+    expect(call.name).toBe('conversation.user.text')
+    expect(call.input.text).toBe('sk-abc1234567890')
+    // facts 空对象是契约要点：官方 whitespace 规则读不到 flag 即禁用（显示与
+    // 旧面逐字一致）；密钥脱敏规则不读 facts，照常生效
+    expect(call.input.facts).toEqual({})
+    expect(call.input.interactive).toBe(false)
+    expect(call.input.ellipsis).toBe(false)
+    // 外层容器保留（样式承载），文本投影在其内部
+    expect(q(container, '.dsh-recall-bubble')).not.toBeNull()
+  })
+
+  it('两代图片入口都缺 → 图片静默跳过、组件不崩（未知契约的降级面）', async () => {
+    const { container } = await mount({
+      props: { node: { id: 'm1', key: 'm1', data: { content: [{ type: 'image', attachment: { attachmentId: 'att-1' } }] } } },
+    })
+
+    expect(container.textContent).not.toContain('att-1')
+    expect(q(container, '.dsh-recall-bubble')).toBeNull()
   })
 
   it('file 块渲染文件卡片（扩展名徽标 + 文件名）', async () => {

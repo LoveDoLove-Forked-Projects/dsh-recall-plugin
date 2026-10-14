@@ -50,7 +50,7 @@ export type SlotName =
   | 'conversation.chat.commandview'
   | 'conversation.chat.assistant-actions'
   | 'conversation.chat.turnTail'
-  | 'conversation.message.images'
+  | 'conversation.message.images' // 0.2.1-alpha.3 起拆为 conversation.chat.message.images（输出图）+ conversation.chat.user.images（用户图），旧名不再存在（本枚举仅类型备忘、零运行时消费）
   | 'conversation.details.tool'
   | 'details'
   | 'conversation.approval.detail'
@@ -79,9 +79,14 @@ export type SlotName =
   | 'sidebar.workspaces.directoryFlow'
 
 // ---- Chat 节点（conversation.chat.node keyed slot props）----
-// 插件实际读取仅三字段：node / renderMessageImages / sessionId（I2：props
-// 无裸 loadImage；I3：sessionId 由 scope=session kit 注入；I4：node.id 是
-// 快照主键、node.key 是位置键；I5：keyed key 与 UI 投影 kind 对齐 user+steering）
+// 插件实际读取字段：node / sessionId / 图片入口两代其一（I2；I3：sessionId
+// 由 scope=session kit 注入；I4：node.id 是快照主键、node.key 是位置键；
+// I5：keyed key 与 UI 投影 kind 对齐 user+steering）——
+// 旧面 ≤0.2.1-alpha.2 只有 renderMessageImages（经 conversation.message.images
+// slot 渲染官方 MessageImages；那代契约里从不存在 loadImage，issue #9 实证）；
+// 新面 ≥0.2.1-alpha.3 移除它、追加 renderFactorySlot 并正式下放 loadImage
+// （经 conversation.chat.user.content Factory 渲染，附件行走拆分后的
+// conversation.chat.user.images slot）。
 
 export interface ChatNodeData {
   id?: string
@@ -92,9 +97,14 @@ export interface ChatNodeData {
 
 export interface ChatNodeProps {
   node?: ChatNodeData
-  // 图片唯一入口：内部经 conversation.message.images slot 渲染官方
-  // MessageImages（issue #9 实证：契约里从不存在 loadImage）
+  // 旧面图片入口（≤0.2.1-alpha.2）
   renderMessageImages?: unknown
+  // 新面渲染入口（≥0.2.1-alpha.3；renderFactorySlot 由 PropsRenderFactories
+  // 追加进 chat.node props，loadImage 随 ChatNodeOwnerProps 正式下放）：
+  // 图片走 conversation.chat.user.content，文本走 conversation.user.text
+  // （后者继承官方规则链——密钥脱敏等）
+  renderFactorySlot?: unknown
+  loadImage?: unknown
   sessionId?: string
 }
 
