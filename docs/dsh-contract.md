@@ -2,7 +2,7 @@
 
 > 插件视角的官方（deepseek-harness）API 契约参考：插件**依赖面**逐项给出签名与核验状态，插件**未依赖面**给出全量清单与一句话说明。
 >
-> * 对应版本：**dsh 0.2.1-alpha.2**（tag `dsh-v0.2.1-alpha.2`，2026-10-09 发布、0.2.1 线第二个 alpha；npm dist-tag `alpha` 指向本版（`latest`/`next` 仍 0.2.0-rc.2）——**装本版须显式写版本号**；`npm install -g @deepseek-ai/dsh@0.2.1-alpha.2` 全局实装（15 增 / 12 删 / 546 替换包、2 分钟）。**对插件零破坏、无需改码、peer 窗口无需追加**（既有 `>=0.2.1-alpha.1 <0.3.0` 同 tuple 段天然放行 alpha.2；cordis 4.0.5-alpha.1 与 schemastery 3.18.5-alpha.1 两条独立版本线本轮未动）：**全树内容级 diff**（npm 侧安装的 `0.2.1-alpha.1` 完整树 290 包作基线，逐包归一化版本号比对 → 274 包有差异 / 1156 个真内容变更文件，关键契约文件再逐行 diff）确认注册 / 消费契约（ui-chat `contract/slots.d.ts` ＋ `contract/chat-nodes.d.ts`（`ChatNodeOwnerProps` 含 `renderMessageImages` 逐字节相同）、api-session-controller `client/contract/sessions.d.ts`（fork / binding）、ui-conversation `service.d.ts`（updateQueue）与 `contract/input.d.ts`（`setDraft` 签名）、`plugins.bundle.config` ＋ `settings.plugin.item` 双 slot）**均未漂移**；真增量落在插件不消费处或纯增（`conversation.chat.flow` 渲染中间层与 reasoning body / content slot、`ChatNodeSeat` 新增 `useChatNodeBottom`/`deferCollapse`/`useGroupAction` 入参、`fork` 可选 `allowMigration`、实验性 `appendPluginRecord` / `pluginRecordOf`、`formatStatus` 迁移态字段、webserver 任意绑定地址与 TLS、agents home 解析），并有**正向**一处（新增工作目录能力在架构文档明示「不改变原始项目标识、沙箱写入根目录或已有进程目录」，影子仓库范围假设获官方确认）。**门禁**：`test:probe` **52/52**、`verify:host` 装配断言全过（inject=shell,sessions,agents、端点 13 项）、单测 499/499、client 90/90、`typecheck`、`check:dsh` 全绿。核验记录归口 [compat-audit.md](./compat-audit.md) 头部 0.2.1-alpha.2 段与 [upgrade-assessments/dsh-0.2.1-alpha.2.md](upgrade-assessments/dsh-0.2.1-alpha.2.md)。**沿革事实（当前双分支实现的依据）**：① 0.1.7-alpha.1 起两处接缝换代——shell 执行接缝 `resolve` + `execute()`（删 `run` / `start`；§1.1 shell）、settings 面只剩 `SettingsForms`（profile entry id、可写字段须 `.volatile()`；§1.1 settings），插件双分支共存适配；② 包布局收进 `dsh/node_modules/@deepseek-ai/*`（I11）；③ fork 实现重写（边界语义等价，I35）；④ 事件集（§四；alpha.2 实测 `KNOWN_SESSION_EVENT_TYPES` 59 → 60，仅新增 `working-directory/change`，零删除）；⑤ Session 日志格式 **V4**（保留原始 message id，插件以 id 为主键、以真实 `e.seq` 推 cutSeq，免疫）；⑥ `sessions.fork` 增加可选 `onCreated`（插件不传）；⑦ 0.2.1-alpha.2 起 `sessions.fork` 增加可选 `allowMigration`（仅显式 `false` 且源会话为 `migration-required` 时抛错拒绝；插件不传，保持 Host 默认）。
+> * 对应版本：**dsh 0.2.1-alpha.3**（tag `dsh-v0.2.1-alpha.3`，2026-10-14 发布、0.2.1 线第三个 alpha；npm dist-tag `alpha` 指向本版；`npm install -g @deepseek-ai/dsh@0.2.1-alpha.3` 全局实装（55 增 / 7 删 / 554 替换包、7 分钟；cordis 4.0.5-alpha.1 → 4.0.5-alpha.2，schemastery 未动）。**首个破坏性版本：chat.node 图片渲染入口换代，插件已双分支适配**——ui-chat `ChatNodeOwnerProps` **移除 `renderMessageImages`**、`RenderMessageImages` 类型从 ui-conversation 导出面删除、`conversation.message.images` 拆为 `conversation.chat.message.images` + `conversation.chat.user.images`、`ChatNodeViewProps` 追加 `PropsRenderFactories`（`renderFactorySlot`）、`loadImage` 保留；插件 `recall-node.ts` 改运行时双分支（旧面闭包 / 新面 `renderFactorySlot('conversation.chat.user.content', …)` 只渲染附件行），细节见 §1.2 与 [compat-audit.md](./compat-audit.md) I2。**其余消费/注册契约零漂移**：`sessions.fork` 未动（`sessions.d.ts` 仅 `create` 加可选 `agentPreset`）、`updateQueue` / `setDraft`（`contract/input.d.ts` 逐字节相同）/ binding / readAttachment / archiveSession / openSession 未动；`dsh-shell`、`dsh-session-query`、`dsh-session-persistence`、`dsh-fs-local` 整包零内容变化；`ChatNodeKind` 全集探针全绿（仅新增可选 `groupTree`，纯加法）。**事件集** 60 → 62，仅新增 `job/registered` / `job/settled`、零删除（快照触发与 cutSeq 链不受影响）。**访问控制收紧**：exact Fetch 路由明确「仅 owner Peer 可达、非 owner 一律 403」（新增 `dsh-api-remote-access` 方法级门禁）——本机 web/desktop 零影响，远程非 owner 访问场景插件 API 403。**门禁**：`test:probe` **52/52**、`verify:host` 装配断言全过（inject=shell,sessions,agents、端点 13 项）、单测 499/499、client 92/92、`typecheck`、`check:dsh` 全绿（同 tuple，peer 窗口无需追加）。核验记录归口 [compat-audit.md](./compat-audit.md) 头部 0.2.1-alpha.3 段与 [upgrade-assessments/dsh-0.2.1-alpha.3.md](upgrade-assessments/dsh-0.2.1-alpha.3.md)。**沿革事实（当前双分支实现的依据）**：① 0.1.7-alpha.1 起两处接缝换代——shell 执行接缝 `resolve` + `execute()`（删 `run` / `start`；§1.1 shell）、settings 面只剩 `SettingsForms`（profile entry id、可写字段须 `.volatile()`；§1.1 settings），插件双分支共存适配；② 包布局收进 `dsh/node_modules/@deepseek-ai/*`（I11）；③ fork 实现重写（边界语义等价，I35）；④ 事件集（§四；alpha.3 实测 62 种——相对 alpha.2 的 60 仅新增 `job/registered` / `job/settled`，零删除）；⑤ Session 日志格式 **V4**（保留原始 message id，插件以 id 为主键、以真实 `e.seq` 推 cutSeq，免疫）；⑥ `sessions.fork` 增加可选 `onCreated`（插件不传）；⑦ 0.2.1-alpha.2 起 `sessions.fork` 增加可选 `allowMigration`（仅显式 `false` 且源会话为 `migration-required` 时抛错拒绝；插件不传，保持 Host 默认）；⑧ **0.2.1-alpha.3 图片渲染入口换代为双面（I2）**——≤alpha.2 仅 `renderMessageImages`；≥alpha.3 移除它、改 `renderFactorySlot` + `loadImage` 经 `conversation.chat.user.content` Factory 渲染附件行（插件运行时双分支探测）。
 >
 > * 来源：官方源码直接核验（本机构建检出在 `D:\workspace\dsh-plugin\deepseek-harness`），非文档转述——**遇字段争议一律以** **`.d.ts`/源码为准**（AGENTS.md 合规清单 #8）
 >
@@ -14,7 +14,7 @@
 
 ***
 
-## 一、插件依赖面（详细契约，0.2.1-alpha.2 核验通过）
+## 一、插件依赖面（详细契约，0.2.1-alpha.3 核验通过）
 
 ### 1.1 Host 服务（经 `inject` 声明或 `ctx.get` 获取）
 
@@ -196,14 +196,15 @@ interface ChatNodeOwnerProps {
   openFile(path: string): void
   inspectCall(callId: ToolCallId): void
   forkAt(seq: number): void
-  loadImage: MessageImageLoader   // **0.1.3-alpha.1 新增下放**（原 Omit 剔除字段；session 授权图片加载器，chat-node 渲染附件展示槽用；插件未用，仍走 renderMessageImages）
-  renderMessageImages: RenderMessageImages   // 图片渲染入口（I2 保留；props 曾剔除 loadImage、0.1.3 起随 loadImage 一并下放）
+  loadImage: MessageImageLoader   // 0.1.3-alpha.1 起下放；**0.2.1-alpha.3 起成为图片入口链的一环**（新面经它 + renderFactorySlot 渲染）
+  // 旧面（≤0.2.1-alpha.2）：renderMessageImages: RenderMessageImages —— **0.2.1-alpha.3 已移除**
+  //（随 conversation.message.images slot 拆分下线，见下方双面说明）
   fileMentions(owner: TurnTailOwnerProps): MarkdownFileMentions | undefined
   turnProcess?: TurnProcessOwnerProps        // 新增：折叠过程状态（插件未读）
 }
 ```
 
-* 插件实际读取仅三字段：`node` / `renderMessageImages` / `sessionId`，0.1.2-alpha.1 全部保留
+* 插件实际读取：`node` / `sessionId` + 图片入口双面之一（I2）——**旧面**（≤0.2.1-alpha.2）`renderMessageImages`；**新面**（≥0.2.1-alpha.3）`renderFactorySlot`（`ChatNodeViewProps & PropsRenderFactories`）+ `loadImage`，经 `renderFactorySlot('conversation.chat.user.content', { content: { text:'', attachments:[{type:'image',image:{attachment}}], extraBlocks:[] }, loadImage, interactive:false, facts:{} })` 只渲染附件行（空 text/extraBlocks 保官方 `showBubble=false`，文本仍由插件自绘气泡）
 
 * `props.sessionId` 由 scope='session' 的 kit 注入（`ui-session` merge 进 `SessionStandardProps`，I3）
 
@@ -358,9 +359,9 @@ interface PluginConfigViewProps { readonly view: 'summary' | 'page' }
 
 **client 半专用**（Host 不可见）：`connection`、`locale`、`modules`/`clientModules`、`slots`/`uiRenderer`、`layout`、`uiSession`、`uiConversation`/`conversation`、`commandUi`、`inputTriggers`、`modelDirectories`、`chatFileMentions`、`settingsSchema`/`settingsScope`、`theme`、`uiWorkspace`、`timer`（cordis-client-runner 提供，声明后可用 `ctx.timeout` 等计时动词）
 
-## 四、会话事件类型全集（60 种）
+## 四、会话事件类型全集（62 种）
 
-已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.2.1-alpha.2；`dsh-session/lib/types/known-event-types.js`，由官方 `gen-persistence-catalog` 生成）：
+已知类型集合（`KNOWN_SESSION_EVENT_TYPES`，0.2.1-alpha.3；`dsh-session/lib/types/known-event-types.js`，由官方 `gen-persistence-catalog` 生成）：
 
 ```
 agent-preset/selected   agent/inbox/spliced    approval/asked      approval/decided
@@ -369,6 +370,7 @@ command/run             compaction/end         compaction/prune    compaction/st
 compaction/summary      deliverables/presented(*新)                developer/message(*新)
 feedback/message-delete feedback/message-put  feedback/record     goal/change
 hook/invoked            hook/result            image/offload(*新)  llm/retry
+job/registered(*新)     job/settled(*新)
 llm/retry-started       model/selection        permission/preset   plan/mode
 request/context         request/header         sandbox/mode        schedule/change
 session-log-deepseek/delivery-accepted         session/end-seed    session/title
@@ -384,7 +386,7 @@ working-directory/change(*新)
 workspace/changes(*新)
 ```
 
-0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**0.1.5-alpha.1（Session format v3）三处变化**：① 新增 `system/message`（系统提示词纳入消息历史，取代 `request/header` 的 `header.system` 字段）；② `tool/code-dispatch`/`tool/code-dispatch-start` 更名为 `tool/ptc-dispatch`/`tool/ptc-dispatch-start`（PTC 词汇规范化，读取侧 V2→V3 迁移会把旧 `ptc-dispatch` 重命名回 `code-dispatch` 供旧消费方，但 v3 原生写入用 `ptc-dispatch`）；③ 新增 `feedback/message-put`/`feedback/message-delete`（反馈独立提交）。**0.1.7-alpha.1（Session format v4）新增 5 种**：`deliverables/presented`、`developer/message`、`image/offload`、`subagent/catalog`、`workspace/changes`（另有 V3→V4 批量迁移工具；「部分 V3 会话缺轮次结束记录」的兼容属正向，`resolveCutSeq` 依赖的 `turn/end` 更可靠）。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v3/v4 对旧日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后密集重映射语义（V2→V3 会插入 `system/message` 事件并 remap seq，但保留原始 message id——插件以 id 为主键定位消息、以恢复后 seq 推导 cutSeq，坐标系与 fork 同源，不受影响）。**0.2.1-alpha.2 新增 1 种、零删除**：`working-directory/change`——对应新增的工作目录能力（官方架构文档同步明示其「不改变原始项目标识、沙箱写入根目录或已有进程目录」，本插件的影子仓库范围假设据此确认），`turn/end` 等快照主链事件未动。
+0.1.2-alpha.1 相对 0.1.1-rc.2 新增 3 种：`model/selection`、`session-log-deepseek/delivery-accepted`、`subagent/model-selection-policy`。**0.1.3-alpha.1（Session format v2）一进一出**：移除 `assistant/chunk`（不再持久化顶层 chunk，按 attempt 聚合嵌入 `assistant/message`）、新增 log-only 的 `assistant/attempt`。**0.1.5-alpha.1（Session format v3）三处变化**：① 新增 `system/message`（系统提示词纳入消息历史，取代 `request/header` 的 `header.system` 字段）；② `tool/code-dispatch`/`tool/code-dispatch-start` 更名为 `tool/ptc-dispatch`/`tool/ptc-dispatch-start`（PTC 词汇规范化，读取侧 V2→V3 迁移会把旧 `ptc-dispatch` 重命名回 `code-dispatch` 供旧消费方，但 v3 原生写入用 `ptc-dispatch`）；③ 新增 `feedback/message-put`/`feedback/message-delete`（反馈独立提交）。**0.1.7-alpha.1（Session format v4）新增 5 种**：`deliverables/presented`、`developer/message`、`image/offload`、`subagent/catalog`、`workspace/changes`（另有 V3→V4 批量迁移工具；「部分 V3 会话缺轮次结束记录」的兼容属正向，`resolveCutSeq` 依赖的 `turn/end` 更可靠）。**对齐不改语义**——消费方按需扫描（如插件 scanCutSeq 只扫 `user/message` + `turn/end`）天然向后兼容；v3/v4 对旧日志经不可变相邻 generation 迁移，读取侧 seq 为迁移后密集重映射语义（V2→V3 会插入 `system/message` 事件并 remap seq，但保留原始 message id——插件以 id 为主键定位消息、以恢复后 seq 推导 cutSeq，坐标系与 fork 同源，不受影响）。**0.2.1-alpha.2 新增 1 种、零删除**：`working-directory/change`——对应新增的工作目录能力（官方架构文档同步明示其「不改变原始项目标识、沙箱写入根目录或已有进程目录」，本插件的影子仓库范围假设据此确认），`turn/end` 等快照主链事件未动。**0.2.1-alpha.3 新增 2 种、零删除**：`job/registered`、`job/settled`（jobs 作业注册/结算落会话日志，对应「应用意外退出后未完成任务显示『任务已停止』」的能力面；与 I7 的归档 stopActivity 护栏同域）——插件扫描面（`user/message` + `turn/end`）与快照触发不受影响。
 
 ## 五、内置 Tool 包清单（22 个）
 
@@ -400,7 +402,7 @@ workspace/changes(*新)
 
 * **Config**：活 Schemastery schema，无效配置加载即响亮失败（合规 #3）
 
-* **一次性 token 鉴权**：`dsh web` 启动 URL 带 `?token=`；实测插件 `/api/recall/*` 前缀路由不经过该鉴权层
+* **一次性 token 鉴权**：`dsh web` 启动 URL 带 `?token=`；实测插件 `/api/recall/*` 前缀路由不经过该鉴权层。**0.2.1-alpha.3 起 exact Fetch 路由明确「仅 owner Peer 可达、非 owner principal 一律 403」**（`dsh-api-remote-access` 方法级门禁 + Peer/Principal 模型）——本机 web/desktop（owner）不受影响；远程非 owner 部署下插件 API 会被 403（观察项，见 compat-audit 头部 0.2.1-alpha.3 段）
 
 * **APIProxy 已移除**：一切远程调用走 `@Remote` 网关（插件未使用，无影响）
 
@@ -411,4 +413,4 @@ workspace/changes(*新)
 3. **实弹冒烟**：中文路径工作区发消息 → 撤回（清单/文件恢复/对话回退/标题不变）→ 设置页快照管理。新 UI 机制（如 0.1.2 的 turn-process 折叠、字号调节）重点确认插件 UI 可见性与视觉协调。
 4. **台账**：核查结论对照 `docs/compat-audit.md` I1-I41 定点更新，发现失效项补「失效症状 + 复查动作」。
 
-> **版本核验记录归口**：历次版本（含最新 **0.2.1-alpha.2**，2026-10-09：零破坏、无需改码、peer 窗口无需追加——同 tuple 段天然覆盖）的核查记录见 [compat-audit.md](./compat-audit.md) 头部核验段与 [upgrade-assessments/](./upgrade-assessments/)；本文只保留当前版本的核验状态与一直成立的事实，不堆叠历史记录。
+> **版本核验记录归口**：历次版本（含最新 **0.2.1-alpha.3**，2026-10-14：首个破坏性版本——chat.node 图片渲染入口换代，插件双分支适配已落地；peer 窗口同 tuple 无需追加）的核查记录见 [compat-audit.md](./compat-audit.md) 头部核验段与 [upgrade-assessments/](./upgrade-assessments/)；本文只保留当前版本的核验状态与一直成立的事实，不堆叠历史记录。

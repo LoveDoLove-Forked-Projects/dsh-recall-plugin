@@ -2,7 +2,7 @@
 
 > 配套文档：[smoke-checklist.md](./smoke-checklist.md)（测试项清单；逐项 ✅/△ 结果注在对应条目上）｜ 本文件只登记**会话级执行记录**：日期、环境、结果、发现与发版判定。
 > 约定：每次执行后追加一节（日期 + 范围）；出现失败的记 issue 并回链；清单全部通过后与 checklist 一起移入 `completed/`。
-> 状态总览：第一〜八节均已执行通过（一〜七节 2026-08-29：Windows 侧 + WSL 侧 + 修复实施 + v2.1.1 本机验证 + PF 性能批次实弹；第八节 2026-09-18：仅撤回对话模式 5/5）。第九节（rewind 加固批次 A2/A3/A4，2026-09-30 登记）待实弹。
+> 状态总览：第一〜八节均已执行通过（一〜七节 2026-08-29：Windows 侧 + WSL 侧 + 修复实施 + v2.1.1 本机验证 + PF 性能批次实弹；第八节 2026-09-18：仅撤回对话模式 5/5）；第九节（rewind 加固批次 A2/A3/A4）2026-09-30 实弹通过；第十节（事件接缝 M5）2026-10-03 通过；第十一节（dsh 0.2.1-alpha.3 图片渲染换代 + 文本投影）2026-10-15 通过。
 
 ## 2026-08-29 Windows 侧（第一〜四节）
 
@@ -237,3 +237,27 @@
 5. **[观察] 浏览器自动化补充手法**：composer 实弹发消息（fill + 发送按钮 + 轮询「已完成」状态）在模型在线时完全可行，每轮 ~10-30s；「新建会话」可走会话树工作区节点旁的「在 XX 中新建会话」按钮（工作区下拉菜单项在展开瞬间呈 disabled，Playwright actionability 会误判超时）；确认面板从 loading 到 confirm 约 1-2s，按钮计数须在预览完成后取。
 
 **发版判定**：第十节通过，无阻塞项；2.5.0（事件接缝 + notify 端点 + client 五处上报）具备发版条件。事件证据：①三场景 complete 与 M5-2 failed(fork) 的完整 payload 已逐字引用于上文第 1/2 条；②`C:\Users\cc\.dsh\recall-event-probe.log` 留档 M5-3 的 received/listener-throw 对（throw 宿主）与 M5-4 宿主的 boot 行（throwMode:false @09:18:31，即「探针在旧 host 上处于监听态、E1 撤回全程零事件」的直接证据；M5-3 前清空过日志隔离证据，故早前事件不在文件中）。测试产物保留 `D:\tmp\recall-h0`（m5a.txt=v1、多代 fork 会话与安全快照）与 `D:\tmp\m5-smoke`（headless 试验 store + cordis 复现脚本）；web/headless profile 已还原（web＝npm 2.4.6 原版并强制重装、探针目录删除；headless＝空依赖），3080 服务已停，本插件仓库无 M5 引入的改动。
+
+## 2026-10-15 dsh 0.2.1-alpha.3 活体冒烟（第十一节，图片渲染换代 + 文本投影；即 [alpha.3 评估](../../upgrade-assessments/dsh-0.2.1-alpha.3.md) 待办②）
+
+- **环境**：Windows 10 ｜ dsh **0.2.1-alpha.3**（全局，`npm ls -g` 实测）｜ 插件＝**工作区未发版构建以「构建覆盖」方式装入**（web profile 的 registry 2.4.10 包内替换 `lib/client.js`（169125 → 170298 B）与兼容矩阵 `package.json`，其余文件逐字节相同；原因见发现 3）｜ `dsh web --no-open --port 3080`（token URL）｜ 测试工作区 `D:\tmp\recall-h0` ｜ 素材：新生成 `smoke-a3.png`（96×96 PNG）+ `a3.txt`
+- **执行方式**：agent-browser（Playwright 内核：`upload` 注入隐藏文件输入 + 页内 `__reactProps` 触发点击 + `eval` 读 DOM / 调端点）+ 磁盘对账（git tag / `index.json` / `lineage.json` / `heartbeat` / `workspace.json` / 宿主 stderr）
+- **结果**：4 项通过（逐项结论同 [评估文档 §2.6](../../upgrade-assessments/dsh-0.2.1-alpha.3.md)）
+
+**逐项结论**：
+
+1. **图片渲染（新面 Factory 分支）— 通过**：带 PNG 附件的用户消息在插件重绘气泡内渲染出 `<img>`（blob，96×96，`naturalWidth/Height=96`）；点击图片弹出官方灯箱（`_backdrop_19zw2`，`interactive:false` 未阻断查看）；行内 1 图 / 1 气泡 / 1 stack——`content.text=''` + `extraBlocks:[]` 的 `showBubble=false` 契约生效，正文只有插件自绘气泡、**无重复官方气泡**。
+2. **文本投影（密钥脱敏对齐）— 通过**：同一条消息文本含 `AKIAIOSFODNN7EXAMPLE` 与 `sk-abcdefghij1234567890` → 插件气泡渲染 `AKIAIOSF************` / `sk-abcde***************`（官方规则隐藏 8 位可读、其余打码）；`row.innerHTML` 不含任一原串（**插件行内零原文**）。图片 + 两种密钥形态同现，一并覆盖组合场景。
+3. **撤回全链（both）— 通过**：3 条消息各出快照（tag `snap-569734ed…` 00:11:38 / `snap-45268e75…` 00:12:25 / `snap-6e302004…` 00:13:42，`index.json` 会话归属 `session-c1c2a210…` 逐条正确）；改 `a3.txt`（v2→v3）后撤回消息 3：面板「整段回退 … 共 2 个文件将变更（修改 1 · 删除 1）」+ 两枚范围 radio → 确认后：`a3.txt` 恢复为 `v2 line (manual change)`、`smoke-write-test.txt` 被删、安全快照 `snap-pre-rollback-1791994471867`（00:14:33）、lineage 追加 `childId=session-5c91d82d… ← parentId=session-c1c2a210…`、原会话进归档（`workspace.json` 归档集合 8→9）、视图切子会话（3→2 行）、**子会话重绘后图片与脱敏文本仍正确**、标题继承「冒烟图片与文本投影」无「 2」递增、被撤回消息回填输入框、输入框上方无残留排队项、`recall-intent.json` 清零、心跳 `50696 1791994472`（PID 与宿主进程实测一致）。
+4. **错误面 — 通过**：`POST /api/recall/status` → `{ok:true,errors:[]}`；宿主 stderr 仅第三方 `better-sidebar: pending` 与插件自身 `recall shell dialect probe: pwsh`，**无 skip/compat 行**。
+
+**未覆盖（局限）**：① 旧面分支（≤0.2.1-alpha.2 的 `renderMessageImages` 闭包）未活体重跑——该分支语句与已发 2.4.10 逐字相同（本轮 diff 仅把它移入 `if`），实弹需先降级 dsh；② session-only 范围与设置页三卡片不在本轮范围（本次改动未触碰）。
+
+**发现（按严重度）**：
+
+1. **[观察·中，非插件面] 官方「工作过程」摘要卡明文回显用户消息**：会话里出现 `The user sent an image "smoke-a3.png" with text: "…AKIAIOSFODNN7EXAMPLE…"`（官方摘要卡渲染面；该串**不在插件行内**——`row.innerHTML` 无原文）。`dsh-client-ui-secret-mask` 只覆盖官方文本投影层，插件气泡复用该层后已打码，但该摘要面不受覆盖；非本轮引入，记录以备上游/用户预期评估。
+2. **[过程备忘] 排队消息形态会让 cutSeq=null**：Agent 运行中再发消息会进队列并与当轮合并（两条消息之间没有 `turn/end`）→ 对后一条撤回时面板报「该消息是本会话中第一条用户消息，无法回退对话」（仅回退文件）。构造对话回退用例须先让上一轮结束——模型端点悬挂时用 UI「停止生成」收尾即可产生 `turn/end` 切点（本轮实测有效）。
+3. **[过程备忘] 本机 shell 沙箱拦截 junction 遍历 → link 模式不可用，改「构建覆盖」**：沙箱内任何 junction 的 `stat`/`readdir`/`realpath` 均报 `UNKNOWN -4094`（PowerShell 文案「不可信装入点」），`pnpm add dsh-recall-plugin@link:…` 创建链接后自身都读不过去（工作区内的对照 junction 同样如此，证明是沙箱文件系统过滤、非链接损坏）。改走 M5-4 既有手法：npm 模式装 registry 2.4.10，再把工作区 `lib/client.js` + `package.json` 覆盖进已安装包（两者版本同为 2.4.10）。另：web profile 遗留 2026-10-03 M5 探针的断链 junction `node_modules/recall-event-probe`（沙箱下会让 `dsh web` 启动崩在 `realpath`）——已**移入 `~/.dsh/_quarantine/` 保留（未删除）**，其原目标目录补回为空目录；如需还原，把该链接移回 `node_modules/recall-event-probe` 即可（非沙箱进程下 dsh 对断链 junction 本身容忍：`realpath` 走 ENOENT 分支跳过）。
+4. **[过程备忘] 还原手续**：冒烟后已把已安装包**逐字节还原**为 registry 2.4.10（`npm pack` 比对本：`lib/client.js` 169125 B、`package.json` 一致）、profile `package.json` / `pnpm-lock.yaml` 与冒烟前备份逐字节相同（备份 `*.bak-a3smoke` 留档）、临时脚本清除、3080 实例停止（`taskkill`）。
+
+**发版判定**：本轮修复（图片双面适配 + 文本投影脱敏）在 0.2.1-alpha.3 真宿主 + 浏览器实弹**无阻塞项**，具备发版条件。测试产物保留：`D:\tmp\recall-h0`（`a3.txt`=`v2 line (manual change)`、`smoke-a3.png`、`m5a.txt`、`smoke-020.txt`）、store 三条消息快照 + 一条安全快照 + 一条 lineage、截图 `D:\tmp\recall-a3-smoke.png`；UI 子会话「冒烟图片与文本投影」保留供复验。

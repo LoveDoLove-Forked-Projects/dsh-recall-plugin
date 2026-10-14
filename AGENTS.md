@@ -190,7 +190,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 
-* I2 chat.node props 有 `renderMessageImages` 与 `loadImage`（0.1.3-alpha.1 起下放），图片渲染走 `renderMessageImages`。
+* I2 chat.node 渲染入口双面：≤0.2.1-alpha.2 图片走 `renderMessageImages`（`loadImage` 0.1.3-alpha.1 起并存下放）；≥0.2.1-alpha.3 该 prop 移除，改 `renderFactorySlot`（`PropsRenderFactories`）——图片经 `conversation.chat.user.content` Factory 渲染附件行、文本经 `conversation.user.text` Factory 投影（继承密钥脱敏链，`facts:{}` 保原文显示）——运行时双分支探测（recall-node.ts）。
 
 * I3 session-scope slot props 合成：`props.sessionId` 由 kit 注入。
 

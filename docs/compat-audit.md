@@ -7,6 +7,41 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.2.1-alpha.3 核验（2026-10-14）——首个破坏性版本：chat.node 图片渲染入口换代，插件已双分支适配；peer 窗口无需追加**：**npm 已发布**（dist-tag `alpha` 指向本版，
+> tag `dsh-v0.2.1-alpha.3`，2026-10-14 发布、0.2.1 线第三个 alpha），`npm install -g @deepseek-ai/dsh@0.2.1-alpha.3` 全局实装（55 增 / 7 删 / 554 替换包、7 分钟；cordis
+> 4.0.5-alpha.1 → 4.0.5-alpha.2，schemastery 3.18.5-alpha.1 未动）。**核验方式为全树内容级 diff**：npm 清理失败残留 `.dsh-EBhnoWNL` 恰为 `0.2.1-alpha.2` 整包副本
+> （513.8 MB/29150 条目）直接作基线——@deepseek-ai 包集合 304 → 301（**移除 6**：webhook 族 2 + hooks 族 3 + `dsh-subagent-in-process-driver`；**新增 3**：
+> `dsh-api-remote-access`（方法级 Remote 访问控制）/ `dsh-client-ui-secret-mask`（消息密钥脱敏渲染）/ `dsh-harness-dev-context`），关键契约文件再逐行 diff。
+> **破坏性变更（本轮唯一）——`conversation.chat.node` 图片渲染入口换代（I2）**：ui-chat `ChatNodeOwnerProps` **移除 `renderMessageImages`**，`RenderMessageImages`
+> 类型从 ui-conversation 导出面删除，`conversation.message.images` slot 拆分为 `conversation.chat.message.images`（输出图）+ `conversation.chat.user.images`（用户图），
+> `ChatNodeViewProps` 追加 `PropsRenderFactories`（`renderFactorySlot`），`loadImage` 保留并成为图片入口链的一环；官方 `UserMessageNodeView` 改经
+> `renderFactorySlot('conversation.chat.user.content', { content, loadImage, facts, interactive })` 渲染，空 `text`/`extraBlocks` 时官方 UserContent 只出
+> attachmentRow（showBubble=false）。插件 `recall-node.ts` 图片重绘原读 `props.renderMessageImages` → 新版恒 undefined，**用户消息图片在撤回节点重绘中静默消失**
+> （文本/JSON 块、撤回按钮与全部执行链不受影响）；`test:probe` 1/52 红即 I2 探针的设计预警。**修复已落地**：双分支运行时探测（旧面闭包 / 新面 `renderFactorySlot` +
+> `loadImage` 经 `conversation.chat.user.content` Factory 只渲染附件行），探针改双面契约断言、client 测试 +2（旧面/新面/双缺降级）；并同日完成**密钥脱敏对齐**——文本行改经新面 `renderFactorySlot('conversation.user.text', { text, facts: {}, interactive: false, ellipsis: false })` 投影（继承 `dsh-client-ui-secret-mask` 规则链；facts 空对象令 whitespace 折叠/裁剪规则读不到 flag 即禁用、显示与旧面逐字一致；旧面无 `renderFactorySlot` 保持纯字符串），探针 +1、client 测试 +1（client **93/93**、probe **53/53**）。**消费面其余零漂移**：
+> `sessions.fork` **未动**（`sessions.d.ts` 仅 `create` 加可选 `agentPreset`）、`updateQueue`/`setDraft`（`contract/input.d.ts` **逐字节相同**）/`binding`/
+> `readAttachment`/`archiveSession`/`openSession` 未动；`dsh-shell`、`dsh-session-query`、`dsh-session-persistence`、`dsh-fs-local` **整包零内容变化**，
+> `dsh-settings`/`dsh-sandbox-policy`/`dsh-session-projection`/`ui-settings-plugins` 仅 locale + lockstep 版本号；`ChatNodeKind` 全集探针全绿（`chat-nodes.d.ts`
+> 仅新增可选 `groupTree` 纯加法）。**事件集**：`KNOWN_SESSION_EVENT_TYPES` 60 → 62，仅新增 `job/registered`、`job/settled`、**零删除**（`user/message`/`turn/end`/
+> `turn/start`/`session/title` 全在，快照触发与 cutSeq 链不受影响）。**访问控制收紧（观察项）**：exact Fetch 路由（插件 13 端点）明确「仅 owner Peer 可达，非 owner
+> principal 一律 403」（`ConnectionFetchHandler.fetch(request, peer)` 新增必填 peer；新增 `dsh-api-remote-access` + gateway/workspace-follow 接入 Principal 模型）——
+> **本机 web/desktop（owner）零影响**，远程非 owner 访问场景插件 API 将 403。**镜像重拉**：13 源中 11 份逐字节相同、2 份差异——`05-publish.md`
+> （`--from-default-profile` 改「创建或重置」语义，+9 B）、`11-cookbook-conversation-node.md`（`exclusive` 认领语义 + `groupTree` 行位置表，+1880 B）。
+> **门禁**：`typecheck`、单测 **499/499**、`test:client` **92/92**、`test:probe` **52/52**（修复后）、`verify:host` 装配断言全过（inject=shell,sessions,agents、
+> 端点 13 项）、`check:dsh` **全绿**（本地 0.2.1-alpha.3 落既有 peer 段 `>=0.2.1-alpha.1 <0.3.0` 内——**同 tuple 无需追加**）。**台账动作**：`dshReleases` 补
+> `0.2.1-alpha.3: compatible`、`docs/dsh-contract.md` 与 `docs/reference/README.md` 版本字段同步、镜像 2 份覆盖、I2 条目重写、AGENTS.md I2 行更新、README 双语兼容范围同步。
+> **活体冒烟（2026-10-15，真宿主 + 浏览器，待办②销账）通过**：插件以工作区构建覆盖方式装入 web profile（`lib/client.js` 170298 B + 兼容矩阵
+> `package.json`，其余文件与 registry 2.4.10 逐字节相同），dsh web（3080）启动零 skip/compat（stderr 仅 `recall shell dialect probe: pwsh`）；
+> 带 PNG 附件的用户消息经新面 `conversation.chat.user.content` Factory 渲染（96×96 blob 图、官方灯箱可点、行内 1 图 1 气泡且无重复官方气泡）；
+> 含 `AKIAIOSFODNN7EXAMPLE`／`sk-…` 的消息在插件气泡呈现打码形态（`AKIAIOSF************`）且**行内零原文**；撤回全链（改文件 → 撤回 → 文件恢复与删项、
+> 安全快照 `snap-pre-rollback-1791994471867`、lineage `childId=session-5c91d82d… parentId=session-c1c2a210…`、原会话归档、子会话重绘后图片与脱敏文本仍正确、
+> 标题继承无递增、草稿回填、无残留排队项）、`POST /api/recall/status` 零错误。**局限**：旧面（≤0.2.1-alpha.2 的 `renderMessageImages` 闭包）未活体重跑——
+> 该分支语句与已发 2.4.10 逐字相同（diff 仅移入 `if`），实弹需降级 dsh。**新观察（非插件面）**：官方「工作过程」摘要卡以明文回显用户消息
+> （`The user sent an image "…" with text: "…AKIAIOSFODNN7EXAMPLE…"`），`dsh-client-ui-secret-mask` 只覆盖官方文本投影层，不达该面。
+> 核验记录归口 [upgrade-assessments/dsh-0.2.1-alpha.3.md](./upgrade-assessments/dsh-0.2.1-alpha.3.md)。**观察项（非阻塞）**：① 远程非 owner 场景 exact 路由 403 →
+> 撤回 UI 可渲染但执行必败，若官方把远程访问做成主场景需评估迁移到 Remote + remote-access 授权模型；② `conversation.chat.user.content` 为内容级 Factory——若官方
+> 要求 chat.node 贡献者不得直接渲染它或改签名，图片分支需再适配；③ 旧面 `renderMessageImages` 分支保留至 0.2.1-alpha.2 支持窗结束（peer 全窗口策略）。
+>
 > **0.2.1-alpha.2 核验（2026-10-09）——零破坏版本，无需改码，peer 窗口无需追加**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag `dsh-v0.2.1-alpha.2`，2026-10-09 发布、0.2.1 线第二个 alpha；`latest`/`next` 仍 0.2.0-rc.2），
 > `npm install -g @deepseek-ai/dsh@0.2.1-alpha.2` 全局实装（15 增 / 12 删 / 546 替换包、2 分钟；cordis 4.0.5-alpha.1 与
@@ -644,20 +679,29 @@
   尊重插件 priority 值，可恢复重试循环原始语义。`['user','steering']` 两 key 仍独立注册
   （kind 集合由 I5 探针盯防）。
 
-### I2 chat.node props：renderMessageImages 为图片渲染入口（0.1.3 起 loadImage 下放）
-- **依赖的官方行为**：`renderMessageImages({ images: [{attachment}], align })` 是图片
-  渲染入口；`loadImage` 在 0.1.2-alpha.1 被 `Omit<MessageImagesOwnerProps,'loadImage'>`
-  明确剔除，**0.1.3-alpha.1 起作为必填 `loadImage: MessageImageLoader` 直接下放**
-  （session 授权图片加载器，供 chat-node 渲染附件展示槽用）。插件撤回重绘仍只走
-  `renderMessageImages`，读 `loadImage` 属误用。
-- **出处**：`dsh-client-ui-chat/lib/types/client/contract/slots.d.ts`（ChatNodeOwnerProps；
-  0.1.3-alpha.1 实证 `loadImage: MessageImageLoader` 与 `renderMessageImages` 并存、
-  Omit 剔除形态撤销；ui-conversation 构建产物仍保留历史 Omit 类型命名）。
-- **探针/单测**：`tests/probe/api-surface.test.js`（renderMessageImages 存在 + Omit 整型匹配；
-  0.1.3-alpha.1 产物下仍全绿——Omit 类型在 ui-conversation 产物中以历史形态保留）。
-- **失效症状**：图片永久无声空白（issue #9：读不存在的 loadImage，守卫 return，零报错）。
-- **复查动作**：重跑 test:probe；确认 images 仍传 image 块数组（非裸 attachment）；
-  若未来去掉历史 Omit 类型导致探针红，改为断言 loadImage 下放形态即可。
+### I2 chat.node 渲染入口双面：旧面 `renderMessageImages` / 新面 `renderFactorySlot`（图片 user.content + 文本 user.text 投影；0.2.1-alpha.3 换代）
+- **依赖的官方行为**：两代契约并存（插件运行时双分支探测，recall-node.ts）——
+  **旧面（0.1.3-alpha.1 〜 0.2.1-alpha.2）**：`renderMessageImages({ images: [{attachment}], align })`
+  是图片渲染入口；`loadImage` 在 0.1.2-alpha.1 被 `Omit<MessageImagesOwnerProps,'loadImage'>` 剔除、
+  0.1.3-alpha.1 起作为必填 `loadImage: MessageImageLoader` 并存下放（插件旧面不用它）。
+  **新面（≥0.2.1-alpha.3）**：`renderMessageImages` 随 `conversation.message.images` 拆分
+  （→ `conversation.chat.message.images` + `conversation.chat.user.images`）下线，`ChatNodeViewProps`
+  追加 `PropsRenderFactories`（`renderFactorySlot`），图片改经
+  `renderFactorySlot('conversation.chat.user.content', { content: { text:'', attachments:[{type:'image',image:{attachment}}], extraBlocks:[] }, loadImage, interactive:false, facts:{} })`
+  渲染——空 text/extraBlocks 时官方 `UserContent` 只出 attachmentRow（showBubble=false），
+  官方 `UserMessageNodeView` 同法调用；文本仍由插件自绘气泡、不重复出官方文本气泡。**文本投影（≥0.2.1-alpha.3）**：`renderFactorySlot('conversation.user.text', { text, facts, interactive, ellipsis })` 按注册规则切分原文本——`dsh-client-ui-secret-mask` 的密钥打码在此生效；whitespace 折叠/裁剪规则经 `context.read(flag)` 门控，`facts: {}` 即禁用（插件以空 facts 保原文显示，仅继承脱敏）。
+- **出处**：`dsh-client-ui-chat/lib/types/client/contract/slots.d.ts`（旧面 `ChatNodeOwnerProps.renderMessageImages`；
+  新面 `ChatNodeOwnerProps.loadImage` + `ChatNodeViewProps & PropsRenderFactories`）；
+  `dsh-client-ui-slots/lib/types/index.d.ts`（`RenderFactorySlot`/`PropsRenderFactories` 类型定义）；
+  `dsh-client-ui-conversation`（旧面 `RenderMessageImages` 定义/导出，≥alpha.3 已删除）。
+- **探针/单测**：`tests/probe/api-surface.test.js`（两代契约任一在位 + 新面 `PropsRenderFactories`/`loadImage`
+  与 ui-slots `renderFactorySlot` 条件钉）；`tests/client/recall-node.test.ts`（旧面闭包载荷 / 新面 Factory
+  载荷与 `text:''` 契约要点 / 两入口双缺降级 三例）。
+- **失效症状**：图片永久无声空白（issue #9 的第二次形态——0.2.1-alpha.3 移除 `renderMessageImages`，
+  旧代码读它恒 undefined，`typeof === 'function'` 守卫静默跳过、零报错）。
+- **复查动作**：重跑 test:probe 与 test:client；若两面探针都红（官方第三次重排图片入口），按
+  `recall-node.ts` 的 `imageBlocks` 渲染分支重核新入口；images 仍传 image 块数组（非裸 attachment）、
+  `content.text` 必须传空串（否则重复出官方文本气泡）、`loadImage` 原样透传。
 
 ### I3 session-scope slot props 合成：props.sessionId 由 kit 注入
 - **依赖的官方行为**：`props = {...kit, ...injected, ...slotInjected.props, ...ownerProps}`，

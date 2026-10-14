@@ -2,9 +2,9 @@
 
 > 用途：dsh 插件开发相关官方文档的本地副本，改代码前优先查这里，避免每次联网翻文档。
 >
-> 归档日期：2026-10-09，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-alpha.2` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
+> 归档日期：2026-10-14，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-alpha.3` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
 >
-> 归档 dsh 版本：0.2.1-alpha.2（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
+> 归档 dsh 版本：0.2.1-alpha.3（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
 >
 > 在线站点：https://deepseek-harness.github.io/deepseek-harness/ ｜ 每份文件头部都带「来源」注释，可溯回官方原文。
 
@@ -103,3 +103,11 @@ iwr -UseBasicParsing 'https://raw.githubusercontent.com/deepseek-ai/deepseek-har
 > ⑤ 新增「[工作目录](subsystems/working-directory.zh.md) 提供用户上下文和执行路径，**不改变原始项目标识、沙箱写入根目录或已有进程目录**」
 > —— 此句是本轮对撤回插件的关键澄清（工作目录切换不动写入根，影子仓库范围假设不受影响）；Agent Teams 描述改「持久 roster、任务状态和**直接 inbox 消息**协作」（对应 inbox 直投重构）。
 > 本轮直连 `raw.githubusercontent` 一次成功，13/13 齐，无需代理或重试。
+>
+> 2026-10-14 七次重拉（`dsh-v0.2.1-alpha.2` → `dsh-v0.2.1-alpha.3`）：13 源中 **11 份逐字节相同、2 份有差异**。
+> ① `05-publish.md` 净 **+9 字节**（一处）：`--from-default-profile` 语义由「创建 profile」改为「**创建或重置** profile」——
+> 对应本版「重建已有自定义配置时会替换该配置及其插件和设置」的行为变化；
+> ② `11-cookbook-conversation-node.md` 净 **+1880 字节**（+16 行）：新增 `exclusive: true` 认领语义段（同一 target 上
+> 专用 Definition 与通用 Definition 的事件归属，与 `ConversationMatchResult.exclusive` 对偶）与 `groupTree` 行位置声明表
+> （exchange/input/turn/process 四档，对应 ui-chat 新增 `contract/group-tree.d.ts`）。
+> 本轮改用 Node fetch 直连拉取（PowerShell `Invoke-WebRequest` 未测；首文件 1 次重试后 13/13 齐）。
