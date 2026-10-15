@@ -2,6 +2,18 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+### 兼容
+
+- **dsh 0.2.1-alpha.4 兼容（零破坏核验，无代码改动）**（升级核查见 [docs/upgrade-assessments/dsh-0.2.1-alpha.4.md](docs/upgrade-assessments/dsh-0.2.1-alpha.4.md) 与 [docs/compat-audit.md](docs/compat-audit.md) 头部 0.2.1-alpha.4 段）：双 lockfile 包清单对比（第三方依赖零变化）+ 32 个关键包 `lib/` 逐字节 diff 确认插件消费/注册契约零漂移——`sessions.fork`（`dsh-session` 整包）、`dsh-shell`、`dsh-settings`、`dsh-session-query`、`dsh-session-persistence`、`dsh-cordis-host-runner`（host 插件加载器）、`dsh-client-ui-chat`（slot 定义方）等 22 包零变更。
+- **本版唯一机制变更（`engines.dsh` 优先判定）不作用于本插件**：`dsh-app-boot` 兼容性门禁改为「manifest 声明 `engines.dsh` 则只查它并**短路** peerDependencies；未声明沿用 peer 判定」——本插件未声明 `engines.dsh`（`engines` 仅 `{node:">=20"}`）→ 走 peer 路径，六条 `@deepseek-ai/dsh-*` peer 对 0.2.1-alpha.4 全满足；**维持不声明**（多段逐线窗口无法用单段等价表达，声明即短路 peer 判定且放宽未验证版本，见 I43）。输入链「命令芯片」重构（`ui-conversation` 等 3 包，编辑器内部）不改变 `setDraft` / `createDrafts` / `releaseDraftAttachments` / `addAttachments` 签名与行为；三个 client 基础包（store / primitives / slots）内联化退出运行时树，对插件透明（bundle 仅 require react）。门禁：`test:probe` **53/53**、单测 **499/499**、client **93/93**、`verify:host` 装配断言全过、`typecheck`、`check:dsh` 全绿；`dsh.compatibility.dshReleases` 补 `0.2.1-alpha.4: compatible`。
+
+### 文档
+
+- `docs/reference/` 镜像按 tag `dsh-v0.2.1-alpha.4` 重拉：13 源中 12 份逐字节相同、仅 `05-publish.md` 差异（新增 `engines.dsh` 版本声明段，+365 B）。
+- `docs/dsh-contract.md`（版本段与沿革 ⑨）/ `docs/compat-audit.md`（新增 I43）/ `AGENTS.md`（I43 索引行）/ README 双语兼容范围与徽章同步至 0.2.1-alpha.4。
+
 ## [2.4.11] - 2026-10-15
 
 ### 兼容

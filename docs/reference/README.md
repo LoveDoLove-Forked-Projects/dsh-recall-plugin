@@ -2,9 +2,9 @@
 
 > 用途：dsh 插件开发相关官方文档的本地副本，改代码前优先查这里，避免每次联网翻文档。
 >
-> 归档日期：2026-10-14，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-alpha.3` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
+> 归档日期：2026-10-15，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-alpha.4` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
 >
-> 归档 dsh 版本：0.2.1-alpha.3（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
+> 归档 dsh 版本：0.2.1-alpha.4（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
 >
 > 在线站点：https://deepseek-harness.github.io/deepseek-harness/ ｜ 每份文件头部都带「来源」注释，可溯回官方原文。
 
@@ -16,7 +16,7 @@
 | [02-basic.md](./02-basic.md) | 第一个插件：入口形态（name + apply）、inject、三种形态 | [develop/basic/](https://deepseek-harness.github.io/deepseek-harness/develop/basic/) |
 | [03-basic-tool.md](./03-basic-tool.md) | 开发一个 Tool（工具定义 DSL）——本项目未注册 tool，留作参照 | [develop/basic/tool](https://deepseek-harness.github.io/deepseek-harness/develop/basic/tool) |
 | [04-config.md](./04-config.md) | 插件配置：Schema 校验、无硬编码可调参数、配 HMR | [develop/basic/config](https://deepseek-harness.github.io/deepseek-harness/develop/basic/config) |
-| [05-publish.md](./05-publish.md) | 打包与安装：bundle/profile 双 manifest、patch 层语义、git 安装的 prepare 授权 | [develop/basic/publish](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish) |
+| [05-publish.md](./05-publish.md) | 打包与安装：bundle/profile 双 manifest、patch 层语义、`engines.dsh` 版本声明（0.2.1-alpha.4 新增段）、git 安装的 prepare 授权 | [develop/basic/publish](https://deepseek-harness.github.io/deepseek-harness/develop/basic/publish) |
 | [06-framework.md](./06-framework.md) | 插件与生命周期：Fiber 状态机、自动清理、HMR | [develop/framework/](https://deepseek-harness.github.io/deepseek-harness/develop/framework/) |
 | [07-framework-service.md](./07-framework-service.md) | 服务与依赖：Service 类、跨插件提供能力 | [develop/framework/service](https://deepseek-harness.github.io/deepseek-harness/develop/framework/service) |
 | [08-framework-events.md](./08-framework-events.md) | 事件系统：事件域、事件映射 | [develop/framework/events](https://deepseek-harness.github.io/deepseek-harness/develop/framework/events) |
@@ -111,3 +111,10 @@ iwr -UseBasicParsing 'https://raw.githubusercontent.com/deepseek-ai/deepseek-har
 > 专用 Definition 与通用 Definition 的事件归属，与 `ConversationMatchResult.exclusive` 对偶）与 `groupTree` 行位置声明表
 > （exchange/input/turn/process 四档，对应 ui-chat 新增 `contract/group-tree.d.ts`）。
 > 本轮改用 Node fetch 直连拉取（PowerShell `Invoke-WebRequest` 未测；首文件 1 次重试后 13/13 齐）。
+>
+> 2026-10-15 八次重拉（`dsh-v0.2.1-alpha.3` → `dsh-v0.2.1-alpha.4`）：13 源中 **12 份逐字节相同、仅 `05-publish.md` 有差异**
+> （净 **+365 字节 / +245 字符（+2 行）**）：新增 **`engines.dsh` 版本声明段**——「组合包用 `engines.dsh` SemVer 范围声明支持的
+> DSH 版本（例 `"engines": { "dsh": ">=0.2.0 <0.3.0" }`）；安装和 profile 启动会拒绝当前运行的 DSH 不满足该范围的组合包；
+> 没有 `engines.dsh` 时，改为检查其 `@deepseek-ai/dsh*` peer 依赖范围」——对应本版 `dsh-app-boot` 兼容性门禁的
+> 「`engines.dsh` 优先判定」变更（本插件未声明 `engines.dsh`，走 peer 路径；核验见
+> [upgrade-assessments/dsh-0.2.1-alpha.4.md](../upgrade-assessments/dsh-0.2.1-alpha.4.md)）。本轮 Node fetch 直连一次成功，13/13 齐，无需代理或重试。

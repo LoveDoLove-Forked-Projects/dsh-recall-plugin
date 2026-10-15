@@ -186,7 +186,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 > 细节（依赖的官方行为 / 出处 / 探针·单测 / 失效症状 / 复查动作）全部住在
 > [docs/compat-audit.md](docs/compat-audit.md) 的「子系统 × 不变量 × 探针」矩阵
-> （I1-I41），这里只留一行一条索引；dsh 升级后的定点复查流程见上文「漂移控制」。
+> （I1-I43），这里只留一行一条索引；dsh 升级后的定点复查流程见上文「漂移控制」。
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 
@@ -270,3 +270,5 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I41 win32 下 PowerShell 的**静默错误仍置退出码 1**：`Get-Content -ErrorAction SilentlyContinue` 读缺席文件退出码仍是 1——`fileReadCmd` 必须用 `Test-Path` 分支让缺席收成成功（POSIX 侧 `|| true` 天然免疫），否则 A3 格式守卫把无 marker 的正常 store 判成「读不到」并永久拒写（快照/撤回/列表载入全停）。
 * I42 win32 目录重解析点（junction / 目录符号链接）必须排除出影子仓库：git for Windows 把 junction 当普通目录、`add -A` 递归进链接目标，`core.symlinks` 取 true / false / 默认三种取值**实测同样递归**（无法用配置规避）；自引用 junction（`a/link -> a`）于是按 Windows「路径中最多 31 个重解析点」上限把同一棵子树重复索引——实测 2 文件工作区 → 64 条索引（36 条路径长度 > 260），真实病例 1.24 万条 → 39.2 万条、`.git/index` 168 MB，preview/快照/回退全部退化到分钟级（`diffScript` 要为两侧各建一份 39 万条哈希表）。修法落在 `excludeSyncBlock`（三处脚本都在 `add -A` 之前调用它，故一处覆盖三条链路）+ `oversizeBlock` 同款压栈剪枝；POSIX 侧**有意不做**：git 把指向目录的符号链接记成 120000 条目、不递归进目标，照搬反而会把合法快照内容剔出快照（POSIX 的 bind mount 环不覆盖，已知缺口）。存量幽灵条目上万的首诊清理不走分批 `update-index`（每次调用重写整个 index，37.9 万条估 10–60 分钟）：`$hit.Count -gt 10000` 时 `read-tree --empty` 交随后 `add -A` 整棵重建（实测 1.24 万条夹具 2 秒），失败显式 throw 防幽灵条目随 exclude 已重写永久滞留（清理不再触发）；重解析点遍历带 `if ($root)` 守卫——`ensureGitScript` 无 `$root`，跳过是显式设计而非「`Push($null)` 被 catch 吞掉」的巧合。
+
+* I43 插件兼容性门禁（0.2.1-alpha.4 起）：`engines.dsh` 存在则只查它并**短路** peerDependencies，否则逐条查 `@deepseek-ai/dsh[-*]` peer 范围（`dsh-app-boot` `unmetRequirements`）——本插件**不声明 `engines.dsh`**（多段逐线窗口无法用单段等价表达、声明即短路 peer 判定且放宽未验证版本），维持 peer 路径。

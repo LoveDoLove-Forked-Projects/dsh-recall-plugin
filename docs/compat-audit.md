@@ -7,6 +7,30 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.2.1-alpha.4 核验（2026-10-15）——零破坏版本：`engines.dsh` 优先判定不作用于本插件（走 peer 路径全满足），消费面 32 包 `lib/` 逐字节零漂移、无需改码，peer 窗口无需追加**：
+> 本机全局实装 `@deepseek-ai/dsh@0.2.1-alpha.4`（tag `dsh-v0.2.1-alpha.4`，2026-10-15 发布、0.2.1 线第四个 alpha；`npm view` latest/next 仍 0.2.0-rc.2，需精确版本号安装；
+> cordis 4.0.5-alpha.2、schemastery 两条独立版本线未动）。**核验方式**：双 lockfile 包清单精确对比（alpha.3 / alpha.4 各在独立临时目录 `npm install --package-lock-only` 生成——同布局消除平台噪声；
+> 第三方依赖**零变化**、移除 3 / 新增 5 / 289 包 lockstep bump）+ 32 个关键包 `lib/` 目录逐字节 diff（alpha.3 tarball 从 registry 下载解压 vs 本机实装；只 diff `lib/`，排除实装树包内
+> 嵌套 `node_modules` 假差异）。**插件作者相关唯一机制变更——兼容性门禁 `engines.dsh` 优先（新增 I43）**：`dsh-app-boot` 改为「manifest 声明了 `engines.dsh` 则只查它并**短路**
+> `peerDependencies`；未声明则沿用 peer 判定（逐字节同 alpha.3）」；结果字段 `peers` → `requirements` 改名贯穿 plugin-manager API schema / 版本豁免 / UI 文案；官方文档同义说明见
+> 镜像 `05-publish.md`（八次重拉唯一差异，+365 B / +245 字符）。**本插件**：`engines` 仅 `{node:">=20"}`（无 `dsh` 键）→ 走 peer 路径，六条 `@deepseek-ai/dsh-*` peer 对 0.2.1-alpha.4
+> 全满足；**维持不声明 `engines.dsh`**（决策钉在 I43）。**消费面零漂移（32 包：10 变 22 零）**：`dsh-session`（`sessions.fork`）、`dsh-settings`、`dsh-shell`、`dsh-session-query`、
+> `dsh-session-persistence`、`dsh-host-webserver`、`dsh-workspace`、`dsh-cordis-host-runner`（host 插件加载器）、`dsh-host-plugin-inventory`、`dsh-client-ui-chat`（slot 定义方）、
+> `dsh-client-ui-attachment`、`dsh-client-ui-renderer`、`dsh-client-ui-session`、`dsh-client-ui-settings-plugins`、`dsh-client-connection`、`dsh-api-gateway`、`dsh-host-frontend-static`、
+> `dsh-client-locale`、`dsh-sandbox-policy`、`dsh-pwsh-local`、`dsh-package-manifest`、`dsh-client-resources` **22 包 lib 零变更**。**输入链「命令芯片」重构（回填消费面不变）**：
+> `ui-conversation`（17 文件 / client.js 480 行）+ `ui-input-trigger` + `ui-commands`——`DraftSnapshot` 增可选 `command?: {token}`、`InputEvent` 载荷 `draft: string` 改
+> `command: CommandClaim | undefined`、新增 `resolveClaim` / `matchClaim` 恢复链；插件面 `setDraft(DraftInput)` 签名未变（`DraftInput = string | DraftSnapshot`，传 string 仍合法）、
+> `createDrafts` / `releaseDraftAttachments` / `addAttachments` 未动、文本开头命令 token 仍由 Enter 裁决（同 alpha.3）；**正向**——命令文本编辑体验改善（整体选中 / 删除、撤销 / 刷新恢复）惠及回填。
+> **内联化透明**：`dsh-client-store` / `dsh-client-ui-primitives` / `dsh-client-ui-slots` 退出运行时树（构建期内联进消费方 bundle）——插件 bundle 仅 require react、经 `ctx.slots` 服务消费，零影响。
+> **ReleaseChangeGate（`dsh-client-modules` 新增，观察项②）**：页面 boot release ≠ host release 时暂停模块图应用 / 插件更新直到刷新（配 `HostReleasePrompt` 提示条）——升级场景 HMR 正向加固。
+> **新增实验链路（可选机会，观察项③）**：`dsh-plugin-market` / `dsh-plugin-market-index`（索引 format 1 校验库）/ `dsh-client-ui-plugin-market`（Discover 页）/ `dsh-experimental-plugin-market-bundle`
+> + minisearch——市场侧用同一 `evaluatePluginCompatibility` 评估索引条目 `version.engines.dsh`；现有 npm / DSH-Store 安装方式不变。**事件集** 62 种不变。**门禁**：`test:probe` **53/53**、
+> 单测 **499/499**、client **93/93**、`verify:host` 装配断言全过（inject=shell,sessions,agents、端点 13 项）、`typecheck`、`check:dsh` **`✔ 全部一致`**（同 tuple 无需追加）、`check:upgrade` 三层全绿；**宿主启停冒烟通过**（`dsh web --no-open` 零 compat/skip、插件 2.4.11 实装未被兼容门禁拦截）。**镜像重拉**：13 源中 12 份逐字节相同、
+> 仅 `05-publish.md`（`engines.dsh` 官方说明段）。**台账动作**：`dshReleases` 补 `0.2.1-alpha.4: compatible`、`docs/dsh-contract.md` 版本段与沿革同步（⑨ + §一/§四/§七）、镜像 README 头部与八次重拉记录、
+> I43 新条目。核验记录归口 [upgrade-assessments/dsh-0.2.1-alpha.4.md](./upgrade-assessments/dsh-0.2.1-alpha.4.md)。**观察项（非阻塞）**：① `dshReleases` 经全树检索确认**无 dsh 本地消费方**
+> （纯台账 / 商店元数据，不参与启动门禁）；② 声明 `engines.dsh` 将短路 peer 判定（I43）；③ 插件市场 / Discover 为实验链路、**默认未启用**（实测本机三 profile bundles 均未含该 bundle）——若未来上架索引，条目可携带 engines / metadata / icon；④ 既有观察项延续
+> （远程非 owner 403、`conversation.chat.user.content` 内容级 Factory、旧面 `renderMessageImages` 分支保留至 alpha.2 线退出窗口、`fork.onCreated` 未用）。
+>
 > **0.2.1-alpha.3 核验（2026-10-14）——首个破坏性版本：chat.node 图片渲染入口换代，插件已双分支适配；peer 窗口无需追加**：**npm 已发布**（dist-tag `alpha` 指向本版，
 > tag `dsh-v0.2.1-alpha.3`，2026-10-14 发布、0.2.1 线第三个 alpha），`npm install -g @deepseek-ai/dsh@0.2.1-alpha.3` 全局实装（55 增 / 7 删 / 554 替换包、7 分钟；cordis
 > 4.0.5-alpha.1 → 4.0.5-alpha.2，schemastery 3.18.5-alpha.1 未动）。**核验方式为全树内容级 diff**：npm 清理失败残留 `.dsh-EBhnoWNL` 恰为 `0.2.1-alpha.2` 整包副本
@@ -1527,6 +1551,24 @@
   与一次 win32 实弹冒烟（首次快照后检查 store 目录出现 `format=1`）；若 PowerShell 未来改掉「静默错误置 1」的行为，
   文本钉会提示可以简化回单命令形态。细节与实证见 [plans/completed/plan-quality-hardening.md](plans/completed/plan-quality-hardening.md)
   的「活体冒烟」节与 [plans/completed/smoke-checklist-records.md](plans/completed/smoke-checklist-records.md) 的 2026-09-30 节缺陷 1。
+
+
+### I43 插件兼容性门禁：`engines.dsh` 优先、未声明回退 peer 判定（0.2.1-alpha.4 新增）
+
+- **依赖的官方行为**：0.2.1-alpha.4 起 `dsh-app-boot`（`lib/types/plugin-compatibility.js`）的 `evaluatePluginCompatibility` 按
+  「manifest 的 `engines.dsh`（`engines` 对象的 `dsh` 键）**存在则只查它并短路** `peerDependencies`；否则逐条检查
+  `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` peer 范围」判定；判定式 `semver.satisfies(runtime, range, { includePrerelease: true })`；
+  空 / 非法范围（含 `workspace:` 形式的 `engines.dsh`）一律视为未满足；不满足且未获精确版本豁免（`name@version` + runtime 双键）则
+  拒绝安装与激活（`pluginCompatibilityWarning` 文案）。结果字段 `peers` → `requirements`。官方文档同义说明见镜像
+  `docs/reference/05-publish.md`（0.2.1-alpha.4 新增段）。
+- **插件对策**：**不声明 `engines.dsh`**（`engines` 仅 `{node:">=20"}`）——维持 peer 多段精确窗口（6 条 `@deepseek-ai/dsh-*` 范围
+  并集覆盖 0.1.2-alpha.1 ~ 0.2.x 各验证线）；单段 `engines.dsh` 无法等价表达且会放宽未验证版本，声明即短路 peer 判定、
+  窗口精确性全部丢失。
+- **失效症状**：误声明过窄 / 非法 `engines.dsh`（或官方未来收紧为必填）时，插件在安装 / 启动被拒——UI 提示
+  「与 DSH {runtime} 不兼容（要求 {requirements}）」、插件不加载（非功能异常，零运行时报错）。
+- **复查动作**：dsh 升级后 `npm run check:dsh`（peer 越界哨兵）+ 对照 `dsh-app-boot` 的 `unmetRequirements` 是否漂移；
+  凡涉及 `engines.dsh` 声明的改动，同步 `docs/dsh-contract.md` §七 归口段与本节。核验记录：0.2.1-alpha.4（2026-10-15，
+  `dsh-app-boot` 逐行 diff 与官方镜像 `05-publish.md` 互证）。
 
 
 ## 与 E1 verify-host 的对应关系
