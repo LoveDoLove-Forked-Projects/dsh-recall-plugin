@@ -10,7 +10,7 @@
 import * as React from 'react'
 import { describe, it, expect, afterEach } from 'vitest'
 import { buildRecallNode } from '../../src/client/recall-node.js'
-import { makeUtil, makeCtx, stubFetch, stubSessions, stubWorkspaces, stubUiWorkspace, renderIntoDocument, q, qa, first, click, chatNode, flush } from './helpers.js'
+import { makeUtil, makeCtx, stubFetch, stubSessions, stubWorkspaces, stubUiWorkspace, renderIntoDocument, q, qa, first, click, chatNode, flush, spyLogger } from './helpers.js'
 
 const PREVIEW_OK = {
   ok: true,
@@ -318,60 +318,121 @@ describe('撤回节点：消息渲染与复制', () => {
     expect(first(first(calls).images).attachment).toEqual({ attachmentId: 'att-1' })
   })
 
-  it('图片块经 renderFactorySlot 渲染（新面 ≥0.2.1-alpha.3：user.content Factory）', async () => {
+  it('新面：整条内容经 user.content 单入口渲染（文本/附件/未知块一次交付）', async () => {
     interface FactoryInput {
-      content: { text: string; extraBlocks: unknown[]; attachments: Array<{ type: string; image: { attachment: unknown } }> }
+      content: { text: string; attachments: unknown[]; extraBlocks: unknown[]; referenceLabels?: unknown }
       loadImage: unknown
+      facts: Record<string, unknown>
       interactive: boolean
     }
     const calls: Array<{ name: string; input: FactoryInput }> = []
-    // 同一探测面也被文本投影使用：按 factory 名区分返回，图片断言才不会被文本调用污染
-    const renderFactorySlot = (name: string, input: FactoryInput) => { calls.push({ name, input }); return React.createElement('div', { className: name === 'conversation.chat.user.content' ? 'img-factory' : 'text-projection' }) }
+    const renderFactorySlot = (name: string, input: FactoryInput) => { calls.push({ name, input }); return React.createElement('div', { className: 'official-content' }) }
     const loadImage = async () => 'blob:img'
     const { container } = await mount({
       props: {
         renderFactorySlot,
         loadImage,
-        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'hi' }, { type: 'image', attachment: { attachmentId: 'att-1' } }] } },
+        node: { id: 'm1', key: 'm1', data: { content: [
+          { type: 'text', text: 'hi' },
+          { type: 'image', attachment: { attachmentId: 'att-1' } },
+          { type: 'file', attachment: { attachmentId: 'att-2', name: 'report.pdf', bytes: 2048 } },
+          { type: 'unknown-thing', payload: 1 },
+        ] } },
       },
     })
 
-    expect(qa(container, '.img-factory').length).toBe(1)
-    expect(calls.length).toBeGreaterThanOrEqual(1)
+    expect(qa(container, '.official-content').length).toBe(1)
     const call = first(calls)
-    // 空 text/extraBlocks 是契约要点：官方 UserContent 只在 showBubble 为真时渲染
-    // 文本气泡——插件正文由自己的 .dsh-recall-bubble 渲染，不能重复出一层
     expect(call.name).toBe('conversation.chat.user.content')
-    expect(call.input.content.text).toBe('')
-    expect(call.input.content.extraBlocks).toEqual([])
-    expect(first(call.input.content.attachments)).toEqual({ type: 'image', image: { attachment: { attachmentId: 'att-1' } } })
+    // 投影是官方 contentParts 的复刻：text 拼接 / image·file 转附件描述符 /
+    // 其余块落 extraBlocks（官方 JsonBlock 呈现，未知块绝不静默丢弃）
+    expect(call.input.content.text).toBe('hi')
+    expect(call.input.content.attachments).toEqual([
+      { type: 'image', image: { attachment: { attachmentId: 'att-1' } } },
+      { type: 'file', file: { attachmentId: 'att-2', name: 'report.pdf', bytes: 2048 } },
+    ])
+    expect(call.input.content.extraBlocks).toEqual([{ type: 'unknown-thing', payload: 1 }])
     expect(call.input.loadImage).toBe(loadImage)
-    expect(call.input.interactive).toBe(false)
+    // 与官方 UserMessageNodeView 同参：interactive true（内容整体官方渲染）
+    expect(call.input.interactive).toBe(true)
+    // 主路径不再自绘：气泡与文件卡片都由官方节点承载
+    expect(qa(container, '.dsh-recall-bubble').length).toBe(0)
+    expect(qa(container, '.dsh-recall-filecard').length).toBe(0)
   })
 
-  it('文本经 user.text Factory 投影（新面：继承官方脱敏规则链）', async () => {
-    interface TextInput { text: string; facts: unknown; interactive: boolean; ellipsis: boolean }
-    const calls: Array<{ name: string; input: TextInput }> = []
-    const renderFactorySlot = (name: string, input: TextInput) => { calls.push({ name, input }); return React.createElement('span', { className: 'text-projection' }, input.text) }
+  it('新面：referenceLabels/skillNames 透传（content.referenceLabels + facts 装配）', async () => {
+    interface FactoryInput { content: { referenceLabels?: unknown }; facts: Record<string, unknown> }
+    const calls: FactoryInput[] = []
+    const renderFactorySlot = (_name: string, input: FactoryInput) => { calls.push(input); return React.createElement('div', { className: 'official-content' }) }
+    await mount({
+      props: {
+        renderFactorySlot,
+        loadImage: async () => 'blob:img',
+        node: { id: 'm1', key: 'm1', data: {
+          content: [{ type: 'text', text: 'hi' }],
+          referenceLabels: ['a.md'],
+          skillNames: ['skill-x'],
+        } },
+      },
+    })
+
+    const call = first(calls)
+    expect(call.content.referenceLabels).toEqual(['a.md'])
+    // 官方 UserStyleBubble 的 facts 装配：引用标签走 sessionLabels、技能名走 skillNames
+    expect(call.facts).toEqual({ sessionLabels: ['a.md'], skillNames: ['skill-x'] })
+  })
+
+  it('两面并存（0.2.0-rc.2 形态，issue #23 回归）→ 走旧面自绘，不调 content Factory', async () => {
+    const factoryCalls: string[] = []
+    const renderFactorySlot = (name: string) => { factoryCalls.push(name); return React.createElement('div', { className: 'official-content' }) }
+    const renderMessageImages = () => React.createElement('div', { className: 'img-slot' })
     const { container } = await mount({
       props: {
         renderFactorySlot,
-        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'sk-abc1234567890' }] } },
+        renderMessageImages,
+        loadImage: async () => 'blob:img',
+        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'hi' }] } },
       },
     })
 
-    expect(qa(container, '.text-projection').length).toBe(1)
-    expect(calls.length).toBeGreaterThanOrEqual(1)
-    const call = first(calls)
-    expect(call.name).toBe('conversation.user.text')
-    expect(call.input.text).toBe('sk-abc1234567890')
-    // facts 空对象是契约要点：官方 whitespace 规则读不到 flag 即禁用（显示与
-    // 旧面逐字一致）；密钥脱敏规则不读 facts，照常生效
-    expect(call.input.facts).toEqual({})
-    expect(call.input.interactive).toBe(false)
-    expect(call.input.ellipsis).toBe(false)
-    // 外层容器保留（样式承载），文本投影在其内部
-    expect(q(container, '.dsh-recall-bubble')).not.toBeNull()
+    // renderMessageImages 在场 = 新槽位缺席（0.2.0-rc.2 已下发 renderFactorySlot
+    // 但 conversation.user.* 槽位尚未引入）——按旧面走，正文自绘不静默空白
+    expect(factoryCalls).toEqual([])
+    expect(qa(container, '.official-content').length).toBe(0)
+    expect(q(container, '.dsh-recall-bubble')?.textContent).toBe('hi')
+  })
+
+  it('新面 Factory 返回空（槽位未注册）→ 回落自绘并告警，正文不静默空白', async () => {
+    const spy = spyLogger()
+    cleanups.push(spy.dispose)
+    const { container } = await mount({
+      props: {
+        renderFactorySlot: () => null,
+        loadImage: async () => 'blob:img',
+        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'hi' }] } },
+      },
+    })
+
+    expect(q(container, '.dsh-recall-bubble')?.textContent).toBe('hi')
+    // 降级必须可见（warn 恒输出）——静默空白正是 issue #23 的失效模式
+    expect(spy.entries.filter((e) => e.level === 'warn').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('新面 Factory 抛错 → 回落自绘，组件不崩', async () => {
+    const spy = spyLogger()
+    cleanups.push(spy.dispose)
+    const { container } = await mount({
+      props: {
+        renderFactorySlot: () => { throw new Error('user.content slot missing') },
+        loadImage: async () => 'blob:img',
+        node: { id: 'm1', key: 'm1', data: { content: [{ type: 'text', text: 'hi' }, { type: 'file', attachment: { attachmentId: 'att-2', name: 'report.pdf' } }] } },
+      },
+    })
+
+    expect(q(container, '.dsh-recall-bubble')?.textContent).toBe('hi')
+    // 兜底路径保留文件卡片自绘（新面兜底时图片无入口可用是唯一缺口）
+    expect(qa(container, '.dsh-recall-filecard').length).toBe(1)
+    expect(spy.entries.filter((e) => e.level === 'warn').length).toBeGreaterThanOrEqual(1)
   })
 
   it('两代图片入口都缺 → 图片静默跳过、组件不崩（未知契约的降级面）', async () => {

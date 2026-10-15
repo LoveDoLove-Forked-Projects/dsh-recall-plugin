@@ -11,6 +11,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildTree, clockText, sizeText, bytesToMb, recallApiUrl, buildUtil } from '../../src/client/util.js'
 import { KIND_INFO, summaryText, attachmentRefsFromBlocks, defaultAttachmentName, fileCardInfo } from '../../src/client/recall-node.js'
+import { projectUserContent, userContentFacts, resolveUserContentFace, renderOfficialUserContent } from '../../src/client/user-content.js'
 import { groupByLineage } from '../../src/client/snapshot-manager.js'
 import { nextShadowPriority } from '../../src/client/app.js'
 
@@ -266,5 +267,75 @@ describe('端点路径的基址解析（子路径部署，dsh 0.1.7-rc.1）', ()
       globalThis.document = beforeDocument
       globalThis.fetch = beforeFetch
     }
+  })
+})
+
+describe('用户消息内容投影与渲染面判据（user-content，issue #23 修复）', () => {
+  it('projectUserContent：三分派（text 拼接 / image·file 转附件描述符 / 其余落 extraBlocks）', () => {
+    expect(projectUserContent([
+      { type: 'text', text: 'a' },
+      { type: 'image', attachment: { attachmentId: 'x' } },
+      { type: 'text', text: 'b' },
+      { type: 'file', attachment: { attachmentId: 'y', name: 'f.pdf' } },
+      { type: 'json', payload: 1 },
+    ])).toEqual({
+      text: 'ab',
+      attachments: [
+        { type: 'image', image: { attachment: { attachmentId: 'x' } } },
+        { type: 'file', file: { attachmentId: 'y', name: 'f.pdf' } },
+      ],
+      extraBlocks: [{ type: 'json', payload: 1 }],
+    })
+  })
+
+  it('projectUserContent：缺 attachment 的 image/file、非字符串 text、空块全落 extraBlocks（官方同判，不静默丢）', () => {
+    const p = projectUserContent([
+      { type: 'image' },
+      { type: 'file' },
+      null,
+      { type: 'text', text: 42 },
+    ])
+    expect(p.text).toBe('')
+    expect(p.attachments).toEqual([])
+    expect(p.extraBlocks).toEqual([{ type: 'image' }, { type: 'file' }, null, { type: 'text', text: 42 }])
+  })
+
+  it('userContentFacts：referenceLabels→sessionLabels + skillNames 透传，缺失不落键', () => {
+    expect(userContentFacts(['a.md'], ['s'])).toEqual({ sessionLabels: ['a.md'], skillNames: ['s'] })
+    expect(userContentFacts(undefined, undefined)).toEqual({})
+  })
+
+  it('resolveUserContentFace：旧面闭包在场即旧面（两面并存＝0.2.0-rc.2 形态，issue #23）', () => {
+    expect(resolveUserContentFace({ renderMessageImages: () => null, renderFactorySlot: () => null, loadImage: () => null })).toBe('legacy')
+    expect(resolveUserContentFace({ renderFactorySlot: () => null, loadImage: () => null })).toBe('factory')
+    expect(resolveUserContentFace({ renderFactorySlot: () => null })).toBe('legacy') // 缺 loadImage 不足以调 Factory
+    expect(resolveUserContentFace({})).toBe('legacy')
+  })
+
+  it('renderOfficialUserContent：返回空/抛错/入口缺失 → ok:false（调用方据此回落自绘）', () => {
+    const blocks = [{ type: 'text', text: 'hi' }]
+    expect(renderOfficialUserContent(() => null, blocks, {}, () => null, true)).toEqual({ ok: false })
+    const thrown = renderOfficialUserContent(() => { throw new Error('no slot') }, blocks, {}, () => null, true)
+    expect(thrown.ok).toBe(false)
+    expect(String(thrown.error)).toContain('no slot')
+    expect(renderOfficialUserContent(undefined, blocks, {}, () => null, true).ok).toBe(false)
+  })
+
+  it('renderOfficialUserContent：命中期载荷（factory 名 / content 透传 referenceLabels / facts / interactive）', () => {
+    const calls = []
+    const res = renderOfficialUserContent(
+      (name, input) => { calls.push({ name, input }); return 'node' },
+      [{ type: 'text', text: 'hi' }],
+      { referenceLabels: ['r'] },
+      'LOADER',
+      false,
+    )
+    expect(res).toEqual({ ok: true, node: 'node' })
+    expect(calls.length).toBe(1)
+    expect(calls[0].name).toBe('conversation.chat.user.content')
+    expect(calls[0].input.content).toEqual({ text: 'hi', attachments: [], extraBlocks: [], referenceLabels: ['r'] })
+    expect(calls[0].input.facts).toEqual({ sessionLabels: ['r'] })
+    expect(calls[0].input.loadImage).toBe('LOADER')
+    expect(calls[0].input.interactive).toBe(false)
   })
 })

@@ -2,8 +2,9 @@
  * dsh-recall-plugin — client 撤回节点（UserRecallNode + recallPanel）
  *
  * 从原 lib/client.js 抽出：kind 单表、变更摘要、确认面板、用户消息重绘
- * （文本/图片/JSON 块，图片经官方 renderMessageImages 管线）、撤回执行链
- * （preview→execute→fork→回填）。KIND_INFO/summaryText 模块级导出供单测。
+ * （新面整条内容走官方 conversation.chat.user.content Factory；旧面与兜底
+ * 路径自绘文本、图片经官方 renderMessageImages 闭包、文件卡片与 JSON 块）、
+ * 撤回执行链（preview→execute→fork→回填）。KIND_INFO/summaryText 模块级导出供单测。
  *
  * A4：全部可见文案经 util.t 取词（词典层见 locales/）；模块级纯函数保留
  * 「不收词表则按 zh 渲染」的缺省（zhTranslate），单测与降级路径不因缺 util
@@ -14,6 +15,7 @@ import type { ReactApi, UtilApi } from './util.js'
 import { buildRecallNotify } from './util.js'
 import type { RecallNotifyOutcome } from './util.js'
 import { recallNodeLog } from './log.js'
+import { resolveUserContentFace, renderOfficialUserContent } from './user-content.js'
 import { zhTranslate } from './locales/index.js'
 import type { Translate } from './locales/index.js'
 import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
@@ -440,29 +442,31 @@ export function buildRecallNode(
 
   function UserRecallNode(props: ChatNodeProps) {
     const node = props && props.node
-    // 图片渲染入口（双面探测，I2）：官方两代契约——
-    // - ≤0.2.1-alpha.2：只有 renderMessageImages（内部经 conversation.message.
-    //   images slot 渲染官方 MessageImages，自带鉴权/缓存/重试/灯箱）；契约里
-    //   从不存在 loadImage（issue #9：读不存在字段导致图片永久无声空白）。
-    // - ≥0.2.1-alpha.3：renderMessageImages 随该 slot 拆分下线，改由
-    //   conversation.chat.user.content Factory 承接，props 追加
-    //   renderFactorySlot 并正式下放 loadImage（官方 UserMessageNodeView 同法）。
-    // 运行时探测两分支，保住 peer 全窗口（0.1.2–0.2.x）行为一致。
+    // 内容渲染入口（I2 三代契约，判据单源在 user-content.ts 文件头）：
+    // - ≤0.2.1-alpha.2（旧面）：只有 renderMessageImages 图片闭包（内置鉴权/
+    //   缓存/重试/灯箱），文本/文件/JSON 由插件自绘。
+    // - ≥0.2.1-alpha.3（新面）：图片闭包下线，整条内容经
+    //   conversation.chat.user.content Factory 渲染（官方 UserMessageNodeView
+    //   同法）——插件只保留动作行。
+    // 判据以旧面闭包在场为准，而不是探测 renderFactorySlot：0.2.0-rc.2 两者
+    // 并存但新槽位缺席，误判会让正文静默空白（issue #23）。
     const renderMessageImages = props && props.renderMessageImages
     const renderFactorySlot = props && props.renderFactorySlot
     const loadImage = props && props.loadImage
     const sessionId = props && props.sessionId
-    const data = (node && node.data ? node.data : {}) as { content?: unknown; time?: unknown }
+    const data = (node && node.data ? node.data : {}) as { content?: unknown; time?: unknown; referenceLabels?: unknown; skillNames?: unknown }
     // node.id 是会话事件匹配时写入的真实消息 ID；node.key 是位置键，不能用于快照查询
     const messageId = node ? String(node.id || node.key || '') : ''
     const blocks: ChatBlock[] = Array.isArray(data.content) ? data.content as ChatBlock[] : []
     const text = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('')
+    // 以下三个块视图供自绘降级路径使用（旧面主路径 / 新面工厂兜底）；新面主
+    // 路径由 content Factory 直接消费 blocks，投影见 user-content.ts
     // 官方契约：images 传 image 块数组（{attachment}），官方内部取
     // image.attachment.attachmentId —— 不是裸 attachment 对象
     const imageBlocks: Array<{ attachment: unknown }> = blocks.filter((b) => b && b.type === 'image' && b.attachment).map((b) => ({ attachment: b.attachment }))
-    // file 块（文档/表格等非图片附件）：官方 UserStyleBubble 渲染成文件卡片
-    // （图标 + 文件名 + 扩展名/大小），插件覆盖了整个用户节点渲染，必须自己
-    // 复刻——否则它落进下方 rest 的 JSON 兜底，消息里只剩一坨原文（可见回归）。
+    // file 块（文档/表格等非图片附件）：官方渲染成文件卡片（图标 + 文件名 +
+    // 扩展名/大小）——自绘路径必须复刻，否则它落进下方 rest 的 JSON 兜底，
+    // 消息里只剩一坨原文（可见回归）
     const fileBlocks: ChatBlock[] = blocks.filter((b) => b && b.type === 'file')
     const rest: ChatBlock[] = blocks.filter((b) => !b || !(b.type === 'text' && typeof b.text === 'string') && !(b.type === 'image' && b.attachment) && b.type !== 'file')
     // 回填用附件引用（image/file 块）：撤回后连同文本一起回填到输入框
@@ -747,62 +751,50 @@ export function buildRecallNode(
     }
 
     const bubbleChildren: Array<ReturnType<typeof React.createElement>> = []
-    // 图片在上、气泡在下：布局顺序对齐官方 UserStyleBubble
-    if (imageBlocks.length) {
-      if (typeof renderMessageImages === 'function') {
-        // 旧面（≤0.2.1-alpha.2）：官方注入的渲染闭包
+    // 内容渲染分派（issue #23 修复点）：新面把整条内容交给官方 content
+    // Factory（与官方 UserMessageNodeView 同款调用），插件只保留下方动作行；
+    // 调用失败/返回空即回落自绘——「函数在场」不足以证明「槽位可用」
+    // （0.2.0-rc.2 实证），回落保证内容永远不会静默空白。
+    let officialFace = resolveUserContentFace({ renderMessageImages, renderFactorySlot, loadImage }) === 'factory'
+    if (officialFace) {
+      const official = renderOfficialUserContent(renderFactorySlot, blocks, data, loadImage, true)
+      if (official.ok) {
+        bubbleChildren.push(React.createElement(React.Fragment, { key: 'official' }, official.node as import('react').ReactNode))
+      } else {
+        officialFace = false
+        recallNodeLog.warn('user.content factory unavailable; falling back to own rendering:', official.error)
+      }
+    }
+    if (!officialFace) {
+      // 自绘降级路径（旧面主路径 / 新面工厂兜底）：布局对齐官方「附件在上、
+      // 文本在下」。新面兜底时图片无入口可用（图片闭包与其槽位同代下线），
+      // 跳过即可——这是罕见中间态的降级面，内容其余部分照常可见
+      if (imageBlocks.length && typeof renderMessageImages === 'function') {
         const render = renderMessageImages as (args: { images: Array<{ attachment: unknown }>; align: string }) => import('react').ReactNode
         bubbleChildren.push(React.createElement(React.Fragment, { key: 'images' },
           render({ images: imageBlocks, align: 'end' })
         ))
-      } else if (typeof renderFactorySlot === 'function' && typeof loadImage === 'function') {
-        // 新面（≥0.2.1-alpha.3）：空 text/extraBlocks 时官方 UserContent 只渲染
-        // attachmentRow（showBubble=false），图片经 conversation.chat.user.images
-        // slot 走官方 MessageImages；文本仍由本插件下方气泡渲染、不重复出官方气泡
-        const render = renderFactorySlot as (name: string, input: unknown) => import('react').ReactNode
-        bubbleChildren.push(React.createElement(React.Fragment, { key: 'images' },
-          render('conversation.chat.user.content', {
-            content: {
-              text: '',
-              attachments: imageBlocks.map((b) => ({ type: 'image', image: { attachment: b.attachment } })),
-              extraBlocks: []
-            },
-            loadImage,
-            interactive: false,
-            facts: {}
-          })
+      }
+      // 文件卡片与图片同属「附件在上、文本在下」的官方布局
+      for (let i = 0; i < fileBlocks.length; i++) {
+        const info = fileCardInfo(fileBlocks[i], t)
+        if (!info) continue
+        bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-filecard', key: 'file-' + i },
+          React.createElement('span', { className: 'dsh-recall-filecard-icon' }, info.ext),
+          React.createElement('span', { className: 'dsh-recall-filecard-body' },
+            React.createElement('span', { className: 'dsh-recall-filecard-name', title: info.name }, info.name),
+            React.createElement('span', { className: 'dsh-recall-filecard-meta' }, info.size ? info.ext + ' ' + info.size : info.ext)
+          )
         ))
       }
-    }
-    // 文件卡片与图片同属「附件在上、文本在下」的官方布局
-    for (let i = 0; i < fileBlocks.length; i++) {
-      const info = fileCardInfo(fileBlocks[i], t)
-      if (!info) continue
-      bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-filecard', key: 'file-' + i },
-        React.createElement('span', { className: 'dsh-recall-filecard-icon' }, info.ext),
-        React.createElement('span', { className: 'dsh-recall-filecard-body' },
-          React.createElement('span', { className: 'dsh-recall-filecard-name', title: info.name }, info.name),
-          React.createElement('span', { className: 'dsh-recall-filecard-meta' }, info.size ? info.ext + ' ' + info.size : info.ext)
-        )
-      ))
-    }
-    if (text !== '') {
-      if (typeof renderFactorySlot === 'function') {
-        // 新面（≥0.2.1-alpha.3）：文本经官方 user.text Factory 投影——继承官方
-        // 规则链（含 dsh-client-ui-secret-mask 的密钥打码，观察项①对齐）。
-        // facts 传空对象：官方 whitespace 规则读不到 flag 即禁用（显示与旧面
-        // 逐字一致），引用 chip 仅在显式 wire 格式下出现；interactive:false
-        // 保持只读（历史消息重绘不给引用动作）
-        const render = renderFactorySlot as (name: string, input: unknown) => import('react').ReactNode
-        bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-bubble', key: 'text' },
-          render('conversation.user.text', { text, facts: {}, interactive: false, ellipsis: false })
-        ))
-      } else {
+      // 文本纯字符串自绘：新面主路径已由官方 user.text 投影承接（含密钥脱敏
+      // 链），此分支只在旧面与兜底可达
+      if (text !== '') {
         bubbleChildren.push(React.createElement('div', { className: 'dsh-recall-bubble', key: 'text' }, text))
       }
-    }
-    for (let i = 0; i < rest.length; i++) {
-      bubbleChildren.push(React.createElement('pre', { className: 'dsh-recall-json', key: 'rest-' + i }, JSON.stringify(rest[i], null, 2)))
+      for (let i = 0; i < rest.length; i++) {
+        bubbleChildren.push(React.createElement('pre', { className: 'dsh-recall-json', key: 'rest-' + i }, JSON.stringify(rest[i], null, 2)))
+      }
     }
 
     const actions = []

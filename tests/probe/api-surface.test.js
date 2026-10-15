@@ -62,12 +62,26 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       }
     })
 
+    probeIf(guard)('用户内容 Factory 在位（新面 ≥0.2.1-alpha.3：conversation.chat.user.content 整条内容渲染入口）', () => {
+      const { p, f } = find()
+      const src = read(p, f)
+      const newFace = /PropsRenderFactories/.test(src)
+      if (!newFace) return // 旧面：无该 Factory（不误红）
+      // 插件把整条用户内容交给该 Factory（官方 UserStyleBubble 同款调用）；
+      // 输入契约是插件投影（contentParts 复刻）的对偶面——三分派声明任一漂移
+      // 或附件支改派，此处先红（issue #23 的失效模式正是契约漂移→静默空白）
+      expect(src).toMatch(/'conversation\.chat\.user\.content'/)
+      expect(src).toMatch(/interface UserContentData/)
+      expect(src).toMatch(/readonly attachments: readonly UserContentAttachment\[\]/)
+      expect(src).toMatch(/type: 'file'/)
+    })
+
     probeIf(guard)('文本投影 Factory 在位（新面 ≥0.2.1-alpha.3：conversation.user.text，密钥脱敏链）', () => {
       const { p, f } = find()
       const newFace = /PropsRenderFactories/.test(read(p, f))
       if (!newFace) return // 旧面：文本走纯字符串渲染，无 Factory 依赖（不误红）
-      // Factory 声明与输入契约（UserTextInput/UserTextDocumentInput）同源在位——
-      // 插件文本重绘经它继承官方规则链（dsh-client-ui-secret-mask 的密钥打码）
+      // 官方 UserContent 在气泡内调用它渲染文本——插件经 user.content 间接继承
+      // 该规则链（dsh-client-ui-secret-mask 的密钥打码）
       expect(read('dsh-client-ui-conversation', '/lib/types/client/contract/slots.d.ts')).toMatch(/'conversation\.user\.text'/)
       expect(has('dsh-client-ui-conversation', '/lib/types/client/contract/user-text.d.ts')).toBe(true)
     })

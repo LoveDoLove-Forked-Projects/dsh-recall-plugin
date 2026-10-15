@@ -97,12 +97,14 @@ export interface ChatNodeData {
 
 export interface ChatNodeProps {
   node?: ChatNodeData
-  // 旧面图片入口（≤0.2.1-alpha.2）
+  // 旧面图片入口（≤0.2.1-alpha.2）——同时是「旧面」判据：该闭包在场即新槽位
+  // 缺席（0.2.0-rc.2 已下发 renderFactorySlot 但 conversation.user.* 槽位尚未
+  // 引入，issue #23 实证），此时文本/文件/JSON 由插件自绘
   renderMessageImages?: unknown
   // 新面渲染入口（≥0.2.1-alpha.3；renderFactorySlot 由 PropsRenderFactories
   // 追加进 chat.node props，loadImage 随 ChatNodeOwnerProps 正式下放）：
-  // 图片走 conversation.chat.user.content，文本走 conversation.user.text
-  // （后者继承官方规则链——密钥脱敏等）
+  // 整条内容经 conversation.chat.user.content 渲染（文本走其中的 user.text，
+  // 继承官方规则链——密钥脱敏等；附件/未知块/引用同链），调用返回空即回落自绘
   renderFactorySlot?: unknown
   loadImage?: unknown
   sessionId?: string
