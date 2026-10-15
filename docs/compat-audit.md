@@ -7,6 +7,11 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **2.4.12 发版核验（2026-10-16）——issue #23 修复版：两面判据重写 + 新面内容官方单入口，双环境实弹闭环**：插件 **2.4.12 已发布**（npm `latest`＝2.4.12，shasum `45acaba2e17cd836c31c8adc7322cb2456964f6d` 与本地 `npm pack` 一致，24 文件 / 183.0 kB / 解包 562.8 kB）；GitHub Release `v2.4.12` 非 draft/prerelease，tag 指向发版提交 `f3b02b8`（`3561ad0` fix(client) → `713a6ac` docs(compat) → `f3b02b8` chore(release)）。**发布前门禁**：typecheck、单测 39 文件 **505**、client 6 文件 **96**、probe **54**、build `lib/client.js` **172001 B**、verify:host（端点 13 项）、check:dsh「全部一致」、check:upgrade 三层全绿。
+> **双环境活体冒烟**（记录见 [plans/completed/smoke-checklist-records.md](./plans/completed/smoke-checklist-records.md) 第十二节）：0.2.1-alpha.4 全链 4 项通过（官方 `userStack`/`fileCard` 命中、插件自绘零命中、撤回 fork/归档/STALE、status 零错误）；**0.2.0-rc.2 A/B 对照**——registry 2.4.11 在该版本正文空白（issue #23 精确复现）、2.4.12 正文恢复，原场景闭环。
+> **本机实装**：web profile npm 模式 2.4.11 → **2.4.12**（`lib/client.js` 172001 B、`resolveUserContentFace` 标记在位）；供应链策略需 `minimumReleaseAgeExclude` 补 `dsh-recall-plugin@2.4.12`——另发现 **`dshmarket@<ver>` 独立行写法不生效**（pnpm 11.7.0 策略检查仍拦），合并进既有 `||` 链式行后通过（176 条目 5.5s；属 profile 侧操作、非插件问题）；宿主启停冒烟通过（`dsh web` 零 skip/compat，仅 `recall shell dialect probe: pwsh`），页面实装验证：历史会话经新面渲染（官方 `userStack` + 官方 `fileCard` + 脱敏文本 + 插件自绘退场、动作行在位）。
+> **观察项**：dist-tag 传播滞后（本轮约 3 分钟——精确版本探测 `registry.npmjs.org/<pkg>/<ver>` 可先行确认包体已上线）。
+>
 > **0.2.1-alpha.4 核验（2026-10-15）——零破坏版本：`engines.dsh` 优先判定不作用于本插件（走 peer 路径全满足），消费面 32 包 `lib/` 逐字节零漂移、无需改码，peer 窗口无需追加**：
 > 本机全局实装 `@deepseek-ai/dsh@0.2.1-alpha.4`（tag `dsh-v0.2.1-alpha.4`，2026-10-15 发布、0.2.1 线第四个 alpha；`npm view` latest/next 仍 0.2.0-rc.2，需精确版本号安装；
 > cordis 4.0.5-alpha.2、schemastery 两条独立版本线未动）。**核验方式**：双 lockfile 包清单精确对比（alpha.3 / alpha.4 各在独立临时目录 `npm install --package-lock-only` 生成——同布局消除平台噪声；
