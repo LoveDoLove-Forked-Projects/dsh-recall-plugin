@@ -204,7 +204,7 @@ interface ChatNodeOwnerProps {
 }
 ```
 
-* 插件实际读取：`node` / `sessionId` + 图片入口双面之一（I2）——**旧面**（≤0.2.1-alpha.2）`renderMessageImages`；**新面**（≥0.2.1-alpha.3）`renderFactorySlot`（`ChatNodeViewProps & PropsRenderFactories`）+ `loadImage`，经 `renderFactorySlot('conversation.chat.user.content', { content: { text:'', attachments:[{type:'image',image:{attachment}}], extraBlocks:[] }, loadImage, interactive:false, facts:{} })` 只渲染附件行（空 text/extraBlocks 保官方 `showBubble=false`，文本仍由插件自绘气泡）
+* 插件实际读取（issue #23 起判据重写）：`node`（`data.content` 块数组 + `referenceLabels` / `skillNames`）/ `sessionId` + 两面单源判据在 `src/client/user-content.ts`——**旧面信号**＝`renderMessageImages` 闭包在场（≤0.2.1-alpha.2；该闭包与新槽位引入版本互斥，0.2.0-rc.2「已下发 renderFactorySlot、槽位缺席」的并存形态据此归旧面）；**新面**（≥0.2.1-alpha.3）＝`renderFactorySlot`（`ChatNodeViewProps & PropsRenderFactories`）+ `loadImage`，经 `renderFactorySlot('conversation.chat.user.content', { content: { text, attachments:[(image|file)], extraBlocks }, loadImage, interactive:true, facts:{...} })` 渲染**整条内容**（投影＝官方 `contentParts` 三分派复刻，官方 `UserMessageNodeView` 同款调用），返回空/抛错即回落自绘（旧面路径：图片走 `renderMessageImages`、文本/文件卡片/JSON 自绘）并 warn
 
 * `props.sessionId` 由 scope='session' 的 kit 注入（`ui-session` merge 进 `SessionStandardProps`，I3）
 

@@ -261,3 +261,43 @@
 4. **[过程备忘] 还原手续**：冒烟后已把已安装包**逐字节还原**为 registry 2.4.10（`npm pack` 比对本：`lib/client.js` 169125 B、`package.json` 一致）、profile `package.json` / `pnpm-lock.yaml` 与冒烟前备份逐字节相同（备份 `*.bak-a3smoke` 留档）、临时脚本清除、3080 实例停止（`taskkill`）。
 
 **发版判定**：本轮修复（图片双面适配 + 文本投影脱敏）在 0.2.1-alpha.3 真宿主 + 浏览器实弹**无阻塞项**，具备发版条件。测试产物保留：`D:\tmp\recall-h0`（`a3.txt`=`v2 line (manual change)`、`smoke-a3.png`、`m5a.txt`、`smoke-020.txt`）、store 三条消息快照 + 一条安全快照 + 一条 lineage、截图 `D:\tmp\recall-a3-smoke.png`；UI 子会话「冒烟图片与文本投影」保留供复验。
+
+## 2026-10-16 issue #23 修复活体冒烟（第十二节，内容改官方单入口 + 判据重写）
+
+- **环境**：Windows 10 ｜ dsh **0.2.1-alpha.4**（全局）｜ 插件＝**工作区未提交构建以「构建覆盖」方式装入**（web profile 的 registry 2.4.11 包内替换 `lib/client.js`（170298 → 172001 B），其余文件未动；原文件备份 `.bak-23smoke` 留档）｜ `dsh web --no-open --port 3080`（token URL）｜ 测试工作区 `D:\tmp\recall-h0` ｜ 素材：`smoke-a3.png`（96×96 PNG）+ `a3.txt`
+- **执行方式**：agent-browser（`upload` 注入隐藏文件输入 + 页内 `__reactProps.onClick` 直调点击 + `eval` 读 DOM / 调端点）+ 磁盘与 store 对账（index.json / lineage.json / recall-intent.json / heartbeat / git tag / 宿主 stderr）
+- **结果**：4 项通过
+
+**逐项结论**：
+
+1. **新面单入口渲染（本轮核心改动）— 通过**：带 PNG + 文件附件的消息行 DOM＝`.dsh-recall-row > .dsh-recall-stack > .Sixlwa_userStack`（官方内容）——官方 attachmentRow（图片 gallery，`naturalWidth/Height=96`）+**官方 `Sixlwa_fileCard`（`a3.txt` → `TXT 24B`；文件卡片改由官方渲染是本轮新增能力）**+ 官方 bubble；**插件自绘退场**（`.dsh-recall-bubble`/`.dsh-recall-filecard` 均 0 命中）；插件动作行保留（复制 + 撤回 2 枚）。
+2. **密钥脱敏（经官方 user.text 链）— 通过**：消息文本含 `AKIAIOSFODNN7EXAMPLE` 与 `sk-abcdefghij1234567890` → 渲染为 `AKIAIOSF************` / `sk-abcde***************`；`row.innerHTML` 不含任一原串。
+3. **撤回全链（both，含 fork）— 通过**：①**首条消息（cutSeq=null）**：面板「仅回退项目文件」且无范围选项，确认后 agent 生成期间新增的 `_probe/*.cjs` 删除、`a3.txt` 恢复 v2、结果面板「回退完成」、文本回填输入框（含密钥原文——回填是设计行为）。②**第二条（有 cutSeq）**：面板「修改 1 · 删除 1」+ 两枚范围 radio，确认后 fork 到子会话（视图 2 行 → 1 行）、**原会话归档**（侧边栏消失、子会话标题继承无「 2」递增）、**子会话重绘正确**（图片 96×96 + 官方文件卡 + 打码文本 + 撤回按钮在位）、回填第二条文本、磁盘恢复（`probe2.txt` 删除、`a3.txt`=v2）。③**store 对账**：index 15 条（新增 `220aa81c-…`@00:16）、lineage 追加 `childId=session-2f28df45… ← parentId=session-5409d1bb…`、安全快照 2 枚（`snap-pre-rollback-1792080921860` / `…1792081076891`）、`recall-intent.json` 清零、心跳 `63412 1792081077`（PID=宿主进程实测）。
+4. **错误面 — 通过**：`POST /api/recall/status` → `{ok:true, errors:[], storeBase:C:\Users\cc\.dsh\dsh-recall-snapshots}`；宿主 stderr 仅 `recall shell dialect probe: pwsh` + 第三方 `better-sidebar: pending`，**无 skip/compat 行**。
+
+**未覆盖（局限）**：① **issue #23 原始场景（0.2.0-rc.2「renderFactorySlot 在场、槽位缺席」）未实弹**——需降级全局 dsh 至该版本线；等价场景已由单测钉住（client「两面并存 → 归旧面」+「Factory 返回空/抛错 → 回落自绘并告警」、unit 判据/投影四例）；② 旧面闭包（`renderMessageImages`）活体未重跑（同上需降级 dsh），该分支代码与 2.4.10 逐字相同；③ session-only 范围与设置页三卡片不在本轮范围（本次改动未触碰）。
+
+**发现（按严重度）**：
+1. **[观察·低，非插件面] 宿主 stderr 出现 `MaxListenersExceededWarning`（11 close listeners on Socket）**：疑似长连接/SSE 累积，插件只走 fetch、不建 socket；归官方/第三方连接层，记录备查。
+2. **[过程备忘] CLI `click` 对 React 合成事件无效**：`agent-browser click <sel>` 报 Done 但处理器不执行，须页内 `__reactProps.onClick(...)` 直调（本次两处点击均用此法；上节记录同款）。
+3. **[过程备忘] 回填文本会留在输入框**：撤回后直接 `fill` 再发，第二条消息文本＝新输入 + 回填文本（本轮实测），构造用例需先清空（不影响插件行为）。
+
+**收尾**：profile `lib/client.js` 已逐字节还原 registry 2.4.11（170298 B、无新标记）、`.bak-23smoke` 留档可删、3080 实例已停（taskkill）、浏览器已关、截图 `D:\tmp\recall-23-smoke.png`（68 KB）。测试产物：`D:\tmp\recall-h0`（`a3.txt`=v2；`probe2.txt` 已由回退删除）+ store 两条消息快照 + 两枚安全快照 + 一条 lineage；UI 子会话「冒烟文本投影密钥打…」保留供复验。
+
+**发版判定**：本轮改动（内容改官方单入口 + 判据重写 + 兜底回落）在 0.2.1-alpha.4 真宿主 + 浏览器实弹**无阻塞项**，具备发版条件。
+
+### 附：0.2.0-rc.2 原场景复验（issue #23 A/B 对照，同日）
+
+- **环境**：Windows 10 ｜ **dsh 0.2.0-rc.2 临时 prefix 安装**（`npm install @deepseek-ai/dsh@0.2.0-rc.2 --prefix D:\tmp\dsh-rc2`，不污染全局）｜ `dsh web --no-open --port 3081` ｜ 插件＝工作区构建覆盖（同第十二节）与对照态 registry 2.4.11 ｜ agent-browser
+- **前置现象**：rc.2 拒绝加载 alpha.4 写的会话（页面「历史加载失败…contains event type `job/registered` unknown to this harness」）——跨版本会话 fail-closed 属官方设计，故在 rc.2 新建会话内测试；rc.2 启动另 skip 了 6 个官方实验 bundle（rc.2 安装目录不含，非插件）。
+- **A/B 对照（同一会话、同一消息，仅切插件产物）**：
+
+  | 插件产物 | `.dsh-recall-bubble` 文本 | 行内其余 | 判定 |
+  |---|---|---|---|
+  | registry 2.4.11（bug 版） | `""`（空白） | 文件卡 `TXT a3.txt TXT 24B` + 时间 + 两枚动作按钮 | **issue #23 精确复现**（正文空白、自绘气泡只剩内边距） |
+  | 工作区构建（修复版） | `"rc2冒烟：正文不应空白 AKIAIOSFODNN7EXAMPLE"` | 同上 + 图片 `96×96` | **修复确认** |
+
+  两态其余维度一致：`renderMessageImages` 图片闭包 `96×96` ✓、自绘文件卡 1 枚 ✓、动作行 2 枚 ✓、`officialStack: false`（判据归旧面、未触碰 content Factory）✓。密钥在 rc.2 上**不打码**属预期（`dsh-client-ui-secret-mask` 是 alpha.3 才引入，旧面本就明文，与 2.4.10 行为一致）。
+- **撤回链（rc.2 上）— 通过**：① P0-1 护栏正常拦截（agent 运行中点撤回 → 面板「无法回退：Agent 正在运行中」）；② 停止生成后撤回：首条消息 `cutSeq=null` → 「仅回退项目文件」，agent 生成期间新增的 `_probe/png_probe.py` 删除（`_probe/` 空目录残留＝git 语义，非缺陷）、`a3.txt` v5→v2 恢复、结果面板「回退完成」；③ **STALE 自动重拉实测**：预览后文件再变 → 确认时面板自动刷新为「修改 1 · 删除 1」（不执行旧预览）✓。
+- **环境坑（非插件）**：本机 `write_to_file` 对**已存在文件**的写入两次出现未落盘（`a3.txt` mtime 未变），改用 `node fs.writeFileSync` 直写后一切正常——撤回/diff 全程基于真实磁盘，结论不受影响；记录以备后续测试避坑。
+- **收尾**：`.bak-rc2smoke` 还原（170298 B）、3081 已停、浏览器已关、截图 `D:\tmp\recall-rc2-smoke.png`；rc.2 临时安装保留在 `D:\tmp\dsh-rc2`（可删）。

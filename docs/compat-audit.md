@@ -716,35 +716,42 @@
   尊重插件 priority 值，可恢复重试循环原始语义。`['user','steering']` 两 key 仍独立注册
   （kind 集合由 I5 探针盯防）。
 
-### I2 chat.node 渲染入口双面：旧面 `renderMessageImages` / 新面 `renderFactorySlot`（图片 user.content + 文本 user.text 投影；0.2.1-alpha.3 换代）
-- **依赖的官方行为**：两代契约并存（插件运行时双分支探测，recall-node.ts）——
-  **旧面（0.1.3-alpha.1 〜 0.2.1-alpha.2）**：`renderMessageImages({ images: [{attachment}], align })`
-  是图片渲染入口；`loadImage` 在 0.1.2-alpha.1 被 `Omit<MessageImagesOwnerProps,'loadImage'>` 剔除、
-  0.1.3-alpha.1 起作为必填 `loadImage: MessageImageLoader` 并存下放（插件旧面不用它）。
+### I2 chat.node 渲染入口双面：旧面 `renderMessageImages` / 新面 `renderFactorySlot`（整条内容 user.content 单入口；0.2.1-alpha.3 换代，issue #23 起判据重写）
+- **依赖的官方行为**：两代契约并存（判据单源 `src/client/user-content.ts`）——
+  **旧面信号（0.1.3-alpha.1 〜 0.2.1-alpha.2）**：`renderMessageImages({ images: [{attachment}], align })`
+  是图片渲染入口（`loadImage` 在 0.1.2-alpha.1 被 `Omit<MessageImagesOwnerProps,'loadImage'>` 剔除、
+  0.1.3-alpha.1 起作为必填并存下放）；该闭包在场即旧面——图片走闭包，文本/文件卡片/JSON 自绘。
   **新面（≥0.2.1-alpha.3）**：`renderMessageImages` 随 `conversation.message.images` 拆分
   （→ `conversation.chat.message.images` + `conversation.chat.user.images`）下线，`ChatNodeViewProps`
-  追加 `PropsRenderFactories`（`renderFactorySlot`），图片改经
-  `renderFactorySlot('conversation.chat.user.content', { content: { text:'', attachments:[{type:'image',image:{attachment}}], extraBlocks:[] }, loadImage, interactive:false, facts:{} })`
-  渲染——空 text/extraBlocks 时官方 `UserContent` 只出 attachmentRow（showBubble=false），
-  官方 `UserMessageNodeView` 同法调用；文本仍由插件自绘气泡、不重复出官方文本气泡。**文本投影（≥0.2.1-alpha.3）**：`renderFactorySlot('conversation.user.text', { text, facts, interactive, ellipsis })` 按注册规则切分原文本——`dsh-client-ui-secret-mask` 的密钥打码在此生效；whitespace 折叠/裁剪规则经 `context.read(flag)` 门控，`facts: {}` 即禁用（插件以空 facts 保原文显示，仅继承脱敏）。
+  追加 `PropsRenderFactories`（`renderFactorySlot`），**整条内容**改经
+  `renderFactorySlot('conversation.chat.user.content', { content: { text, attachments:[(image|file)], extraBlocks }, loadImage, interactive:true, facts })`
+  渲染（官方 `UserMessageNodeView` 同款调用）——投影＝官方 `contentParts` 三分派复刻（text 拼接 /
+  image·file 转附件描述符 / 其余落 extraBlocks 由官方 JsonBlock 呈现），文本在官方 `UserContent`
+  内部再经 `conversation.user.text` 投影（`dsh-client-ui-secret-mask` 密钥打码在该链生效）。
+  **判据教训（issue #23）**：不得以 `renderFactorySlot` 存在判新面——0.2.0-rc.2 已下发该函数、
+  槽位却缺席（0.2.1-alpha.3 才引入），误判令正文静默空白；`renderMessageImages` 只存在于
+  ≤0.2.1-alpha.2、与新槽位引入版本互斥，是可靠判据。返回空/抛错即回落自绘并 warn（绝不静默空白）。
 - **出处**：`dsh-client-ui-chat/lib/types/client/contract/slots.d.ts`（旧面 `ChatNodeOwnerProps.renderMessageImages`；
-  新面 `ChatNodeOwnerProps.loadImage` + `ChatNodeViewProps & PropsRenderFactories`）；
+  新面 `ChatNodeOwnerProps.loadImage` + `ChatNodeViewProps & PropsRenderFactories` + `UserContentData`/`UserContentInput`）；
+  `dsh-client-ui-chat/lib/client.js`（官方 `contentParts`/`UserContent`/`UserStyleBubble` 实现——投影复刻的对偶面）；
   `dsh-client-ui-slots/lib/types/index.d.ts`（`RenderFactorySlot`/`PropsRenderFactories` 类型定义）；
   `dsh-client-ui-conversation`（旧面 `RenderMessageImages` 定义/导出，≥alpha.3 已删除）。
-- **探针/单测**：`tests/probe/api-surface.test.js`（两代契约任一在位 + 新面 `PropsRenderFactories`/`loadImage`
-  与 ui-slots `renderFactorySlot` 条件钉）；`tests/client/recall-node.test.ts`（旧面闭包载荷 / 新面 Factory
-  载荷与 `text:''` 契约要点 / 两入口双缺降级 三例）。
-- **失效症状**：图片永久无声空白（issue #9 的第二次形态——0.2.1-alpha.3 移除 `renderMessageImages`，
-  旧代码读它恒 undefined，`typeof === 'function'` 守卫静默跳过、零报错）。
-- **复查动作**：重跑 test:probe 与 test:client；若两面探针都红（官方第三次重排图片入口），按
-  `recall-node.ts` 的 `imageBlocks` 渲染分支重核新入口；images 仍传 image 块数组（非裸 attachment）、
-  `content.text` 必须传空串（否则重复出官方文本气泡）、`loadImage` 原样透传。
+- **探针/单测**：`tests/probe/api-surface.test.js`（两代契约任一在位 + 新面 `PropsRenderFactories`/`loadImage`、
+  `UserContentData` 三分派、ui-slots `renderFactorySlot` 条件钉）；`tests/client/recall-node.test.ts`
+  （旧面闭包 / 新面单入口载荷（content 三分派 + facts + interactive）/ 两面并存归旧面（#23 回归）/
+  返回空与抛错回落告警，共五例）；`tests/unit/client-pure.test.js`（投影/facts/判据/调用包装纯函数）。
+- **失效症状**：用户消息内容永久空白（issue #9/#23 同族——「函数在场」≠「槽位可用」：
+  #9 为旧面图片空白、#23 为 0.2.0-rc.2 正文空白，均零报错）。
+- **复查动作**：重跑 test:probe 与 test:client；若 `renderMessageImages` 与 `PropsRenderFactories`
+  同时消失（官方第三次重排渲染入口），按 `user-content.ts` 的 `resolveUserContentFace`/`projectUserContent`
+  重核——判据换成官方新信号，投影与官方 `contentParts` 新派系逐字对齐；`loadImage` 原样透传、
+  `interactive` 与官方 `UserMessageNodeView` 对齐（true）。
 
 ### I3 session-scope slot props 合成：props.sessionId 由 kit 注入
 - **依赖的官方行为**：`props = {...kit, ...injected, ...slotInjected.props, ...ownerProps}`，
   kit 注入 `sessionId/useSession/useSessions/useWorkspaces/useProjection`；owner 同名覆盖 kit。
 - **出处**：`dsh-client-ui-renderer` standardProps/renderEntry（构建产物）。
-- **探针/单测**：`tests/probe/api-surface.test.js`（standardProps/renderEntry 存在性断言）+ UserRecallNode 读取 `props.sessionId`/`props.renderMessageImages`。
+- **探针/单测**：`tests/probe/api-surface.test.js`（standardProps/renderEntry 存在性断言）+ UserRecallNode 读取 `props.sessionId` 与两面渲染入口（`renderMessageImages`/`renderFactorySlot`）。
 - **失效症状**：撤回按钮按 `sessionId` 查询失效（按钮出现但快照查询错会话）。
 - **复查动作**：读 `dsh-client-ui-renderer/lib/client.js` 的 `standardProps`（L549）与
   `renderEntry`（L650）——确认合成顺序仍为 `{...kit, ...injected, ...slotInjected.props,

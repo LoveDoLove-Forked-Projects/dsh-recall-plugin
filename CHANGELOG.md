@@ -4,6 +4,12 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **用户消息正文在 dsh 0.2.0-rc.x 上静默空白（issue #23）——判据重写为「旧面闭包在场即旧面」**：旧实现以 `renderFactorySlot` 是否存在判新面，而 0.2.0-rc.2 已下发该函数、`conversation.user.*` 槽位却尚未引入（0.2.1-alpha.3 才引入）——正文渲染成空、零报错（气泡只剩内边距，插件动作行照常）。`renderMessageImages` 只存在于 ≤0.2.1-alpha.2，与新槽位引入版本互斥，以其判定两面才可靠；0.2.0-rc.2 归旧面自绘、正文恢复。判据与投影单源在新增的 `src/client/user-content.ts`。
+- **新面内容渲染从「分片投影」收敛为「整条内容单入口」**：文本/图片/文件卡片/未知块/引用摘要一次交给官方 `conversation.chat.user.content` Factory（投影＝官方 `contentParts` 三分派的逐字复刻；该函数官方未导出），与官方 `UserMessageNodeView` 同款调用（含 `interactive: true` 对齐）——插件只保留动作行（时间/复制/撤回），气泡外壳/文件卡片/JSON 块/文本四类自绘在新面退场，官方规则链（密钥脱敏等）自动跟随。
+- **兜底不静默**：官方 Factory 返回空或抛错（槽位未注册的中间版本）时回落自绘（文本/文件卡片/JSON；新面兜底无图片入口，跳过）并打 warn——「探测通过但渲染为空」不再可能产出空白正文。旧面（≤0.2.1-alpha.2）行为不变。
+
 ### 兼容
 
 - **dsh 0.2.1-alpha.4 兼容（零破坏核验，无代码改动）**（升级核查见 [docs/upgrade-assessments/dsh-0.2.1-alpha.4.md](docs/upgrade-assessments/dsh-0.2.1-alpha.4.md) 与 [docs/compat-audit.md](docs/compat-audit.md) 头部 0.2.1-alpha.4 段）：双 lockfile 包清单对比（第三方依赖零变化）+ 32 个关键包 `lib/` 逐字节 diff 确认插件消费/注册契约零漂移——`sessions.fork`（`dsh-session` 整包）、`dsh-shell`、`dsh-settings`、`dsh-session-query`、`dsh-session-persistence`、`dsh-cordis-host-runner`（host 插件加载器）、`dsh-client-ui-chat`（slot 定义方）等 22 包零变更。
