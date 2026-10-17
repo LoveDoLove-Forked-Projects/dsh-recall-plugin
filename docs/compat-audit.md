@@ -7,6 +7,14 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **2.4.13 发版核验（2026-10-17）——dsh 0.2.1-rc.2 兼容版（零代码改动）**：插件 **2.4.13 已发布**（npm `latest` 实测 2.4.13，
+> shasum `5b3403fdb6a17618f4986547cf5b13c65ac27088` 与本地 `npm pack --dry-run` 一致，24 文件 / 183.5 kB / 解包 564.7 kB）；
+> GitHub Release `v2.4.13` 非 draft/prerelease，tag 指向发版提交 `3f3fe08`（`git push` 直连成功）。**发布前门禁**：typecheck、
+> 单测 39 文件 **505**、client 6 文件 **96**、probe **54**、build `lib/client.js` 172001 B、verify:host（inject=shell,sessions,agents、端点 13 项）、
+> check:dsh「全部一致」、check:upgrade 三层全绿。**内容**：仅兼容台账与文档（无源码改动）——`dshReleases` 补 alpha.5 / rc.1 / rc.2、
+> 镜像九次重拉 13/13 零差异、契约文档与 README 双语同步 rc.2、新增 rc.1 / rc.2 评估文档。**观察项**：dist-tag 传播滞后约 1 分钟
+> （精确版本 `registry.npmjs.org/dsh-recall-plugin/2.4.13` 先行确认，`npm view` 才跟上）。
+>
 > **0.2.1-rc.2 核验（2026-10-17）——零破坏版本（已实装）：rc.1 汇总版 Breaking 逐条排除，34 个关键包 `lib/` 漂移仅 3 处且均非功能，peer 窗口无需追加**：
 > **版本链路**：`0.2.1-alpha.4`(10-15) → `alpha.5`(10-16) → `rc.1`(10-17) → `rc.2`(10-17)，无 rc.0；评估起点为本机 alpha.4，故按 **alpha.4→rc.2 全链**核验；同日已升级实装 rc.2 并补跑门禁（段末）。
 > **rc.1 是 0.2.1 首个候选版，release notes 汇总自 v0.2.0-rc.2 以来全部变更（含大量 Breaking）**，其中多数在 alpha.1~alpha.5 已落地；rc.2 仅其上的 9 commit 小增量——
