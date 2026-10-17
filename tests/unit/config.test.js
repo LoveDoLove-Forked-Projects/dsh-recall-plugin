@@ -46,7 +46,9 @@ describe('createConfig', () => {
     expect(cfg).toEqual({
       gcSnaps: 50,
       gcHours: 24,
-      maxFileBytes: 104857600,
+      maxFileBytes: 8388608,
+      maxWorkspaceBytes: 268435456,
+      scanBudgetMs: 10000,
       maxSnapshotsPerWorkspace: 500,
       baseExcludes: expect.arrayContaining([
         '.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/',
@@ -82,9 +84,24 @@ describe('createConfig', () => {
     expect(createConfig({ gcHours: -5 }).gcHours).toBe(24)
   })
 
-  it('maxFileBytes 低于 1024 回退到默认值', () => {
-    expect(createConfig({ maxFileBytes: 512 }).maxFileBytes).toBe(104857600)
+  it('maxFileBytes 低于 1024 回退到默认值（issue #24 起默认 8MB）', () => {
+    expect(createConfig({ maxFileBytes: 512 }).maxFileBytes).toBe(8388608)
     expect(createConfig({ maxFileBytes: 2048 }).maxFileBytes).toBe(2048)
+  })
+
+  it('maxWorkspaceBytes / scanBudgetMs：0 = 不限制，非法回退默认（issue #24）', () => {
+    expect(createConfig({ maxWorkspaceBytes: 1024 }).maxWorkspaceBytes).toBe(1024)
+    expect(createConfig({ maxWorkspaceBytes: 0 }).maxWorkspaceBytes).toBe(0)
+    // 负数 = 非法（误输入不该把护栏关掉），回退默认上限
+    expect(createConfig({ maxWorkspaceBytes: -1 }).maxWorkspaceBytes).toBe(268435456)
+    expect(createConfig({ maxWorkspaceBytes: 'abc' }).maxWorkspaceBytes).toBe(268435456)
+    expect(createConfig({}).maxWorkspaceBytes).toBe(268435456)
+
+    expect(createConfig({ scanBudgetMs: 1500 }).scanBudgetMs).toBe(1500)
+    expect(createConfig({ scanBudgetMs: 0 }).scanBudgetMs).toBe(0)
+    expect(createConfig({ scanBudgetMs: -5 }).scanBudgetMs).toBe(10000)
+    expect(createConfig({ scanBudgetMs: 'abc' }).scanBudgetMs).toBe(10000)
+    expect(createConfig({}).scanBudgetMs).toBe(10000)
   })
 
   it('maxSnapshotsPerWorkspace：正常值生效，0/负值 = 不限制，非法回退 500', () => {
@@ -144,6 +161,8 @@ describe('createConfig', () => {
       gcSnaps: fresh.gcSnaps,
       gcHours: fresh.gcHours,
       maxFileBytes: fresh.maxFileBytes,
+      maxWorkspaceBytes: fresh.maxWorkspaceBytes,
+      scanBudgetMs: fresh.scanBudgetMs,
       maxSnapshotsPerWorkspace: fresh.maxSnapshotsPerWorkspace,
       baseExcludes: fresh.baseExcludes,
       refillDraft: fresh.refillDraft,

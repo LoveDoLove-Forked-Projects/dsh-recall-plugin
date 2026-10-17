@@ -29,8 +29,9 @@ export function psq(value: string): string {
 export const UTF8_PRELUDE = 'export LC_ALL=C'
 
 // 超大文件跳过阈值（字节），默认值与 config.js 的 maxFileBytes 一致；
-// 实际生效值以 store.maxFileBytes（用户 config 可调）经 oversizeBlock 注入为准
-export const MAX_FILE_BYTES = 104857600
+// 实际生效值以 store.maxFileBytes（用户 config 可调）经 oversizeBlock 注入为准。
+// issue #24 起默认 8MB（同 pwsh 侧，两套模板必须同值）。
+export const MAX_FILE_BYTES = 8388608
 
 // 失败清扫的 stale 锁阈值（分钟，M3）：锁文件 mtime 超过该值才视为残留可清；
 // 更新的锁视为「有 git 操作正在进行」让路。本插件单条快照/回退的超时是
@@ -72,26 +73,17 @@ function dropGitlinksBlock() {
   ].join('\n')
 }
 
-// 剔除超大文件：find -print0 + read -d '' 按字节安全遍历（文件名含换行
-// 也不怕）；2>/dev/null 容忍个别不可访问子目录（杀软锁定、异常 ACL），
-// 漏看个别文件是 fail-open，可接受——与 pwsh 版同策略。
-// 阈值按调用注入（store.maxFileBytes，config 可调），不读模块常量。
-// 依赖外层已定义的 $git/$g/$root。
-// PF-9 合批：find 命中经管道剥前缀后 xargs -0 多路径合参——xargs 自适应
-// 批次（规避 ARG_MAX）等价 win32 侧显式 100 条/批；-0 保证路径不分裂；
-// xargs 失败/空输入 || true 兜住（fail-open 语义与逐条版一致，残留条目
-// 不进 index 的代价由下次快照幂等重试）。
-// 目录级跳过：exclude 表 basename 形式 pattern（见 pwsh 版同注释）转
-// find 的 ( -type d ( -name A -o -name B ) ) -prune -o 前缀，大目录整棵子树
-// 不进扫描；复杂 pattern 回退全扫，fail-open 语义不变。$new_exc 由前置的
-// excludeSyncBlock 定义（同脚本作用域）。
+// exclude 表 basename 形式 pattern（见 pwsh 版同注释）转 find 的目录剪枝前缀。
+// 抽成独立块：oversizeBlock 与 issue #24 的 limitScanBlock 都要用同一份 prune
+// 数组；两处各自调用一次（重复构建同一数组，无状态副作用）。
+// 依赖前置的 excludeSyncBlock 定义的 $new_exc。
 // 括号是数组元素里的**数据**，不经过 shell 分词——写成 "\(" 时 bash 不剥
 // 反斜杠，find 收到两字符 token \( 直接报「paths must precede expression」
 // 退出 1，整条剔除被 2>/dev/null 与 || true 吞成静默空操作。killOrphansScript
 // 里的 \( 是另一种东西：脚本源码内联写法，分词阶段就被剥掉，两者不可混用。
 // 外层 -type d：prune 只该剪目录，否则与排除目录同名的大文件（dist/target/
 // .git）会被 -name 一并剪掉；pwsh 侧只对 EnumerateDirectories 判名，两侧同语义。
-function oversizeBlock(maxBytes: number): string {
+function dirPruneArgsBlock() {
   return [
     'oversize_args=()',
     'while IFS= read -r line || [ -n "$line" ]; do',
@@ -105,9 +97,56 @@ function oversizeBlock(maxBytes: number): string {
     'done <<< "$new_exc"',
     'oversize_prune=()',
     "if [ ${#oversize_args[@]} -gt 0 ]; then oversize_prune=('(' -type d '(' \"${oversize_args[@]}\" ')' ')' -prune -o); fi",
+  ].join('\n')
+}
+
+// 剔除超大文件：find -print0 + read -d '' 按字节安全遍历（文件名含换行
+// 也不怕）；2>/dev/null 容忍个别不可访问子目录（杀软锁定、异常 ACL），
+// 漏看个别文件是 fail-open，可接受——与 pwsh 版同策略。
+// 阈值按调用注入（store.maxFileBytes，config 可调），不读模块常量。
+// 依赖外层已定义的 $git/$g/$root。
+// PF-9 合批：find 命中经管道剥前缀后 xargs -0 多路径合参——xargs 自适应
+// 批次（规避 ARG_MAX）等价 win32 侧显式 100 条/批；-0 保证路径不分裂；
+// xargs 失败/空输入 || true 兜住（fail-open 语义与逐条版一致，残留条目
+// 不进 index 的代价由下次快照幂等重试）。
+function oversizeBlock(maxBytes: number): string {
+  return [
+    dirPruneArgsBlock(),
     'find "$root" "${oversize_prune[@]}" -type f -size +' + String(maxBytes || MAX_FILE_BYTES) + 'c -print0 2>/dev/null | while IFS= read -r -d \'\' f; do',
     '  printf \'%s\\0\' "${f#"$root"/}"',
     "done | xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" update-index --force-remove -- 2>/dev/null || true",
+  ].join('\n')
+}
+
+// issue #24：快照前置护栏——统计「可纳入快照的文件总量」与耗时，任一超限即
+// 整体停用本次快照（输出 SNAP_LIMIT 后 exit 0），不执行 add。停用而非截断的
+// 理由与 pwsh 版同名函数注释一致（截断快照回退会误删未纳入文件）。
+// GNU find 有 -printf、macOS BSD find 没有：探测后二选一，两条路径都批量输出
+// 文件大小——逐文件 stat 在十万文件量级会退化成十万次进程。
+// 预算只有秒精度（date +%s）：遍历中无法中断，事后比较已足够——超预算即停用，
+// 中途省下的遍历时间不是语义要求。依赖 $root/$new_exc 与前置 excludeSyncBlock。
+function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number): string {
+  const limit = maxBytes > 0 ? String(maxBytes) : '0'
+  const fileLimit = String(fileMaxBytes || MAX_FILE_BYTES)
+  const budgetS = budgetMs > 0 ? String(Math.ceil(budgetMs / 1000)) : '0'
+  return [
+    dirPruneArgsBlock(),
+    'limit_start=$(date +%s)',
+    'if find "$root" -maxdepth 0 -printf \'\' >/dev/null 2>&1; then',
+    '  limit_sizes=$(find "$root" "${oversize_prune[@]}" -type f -printf \'%s\\n\' 2>/dev/null)',
+    'else',
+    '  limit_sizes=$(find "$root" "${oversize_prune[@]}" -type f -exec stat -f%z {} + 2>/dev/null)',
+    'fi',
+    // 口径 = 实际会进快照的字节：超过单文件上限的文件随后被 oversizeBlock
+    // 移出 index，不计入总量（同 pwsh 侧，防一个大文件把干净项目误判超限）
+    'limit_total=$(printf \'%s\\n\' "$limit_sizes" | awk -v lim=' + limit + ' -v flim=' + fileLimit + ' \'{ if ($1 <= flim) { s += $1; if (lim > 0 && s > lim) { print "OVER " s; exit } } } END { if (lim <= 0 || s <= lim) print s }\')',
+    'limit_elapsed=$(( $(date +%s) - limit_start ))',
+    'case "$limit_total" in',
+    '  OVER\\ *) echo "SNAP_LIMIT bytes ${limit_total#OVER } ' + limit + '"; exit 0 ;;',
+    'esac',
+    'if [ ' + budgetS + ' -gt 0 ] && [ "$limit_elapsed" -gt ' + budgetS + ' ]; then',
+    '  echo "SNAP_LIMIT time $((limit_elapsed * 1000)) $(( ' + budgetS + ' * 1000 ))"; exit 0',
+    'fi',
   ].join('\n')
 }
 
@@ -291,6 +330,8 @@ export function snapshotScript(root: string, store: ScriptStore, gitExe: string,
     heartbeatBlock(),
     dropGitlinksBlock(),
     excludeSyncBlock(store.excludeFile, base),
+    // issue #24：总量/预算护栏先于 add——超限时连 add 都不跑
+    limitScanBlock(store.maxWorkspaceBytes, store.maxFileBytes, store.scanBudgetMs),
     attrsMigrateBlock(),
     // fail-open add（issue #7 加固，语义见 pwsh 版同款注释）：--ignore-errors
     // 下「无法索引的路径」以退出码 1 结束但索引已落盘；≥2 才是真 fatal，

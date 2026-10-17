@@ -363,6 +363,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           gcSnaps: cfg.gcSnaps,
           gcHours: cfg.gcHours,
           maxFileBytes: cfg.maxFileBytes,
+          maxWorkspaceBytes: cfg.maxWorkspaceBytes,
+          scanBudgetMs: cfg.scanBudgetMs,
           maxSnapshotsPerWorkspace: cfg.maxSnapshotsPerWorkspace,
           baseExcludes: cfg.baseExcludes.slice(),
           refillDraft: cfg.refillDraft,
@@ -391,6 +393,19 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       if (patch.gcSnaps !== undefined) clean.gcSnaps = Number(patch.gcSnaps)
       if (patch.gcHours !== undefined) clean.gcHours = Number(patch.gcHours)
       if (patch.maxFileBytes !== undefined) clean.maxFileBytes = Number(patch.maxFileBytes)
+      // issue #24 护栏：0 = 显式不限制；负数拒绝（误输入不该把安全护栏关掉）。
+      // 与 maxSnapshotsPerWorkspace 的「负值按 0」不同——那个是历史上限，
+      // 这两个是防病态目录的止损闸。
+      if (patch.maxWorkspaceBytes !== undefined) {
+        const n = Number(patch.maxWorkspaceBytes)
+        if (!Number.isFinite(n) || n < 0) return { ok: false, code: E.RECALL_BAD_TYPE, message: '工作区总量上限必须是 >= 0 的数字（0 表示不限制）' }
+        clean.maxWorkspaceBytes = Math.trunc(n)
+      }
+      if (patch.scanBudgetMs !== undefined) {
+        const n = Number(patch.scanBudgetMs)
+        if (!Number.isFinite(n) || n < 0) return { ok: false, code: E.RECALL_BAD_TYPE, message: '扫描时间预算必须是 >= 0 的数字（0 表示不限制）' }
+        clean.scanBudgetMs = Math.trunc(n)
+      }
       if (patch.maxSnapshotsPerWorkspace !== undefined) {
         const n = Number(patch.maxSnapshotsPerWorkspace)
         // 0 或负值 = 不限制（schema 由 number 校验，非法 NaN 在 settings.write 层被拒）

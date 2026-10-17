@@ -27,7 +27,8 @@ export const UTF8_PRELUDE = '$OutputEncoding = [Text.UTF8Encoding]::new($false)\
 // 超大文件跳过阈值：git 对象库对大文件极不友好，回退语义也不该被一个
 // 200MB 的构建产物拖垮。默认值与 config.js 的 maxFileBytes 一致；实际
 // 生效值以 store.maxFileBytes（用户 config 可调）经 oversizeBlock 注入为准。
-export const MAX_FILE_BYTES = 104857600
+// issue #24 起默认 8MB：100MB 的首拍会把下载/素材目录的大文件整批写进对象库。
+export const MAX_FILE_BYTES = 8388608
 
 // 失败清扫的 stale 锁阈值（分钟，M3）与心跳有效窗口（秒，M3）：语义、取值
 // 理由与「不走 Config」的定性见 scripts.posix.js 同名常量注释，两侧必须
@@ -184,6 +185,47 @@ function oversizeBlock(maxBytes: number): string {
     '  $batch = $oversizeRel.GetRange($i, [Math]::Min(100, $oversizeRel.Count - $i))',
     '  & $git --literal-pathspecs --git-dir=$g update-index --force-remove -- $batch',
     '}'
+  ].join('\n')
+}
+
+// issue #24：快照前置护栏——一次目录遍历同时统计「可纳入快照的文件总量」与
+// 耗时，任一超限即整体停用本次快照（输出 SNAP_LIMIT 后 exit 0），不执行
+// add/write-tree/tag。为什么停用而不是截断：回退脚本按 index 清单删「当前有、
+// 目标无」的文件，截断快照里缺失的文件会在回退时被当新增删除。为什么放在
+// add 之前：总量超限时 add -A 的 hash 与对象写入才是 CPU/磁盘的主要开销，
+// 先判后跑才止得住血。目录剪枝判据与 oversizeBlock 同源（exclude 表 basename
+// 项 + reparse 点），两次遍历各自建集而非共享：两者在脚本里独立可调用。
+// 依赖外层已定义的 $git/$g/$root/$lines。
+function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number): string {
+  const limit = maxBytes > 0 ? String(maxBytes) : '0'
+  const fileLimit = String(fileMaxBytes || MAX_FILE_BYTES)
+  const budget = budgetMs > 0 ? String(budgetMs) : '0'
+  return [
+    '$limitSw = [Diagnostics.Stopwatch]::StartNew()',
+    dirSkipSetBlock('limitSkip'),
+    '$limitStack = [System.Collections.Generic.Stack[string]]::new()',
+    '$limitStack.Push($root)',
+    '$limitBytes = [long]0',
+    "$limitHit = ''",
+    'while ($limitStack.Count -gt 0) {',
+    '  if (' + budget + ' -gt 0 -and $limitSw.ElapsedMilliseconds -gt ' + budget + ') { $limitHit = \'time\'; break }',
+    '  $dir = $limitStack.Pop()',
+    '  try {',
+    '    $di = [System.IO.DirectoryInfo]::new($dir)',
+    // 口径 = 实际会进快照的字节：超过单文件上限的文件随后被 oversizeBlock
+    // 移出 index，不该计入总量（否则一个 300MB 视频就能把干净项目误判超限）
+    '    foreach ($f in $di.EnumerateFiles()) { if ($f.Length -le ' + fileLimit + ') { $limitBytes += $f.Length } }',
+    '    if (' + limit + ' -gt 0 -and $limitBytes -gt ' + limit + ') { $limitHit = \'bytes\' }',
+    '    if ($limitHit) { break }',
+    '    foreach ($d in $di.EnumerateDirectories()) {',
+    '      if ($limitSkip.Contains($d.Name)) { continue }',
+    '      if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }',
+    '      $limitStack.Push($d.FullName)',
+    '    }',
+    '  } catch {}',
+    '}',
+    "if ($limitHit -eq 'bytes') { Write-Output ('SNAP_LIMIT bytes ' + $limitBytes + ' ' + " + limit + "); exit 0 }",
+    "if ($limitHit -eq 'time') { Write-Output ('SNAP_LIMIT time ' + $limitSw.ElapsedMilliseconds + ' ' + " + budget + "); exit 0 }",
   ].join('\n')
 }
 
@@ -384,6 +426,8 @@ export function snapshotScript(root: string, store: ScriptStore, gitExe: string,
     heartbeatBlock(),
     dropGitlinksBlock(),
     excludeSyncBlock(store.excludeFile, base),
+    // issue #24：总量/预算护栏先于 add——超限时连 add 都不跑
+    limitScanBlock(store.maxWorkspaceBytes, store.maxFileBytes, store.scanBudgetMs),
     attrsMigrateBlock(),
     // fail-open add（issue #7 加固）：--ignore-errors 让「个别路径无法索引」
     // （无提交的嵌入式仓库、不可读文件等）以退出码 1 结束但索引照常落盘，

@@ -27,7 +27,7 @@ As each message is sent, the workspace is first snapshotted into an independent 
 - [Snapshot Maintenance & Cleanup](#snapshot-maintenance--cleanup)
 - [How It Works](#how-it-works)
 - [Event Contract (for same-host plugins)](#event-contract-for-same-host-plugins)
-- [Local Development (without publishing)](#local-development-without-publishing)
+- [Contributing](#contributing)
 - [License](#license)
 
 ## UI Preview
@@ -137,7 +137,9 @@ All options can be edited visually in the "**Settings → Plugin Config → Reca
 | --- | --- | --- |
 | `gcSnaps` | 50 | Run `git gc` after this many snapshots accumulate (env `DSH_RECALL_GC_SNAPS` force-overrides) |
 | `gcHours` | 24 | Run gc when this many hours have passed since the last one (whichever trigger fires first; env `DSH_RECALL_GC_HOURS`) |
-| `maxFileBytes` | 104857600 (100MB) | Files larger than this are neither snapshotted nor touched by recalls |
+| `maxFileBytes` | 8388608 (8MB) | Files larger than this are neither snapshotted nor touched by recalls |
+| `maxWorkspaceBytes` | 268435456 (256MB) | Total snapshot-eligible file size per workspace. Exceeding it **disables snapshots for that workspace** (no truncation — a truncated snapshot would make rollback delete the skipped files) and shows a notice on recent messages; raise the limit or add exclusions to recover automatically. 0 = unlimited |
+| `scanBudgetMs` | 10000 (10s) | Time budget for the pre-snapshot file scan. Exceeding it skips the snapshot with a notice (guards against pathological directories stalling startup). 0 = unlimited |
 | `maxSnapshotsPerWorkspace` | 500 | Maximum snapshots kept per workspace; oldest pruned beyond the cap. 0 = unlimited |
 | `retentionDays` | 0 | Keep snapshots for this many days; older ones are deleted. 0 = disabled (works independently of the cap) |
 | `baseExcludes` | `.git`, `node_modules/`, `.dsh-recall-snapshots/`, `dsh-recall-snapshots/`, `target/`, `dist/`, `build/`, `out/`, `coverage/`, `.next/`, `.nuxt/`, `.output/`, `.cache/`, `.gradle/`, `*.exe`, `*.dll`, `*.pdb`, `*.so`, `*.dylib`, `*.msi`, `*.zip`, `*.7z`, `*.rar`, `*.tar`, `*.tar.gz`, `*.iso` | Base exclusion list (gitignore syntax, lower priority than exclude.txt); excluded large directories are skipped as whole subtrees during snapshot scans. Directory-form entries (e.g. `target/`) mean one more thing: **when a path segment of the workspace root itself matches, snapshots are disabled for that workspace** — patterns are relative to the root, so they can never exclude the root itself (i.e. a session opened inside a build-output directory), and such directories have no rollback value anyway; remove the entry to re-enable |
@@ -245,9 +247,26 @@ Versioning: shipped as a stable public contract from day one (not experimental).
 
 Version skew: an old plugin frontend (<2.4.8) never reports, so events never fire; a new frontend with an old host (<2.4.8) gets a missing endpoint and silently ignores it — recall itself is unaffected.
 
-## Local Development (without publishing)
+## Contributing
 
-Point the profile's dependency for this package at your clone via `link:`; DSH loads the built `lib/` artifacts from the workspace (source lives in `src/`), so run `npm run build` after editing `src/`, then restart DSH — no copying or publishing needed:
+### Prerequisites
+
+- Node.js ≥ 20 (develop on Windows, Linux or macOS), git CLI;
+- A local DSH installation (≥ 0.1.2-alpha.1): `npm run test:probe` and `npm run verify:host` need a real dsh; without one the probes skip themselves, which does not block the rest of development and testing.
+
+### Local iteration (no publishing needed)
+
+Clone and build once first (peer dependencies are private `@deepseek-ai/*` packages; `--legacy-peer-deps` skips them and installs only devDependencies — the build and test toolchain):
+
+```powershell
+git clone https://github.com/limbo947/dsh-recall-plugin.git
+cd dsh-recall-plugin
+npm install --legacy-peer-deps   # install the build/test toolchain (esbuild, vitest, typescript, ...)
+npm run build                    # produce the lib/ artifacts (what link mode loads)
+npm test                         # optional: run the unit suite once to verify the baseline
+```
+
+Then point the profile's dependency for this package at your clone via `link:`; DSH loads the built `lib/` artifacts from the workspace (source lives in `src/`), so run `npm run build` after editing `src/`, then restart DSH — no copying or publishing needed:
 
 ```powershell
 # 1. Edit $env:USERPROFILE\.dsh\profiles\web\package.json:
@@ -259,16 +278,26 @@ pnpm install
 # 3. Restart DSH and hard-refresh the page (Ctrl+Shift+R)
 ```
 
-Note: all source lives in `src/` (host in `src/host/`, browser side in `src/client/`, shared types in `src/types/`); `lib/` is a pure build-output directory — `npm run build` generates it via esbuild (per-file host transpilation plus the `lib/client.js` bundle), and the artifacts are committed with the source. **You must run `npm run build` after changing any `src/` file**, otherwise the stale artifacts keep running (CI enforces artifact freshness).
+### Source layout & build
+
+All source lives in `src/`: the host (Node ESM TypeScript) in `src/host/`, the browser side in `src/client/`, cross-domain shared types in `src/types/`; `lib/` is a pure build-output directory — `npm run build` generates it via esbuild (per-file host transpilation plus the `lib/client.js` bundle), and the artifacts are committed with the source. **You must run `npm run build` after changing any `src/` file**, otherwise the stale artifacts keep running (CI enforces artifact freshness).
 
 ### Tests
 
-- `npm test`: pure-logic unit tests (vitest, 39 files / 497 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, the disk-format guard, the recall intent journal, recall terminal-event payload assembly, i18n dictionaries plus a missing-key scan, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
-- `npm run test:client`: client component tests (vitest + jsdom, 6 files / 90 cases, runs in CI) — the recall node main chain (preview→execute→fork→refill) and terminal-event reporting, snapshot-manager tree and delete flows, config/exclude card error paths, the logger switch matrix, and the zh/en rendering chains; assertions pin behaviour and structure only (className / aria / request payloads), never literal copy;
-- `npm run test:probe`: official-API field probes (requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` and the fork-cut anchors of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, the shell execution seam (`execute`/`ShellExecution.result`), the settings surface (`SettingsForms`/profile entry id/volatile gate) plus `loader/volatile-update` and the `Fiber.entry` shape, and goes red on violation;
+- `npm test`: pure-logic unit tests (vitest, 39 files / 505 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, the disk-format guard, the recall intent journal, recall terminal-event payload assembly, i18n dictionaries plus a missing-key scan, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
+- `npm run test:client`: client component tests (vitest + jsdom, 6 files / 96 cases, runs in CI) — the recall node main chain (preview→execute→fork→refill) and terminal-event reporting, snapshot-manager tree and delete flows, config/exclude card error paths, the logger switch matrix, and the zh/en rendering chains; assertions pin behaviour and structure only (className / aria / request payloads), never literal copy;
+- `npm run test:probe`: official-API field probes (2 files / 54 cases, requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` and the fork-cut anchors of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, the shell execution seam (`execute`/`ShellExecution.result`), the settings surface (`SettingsForms`/profile entry id/volatile gate) plus `loader/volatile-update` and the `Fiber.entry` shape, and goes red on violation;
 - `npm run verify:host`: assembly gate (requires a local dsh installation) — boots the plugin with a real cordis context in two passes (legacy settings stub and a modern-face-only stub), asserting inject declarations, endpoint registration, Config schema, teardown cleanliness and settings-face dispatch, catching assembly regressions before release;
-- `npm run build`: full host+client build (mandatory after any `src/` change); `npm run check:dsh`: dsh version inspection (pre-release).
+- `npm run typecheck`: full `tsc --noEmit` type check (includes the `tests/types` compile-time contract assertions; CI runs it before the unit suite);
+- `npm run build`: full host+client build (mandatory after any `src/` change); `npm run check:dsh`: dsh version inspection (pre-release); `npm run check:upgrade`: one-shot dsh-upgrade verification gate (chains check:dsh + test:probe + verify:host; mandatory after a dsh upgrade).
 - CI (GitHub Actions) runs `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + `npm run test:client` + unified artifact-freshness check (`npm run build && git diff --exit-code lib/`; probes and the assembly gate only run on machines with dsh).
+
+### Commit conventions (summary)
+
+- Commit messages follow Conventional Commits (`feat:` / `fix:` / `docs:` / `test:` / `ci:` / `chore:` prefixes with a concise subject); fixes bump patch, new features bump minor;
+- Behaviour changes must be reflected in [CHANGELOG.md](CHANGELOG.md) (Keep a Changelog format) and in both README languages ([中文](README.md) / [English](README.en.md));
+- When assumptions about dsh's official API fields change, update the [docs/compat-audit.md](docs/compat-audit.md) ledger;
+- For the full architecture map, development workflow, official-docs compliance checklist and known pitfalls see [AGENTS.md](AGENTS.md) — the project operations manual for AI coding agents and deep maintainers.
 
 ## License
 

@@ -59,7 +59,7 @@ describe('排除表目录形态判据', () => {
 function fakeRt(root) {
   const calls = { resolveStore: 0, ensureGit: 0, runShell: 0 }
   const state = { snapshots: new Map(), snapFeedback: new Map(), stores: new Map(), indexLoaded: new Set() }
-  const store = { dir: '/store', repo: '/store/git', git: '/store/git/.git', home: true, excludeFile: '/exclude.txt', maxFileBytes: 104857600 }
+  const store = { dir: '/store', repo: '/store/git', git: '/store/git/.git', home: true, excludeFile: '/exclude.txt', maxFileBytes: 8388608, maxWorkspaceBytes: 268435456, scanBudgetMs: 10000 }
   const rt = {
     state,
     isWin: true,
@@ -121,6 +121,9 @@ describe('端点 notice：构建产物 root 的停用说明', () => {
         begin: async () => {}, advance: async () => {}, clear: async () => {},
         read: async () => null, file: () => '/store/recall-intent.json', recover: async () => false,
       },
+      // issue #24：根就绪链由 index.ts 注入（init 与预热共享）；本文件只关心
+      // notice 文案，桩直接返回假 store 供 init 计算 homeFallback
+      ensureRootReady: async () => ({ dir: '/store', repo: '/store/git', git: '/store/git/.git', home: true, excludeFile: '/e.txt', maxFileBytes: 1 }),
       state,
       cfg: { baseExcludes: BASE },
       supported: true,

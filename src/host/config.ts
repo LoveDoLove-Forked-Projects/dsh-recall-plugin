@@ -44,7 +44,12 @@ export function withVolatile<T>(field: T): T {
 export const Config = Schema.object({
   gcSnaps: withVolatile(Schema.number().default(50).description('每积累多少条快照触发一次 git gc')),
   gcHours: withVolatile(Schema.number().default(24).description('距上次 gc 超过多少小时触发（与条数先到先触发）')),
-  maxFileBytes: withVolatile(Schema.number().default(104857600).description('超过该字节数的文件不进快照、不被回退触碰')),
+  maxFileBytes: withVolatile(Schema.number().default(8388608).description('超过该字节数的文件不进快照、不被回退触碰')),
+  // issue #24：单文件上限挡不住「大量小文件」——下载目录 321 个 ≤100MB 文件
+  // 合计 1.05GB 全部进快照。总量超限时**整体停用该工作区快照**而非截断：
+  // 截断快照回退时，未纳入的文件会命中回退脚本的「当前有、目标无」删除侧。
+  maxWorkspaceBytes: withVolatile(Schema.number().default(268435456).description('单工作区可纳入快照的文件总量上限，超过即停用该工作区快照；0 表示不限制')),
+  scanBudgetMs: withVolatile(Schema.number().default(10000).description('快照前扫描（遍历工作区统计总量）的时间预算，超时即停用本次快照；0 表示不限制')),
   maxSnapshotsPerWorkspace: withVolatile(Schema.number().default(500).description('每个工作区保留的最大快照数，超限删除最旧的')),
   baseExcludes: withVolatile(Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）')),
   refillDraft: withVolatile(Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框')),
@@ -184,7 +189,9 @@ function isPlainObject(value: unknown): boolean {
 export const DEFAULTS: ResolvedConfig = {
   gcSnaps: 50,
   gcHours: 24,
-  maxFileBytes: 104857600,
+  maxFileBytes: 8388608,
+  maxWorkspaceBytes: 268435456,
+  scanBudgetMs: 10000,
   maxSnapshotsPerWorkspace: 500,
   baseExcludes: BASE_EXCLUDES,
   refillDraft: true,
@@ -206,7 +213,11 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
   // 环境变量优先（向后兼容），其次 config，最后默认值
   const gcSnaps = pickNumber(process.env.DSH_RECALL_GC_SNAPS, pickNumber(cfg.gcSnaps, 50, 1), 1)
   const gcHours = pickNumber(process.env.DSH_RECALL_GC_HOURS, pickNumber(cfg.gcHours, 24, 1), 1)
-  const maxFileBytes = pickNumber(cfg.maxFileBytes, 104857600, 1024)
+  const maxFileBytes = pickNumber(cfg.maxFileBytes, 8388608, 1024)
+  // 0 = 不限制（issue #24 的逃生口）；非数值/负数按非法回退默认——护栏是
+  // 安全机制，误输入负数不该把护栏关掉（显式关闭只认 0）。
+  const maxWorkspaceBytes = pickNumber(cfg.maxWorkspaceBytes, 268435456, 0)
+  const scanBudgetMs = pickNumber(cfg.scanBudgetMs, 10000, 0)
   // 每工作区快照上限：0 或负值语义 = 不限制（给想全保留的用户出口）；
   // 非数值回退默认 500。默认 500 ≈ 重度使用一周量级，太小会静默丢历史
   // 撤回点，太大失去防膨胀意义。
@@ -241,5 +252,5 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
   // 值（响亮失败），这里只兜 env 覆盖与旧配置文档缺字段两条路径
   const locale: LocalePref = cfg.locale === 'zh' || cfg.locale === 'en' ? cfg.locale : 'auto'
 
-  return { gcSnaps, gcHours, maxFileBytes, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, retentionDays, locale }
+  return { gcSnaps, gcHours, maxFileBytes, maxWorkspaceBytes, scanBudgetMs, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, retentionDays, locale }
 }

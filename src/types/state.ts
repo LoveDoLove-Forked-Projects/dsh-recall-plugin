@@ -8,7 +8,7 @@ import type { EnvErrorKind } from '../host/diagnostics.js'
 import type { PwshScripts, PosixScripts } from './scripts.js'
 
 // store 形态（store.js makeStore 装配：repo 是仓库工作目录、git 是真实 git-dir，
-// maxFileBytes 是 config 热更新的 getter；home=false 表示降级进项目内存储）
+// 三个上限字段都是 config 热更新的 getter；home=false 表示降级进项目内存储）
 export interface StoreInfo {
   dir: string
   repo: string
@@ -16,6 +16,9 @@ export interface StoreInfo {
   home: boolean
   excludeFile: string
   maxFileBytes: number
+  // issue #24 快照护栏（0 = 不限制）：snapshotScript 在 add 之前消费
+  maxWorkspaceBytes: number
+  scanBudgetMs: number
 }
 
 export interface SnapshotInfo {

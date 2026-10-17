@@ -79,7 +79,9 @@ async function mountRecall(initConfig: Record<string, unknown>) {
 const CONFIG_VALUES = {
   gcSnaps: 50,
   gcHours: 24,
-  maxFileBytes: 104857600,
+  maxFileBytes: 8388608,
+  maxWorkspaceBytes: 268435456,
+  scanBudgetMs: 10000,
   maxSnapshotsPerWorkspace: 500,
   baseExcludes: ['node_modules/'],
   refillDraft: true,

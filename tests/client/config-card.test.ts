@@ -16,7 +16,9 @@ import { makeUtil, stubFetch, renderIntoDocument, q, qa, qid, first, at, click, 
 const CONFIG_VALUES = {
   gcSnaps: 50,
   gcHours: 24,
-  maxFileBytes: 104857600,
+  maxFileBytes: 8388608,
+  maxWorkspaceBytes: 268435456,
+  scanBudgetMs: 10000,
   maxSnapshotsPerWorkspace: 500,
   baseExcludes: ['node_modules/'],
   refillDraft: true,
@@ -56,13 +58,16 @@ function actionButtons(container: HTMLElement): HTMLElement[] {
 }
 
 describe('config-card 读取与渲染', () => {
-  it('读取成功：渲染 9 字段控件，值来自 config-get 载荷', async () => {
+  it('读取成功：渲染 11 字段控件，值来自 config-get 载荷', async () => {
     const { container } = await mount()
     expect(qid(container, 'dsh-recall-cfg-gcSnaps')).not.toBeNull()
     expect((qid(container, 'dsh-recall-cfg-gcSnaps') as HTMLInputElement).value).toBe('50')
-    expect((qid(container, 'dsh-recall-cfg-maxFileBytes') as HTMLInputElement).value).toBe('100')
+    // issue #24：单文件默认 8MB；单工作区总量按 MB 展示（256），扫描预算按秒展示（10）
+    expect((qid(container, 'dsh-recall-cfg-maxFileBytes') as HTMLInputElement).value).toBe('8')
+    expect((qid(container, 'dsh-recall-cfg-maxWorkspaceBytes') as HTMLInputElement).value).toBe('256')
+    expect((qid(container, 'dsh-recall-cfg-scanBudgetMs') as HTMLInputElement).value).toBe('10')
     expect(qa(container, '.dsh-recall-cfg-switch').length).toBe(3)
-    expect(qa(container, '.dsh-recall-cfg-row').length).toBeGreaterThanOrEqual(8)
+    expect(qa(container, '.dsh-recall-cfg-row').length).toBeGreaterThanOrEqual(10)
   })
 
   it('布尔字段经 role=switch 呈现，aria-checked 反映当前值', async () => {

@@ -363,12 +363,41 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     agentBusy: (root) => agentBusy(null, root),
   })
 
+  // ---- 根就绪链（预热与 init 共用，in-flight 去重）----
+  // 为什么去重：预热对每个工作区跑一条链，而每个被恢复的会话还会经 init
+  // 端点跑同一条链（resolveStore/ensureGit/loadIndex/rebuild/recover）——
+  // 7 个工作区叠加就是数十条 pwsh 冷启动并发（issue #24 的命令风暴）。
+  // 同一 root 在本进程内只跑一次；失败不缓存，留给下次 init/预热重试。
+  const rootReady = new Map<string, Promise<StoreInfo | null>>()
+  function ensureRootReady(root: string, sessionId: string | null): Promise<StoreInfo | null> {
+    const cached = rootReady.get(root)
+    if (cached) return cached
+    const task = (async (): Promise<StoreInfo | null> => {
+      let store: StoreInfo | null = await rt.resolveStore(root)
+      // 非空断言：resolveStore 恒在 state.stores 写入并返回（含降级兜底），
+      // tryUpgradeToHome 只在该 store 存在时返回它——null 不可达（沿用原控制流）
+      store = (await rt.tryUpgradeToHome(root))!
+      await rt.ensureGit(root, store)
+      await snaps.loadIndex(root, sessionId)
+      await snaps.rebuildOrphans(root, sessionId || '')
+      // A3：拒写态下跳过恢复——reset 是写操作，fail-closed 同样适用
+      if (await snaps.guardStoreFormat(store)) await intentJournal.recover(store)
+      rt.cleanupLegacy(root)
+      return store
+    })()
+    rootReady.set(root, task)
+    // 失败不缓存（与 loadIndex「读失败不标记已载入」同款纪律）：shell 未就绪
+    // 等瞬态故障应留给下一次 init/预热重试。catch 就地消化，防 unhandled rejection
+    task.catch(() => { rootReady.delete(root) })
+    return task
+  }
+
   // ---- 端点表组装：核心路由 + 管理路由，合并进单一 endpoints 对象，
   // 由下方 connection exact 路由逐端点注册（端点名 = /api/recall/ 后第一段，
   // 无跨域命名冲突）。
   const deps = {
     ctx, rt, snaps, maint, state, cfg, supported,
-    enqueue, agentBusy, runLimited, errBody,
+    enqueue, agentBusy, runLimited, ensureRootReady, errBody,
     listExcludeFiles, dumpStores, locateSnapshotOnDisk, collectAllSnapshotRecords,
     listCache, excludeCache, usageCache, sessionInfo, titleFromEvents, messageTextFromEvents,
     // readSettings 传活绑定而非当前引用（A1）：dsh-settings 服务晚挂载时
@@ -482,24 +511,15 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
         }
       } catch (error) { /* 冷元数据不可用则退回 live 注册表 */ }
     }
-    for (const [cwd, sessionId] of warmupRoots) {
-      Promise.resolve(rt.resolveStore(cwd))
-        .then(() => rt.tryUpgradeToHome(cwd))
-        // 非空断言：resolveStore 恒返 store，null 不可达——保持迁移前控制流
-        // （若为 null 由 ensureGit 内抛错、下方 catch 吞掉并跳过后续预热步骤；
-        // 守卫式跳过会让 loadIndex/rebuildOrphans/cleanupLegacy 继续执行，非旧语义）
-        .then((store) => rt.ensureGit(cwd, store!))
-        .then(() => snaps.loadIndex(cwd, sessionId))
-        .then(() => snaps.rebuildOrphans(cwd, sessionId))
-        // A2：中断回退的续做（判定与救援编排见 intent-journal.js）。A3 拒写
-        // 态下跳过——恢复要 reset 工作区，fail-closed 同样适用
-        .then(async () => {
-          const st = state.stores.get(cwd)
-          if (st && await snaps.guardStoreFormat(st)) await intentJournal.recover(st)
-        })
-        .then(() => rt.cleanupLegacy(cwd))
-        .catch(() => {}) // 预热链失败整体吞掉（含 store 非空收口注释的情形；不刷启动噪音）
-    }
+    // issue #24：预热链限流两路并发——每个工作区一条链、每链数条 shell 命令
+    // （每条一个 pwsh 进程），7 个工作区全并发会在启动期叠出数十个进程把
+    // 单核打满。链本体经 ensureRootReady 与 init 端点共享（同 root 只跑一次）。
+    const warmupTasks = Array.from(warmupRoots, ([cwd, sessionId]) => () =>
+      ensureRootReady(cwd, sessionId || '')
+        .then(() => {})
+        .catch(() => {}) // 预热链失败整体吞掉（不刷启动噪音，原语义）
+    )
+    await runLimited(warmupTasks, 2)
   })().catch((error) => {
     // 预热整体自吞 + 留诊断（不写 recordError：预热是纯优化，宿主退出期/启动竞态
     // 都会命中，写进用户可见的「最近错误」只会是噪音——那条通道只收用户可行动的

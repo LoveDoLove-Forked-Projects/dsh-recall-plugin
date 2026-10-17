@@ -27,8 +27,12 @@ const SKIP = new Set(['homeDirScript', 'probeHomeScript', 'legacyHomeMigrateScri
 const pwshKeys = Object.keys(pwsh).filter((k) => !SKIP.has(k)).sort()
 const posixKeys = Object.keys(posix).filter((k) => !SKIP.has(k)).sort()
 
-// 提供 store 最少形状（extractGitDir 只读 store.git 字面量赋值）
-const FAKE_STORE = { git: 'GIT_DIR', repo: 'REPO_DIR', excludeFile: 'EXCLUDE', home: true }
+// 提供 store 最少形状（extractGitDir 只读 store.git 字面量赋值；三个上限
+// 字段按真实 makeStore 形态给值，issue #24 的护栏块会消费后两者）
+const FAKE_STORE = {
+  git: 'GIT_DIR', repo: 'REPO_DIR', excludeFile: 'EXCLUDE', home: true,
+  maxFileBytes: 8388608, maxWorkspaceBytes: 268435456, scanBudgetMs: 10000,
+}
 
 // 带 store 参数的脚本（注入 $g = '<store.git>' 赋值）——这些是 runShell 失败
 // 兜底提取 git-dir 的目标集（store.js extractGitDir）；新增带 store 脚本模板
@@ -191,6 +195,16 @@ describe('关键模板结构断言', () => {
       })
     }
   }
+
+  // issue #24：总量/预算护栏必须在 add -A 之前判定并早退——add 的 hash 与
+  // 对象写入正是要止住的开销；超限标记是 host 侧 parseSnapshotLimit 的唯一输入
+  it('issue #24：snapshotScript 在 add -A 之前输出 SNAP_LIMIT 护栏标记', () => {
+    for (const module of [pwsh, posix]) {
+      const s = module.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+      expect(s).toContain('SNAP_LIMIT')
+      expect(s.indexOf('SNAP_LIMIT')).toBeLessThan(s.indexOf('add -A'))
+    }
+  })
 
   it('两侧 UTF8_PRELUDE 非空（编码前导是 runShell 统一前置注入的契约）', () => {
     expect(pwsh.UTF8_PRELUDE.length).toBeGreaterThan(0)

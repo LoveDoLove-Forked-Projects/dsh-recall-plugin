@@ -17,6 +17,9 @@ export interface ScriptStore {
   git: string
   excludeFile: string
   maxFileBytes: number
+  // issue #24 快照护栏（0 = 不限制）：模板在快照脚本的 add 之前消费
+  maxWorkspaceBytes: number
+  scanBudgetMs: number
 }
 
 // 哨兵/标记字面量（模板输出与解析函数逐字呼应，M5 起编译期锁死）
@@ -25,6 +28,7 @@ export type CleanupStatus = 'CLEANUP_OTHER_INSTANCE' | 'CLEANUP_SKIPPED_FRESH_LO
 export type Sentinel =
   | 'SNAP_OK'
   | 'SNAP_SKIP'
+  | 'SNAP_LIMIT'
   | 'TREE'
   | 'ROLLBACK_OK'
   | 'RESCUE_OK'
@@ -40,7 +44,7 @@ export interface ScriptsCommon {
   // ---- 常量（scripts-contract.test.js 键集含常量，类型侧缺席会让编译期
   // 断言比既有单测宽松，故一并锁定）----
   UTF8_PRELUDE: string
-  MAX_FILE_BYTES: 104857600
+  MAX_FILE_BYTES: 8388608
   STALE_LOCK_MIN: 5
   HEARTBEAT_TTL_S: 900
   FIDELITY_ATTRS: string

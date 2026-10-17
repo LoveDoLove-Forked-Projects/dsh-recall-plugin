@@ -24,7 +24,7 @@
 - [快照维护与清理](#快照维护与清理)
 - [工作原理](#工作原理)
 - [事件契约（供同宿主插件监听）](#事件契约供同宿主插件监听)
-- [本地开发（无需发布）](#本地开发无需发布)
+- [参与贡献](#参与贡献)
 - [License](#license)
 
 ## 界面预览
@@ -134,7 +134,9 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 | --- | --- | --- |
 | `gcSnaps` | 50 | 每积累多少条快照触发一次 `git gc`（env `DSH_RECALL_GC_SNAPS` 可强制覆盖） |
 | `gcHours` | 24 | 距上次 gc 超过多少小时触发（与条数先到先触发；env `DSH_RECALL_GC_HOURS`） |
-| `maxFileBytes` | 104857600（100MB） | 超过该大小的文件不进快照、不被回退触碰 |
+| `maxFileBytes` | 8388608（8MB） | 超过该大小的文件不进快照、不被回退触碰 |
+| `maxWorkspaceBytes` | 268435456（256MB） | 单工作区可纳入快照的文件总量上限。超过时**停用该工作区快照**（不截断——截断快照回退时会误删未纳入的文件），并在最近消息上提示；调大该值或补充排除表后自动恢复；0 = 不限制 |
+| `scanBudgetMs` | 10000（10 秒） | 快照前的文件扫描时间预算。超过时停用本次快照并提示（防病态大目录拖死启动）；0 = 不限制 |
 | `maxSnapshotsPerWorkspace` | 500 | 每个工作区保留的最大快照数，超限自动删除最旧的；0 = 不限制 |
 | `retentionDays` | 0 | 按天数保留快照，超期自动删除；0 = 不启用（与条数上限各自独立生效） |
 | `baseExcludes` | `.git`、`node_modules/`、`.dsh-recall-snapshots/`、`dsh-recall-snapshots/`、`target/`、`dist/`、`build/`、`out/`、`coverage/`、`.next/`、`.nuxt/`、`.output/`、`.cache/`、`.gradle/`、`*.exe`、`*.dll`、`*.pdb`、`*.so`、`*.dylib`、`*.msi`、`*.zip`、`*.7z`、`*.rar`、`*.tar`、`*.tar.gz`、`*.iso` | 基础排除表（gitignore 语法，优先级低于 exclude.txt）；被排除的大目录整棵子树不进快照扫描。其中「目录形态」项（如 `target/`）另有一层含义：**工作区根自身的路径段命中时，该工作区不启用快照**——在构建产物目录里开会话时排除表本来就管不到它自己（模式是相对该 root 的），这类目录也没有回退价值；删掉对应项即恢复 |
@@ -242,9 +244,26 @@ ctx.on('dsh-recall/failed', (e) => {
 
 版本错位：旧版插件前端（<2.4.8）不上报、事件永不触发；新版前端 + 旧版 host（<2.4.8）时上报端点不存在，前端静默忽略，撤回功能不受任何影响。
 
-## 本地开发（无需发布）
+## 参与贡献
 
-把 profile 对本包的依赖改成 `link:` 指向克隆目录；DSH 加载的是工作区 `lib/` 构建产物（源码在 `src/`），改 `src/` 后先 `npm run build` 再重启 DSH 生效，无需复制或发布：
+### 环境要求
+
+- Node.js ≥ 20（Windows / Linux / macOS 均可开发），git CLI；
+- 本机安装 DSH（≥ 0.1.2-alpha.1）：`npm run test:probe` 与 `npm run verify:host` 依赖真实 dsh 安装；没有 dsh 时探针自动跳过，不阻塞其余开发与测试。
+
+### 本地联调（无需发布）
+
+先克隆并构建一次（peer 依赖是私有 `@deepseek-ai/*` 包，`--legacy-peer-deps` 跳过、只装 devDependencies——构建与测试工具链齐备）：
+
+```powershell
+git clone https://github.com/limbo947/dsh-recall-plugin.git
+cd dsh-recall-plugin
+npm install --legacy-peer-deps   # 安装构建/测试工具链（esbuild、vitest、typescript 等）
+npm run build                    # 生成 lib/ 产物（link 模式加载的就是它）
+npm test                         # 可选：跑一遍单测验证基线
+```
+
+再把 profile 对本包的依赖改成 `link:` 指向克隆目录；DSH 加载的是工作区 `lib/` 构建产物（源码在 `src/`），改 `src/` 后先 `npm run build` 再重启 DSH 生效，无需复制或发布：
 
 ```powershell
 # 1. 编辑 $env:USERPROFILE\.dsh\profiles\web\package.json：
@@ -256,16 +275,26 @@ pnpm install
 # 3. 重启 DSH + 硬刷新页面（Ctrl+Shift+R）
 ```
 
-注意：全部源码在 `src/`（Host 在 `src/host/`、浏览器端在 `src/client/`、共享类型在 `src/types/`），`lib/` 是纯构建产物目录——`npm run build` 经 esbuild 生成（逐文件转译 host 产物 + 打包 `lib/client.js`），产物随源码提交。**改任何 `src/` 后必须跑 `npm run build`**，否则运行的是旧产物（CI 有产物新鲜度统一校验）。
+### 源码结构与构建
+
+全部源码在 `src/`：Host（Node ESM TypeScript）在 `src/host/`、浏览器端在 `src/client/`、跨域共享类型在 `src/types/`；`lib/` 是纯构建产物目录——`npm run build` 经 esbuild 生成（逐文件转译 host 产物 + 打包 `lib/client.js`），产物随源码提交。**改任何 `src/` 后必须跑 `npm run build`**，否则运行的是旧产物（CI 有产物新鲜度统一校验）。
 
 ### 测试
 
-- `npm test`：纯逻辑单测（vitest，39 个文件 497 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、磁盘格式守卫、操作意图 journal、撤回终态事件上报组装、i18n 词典与 key 漏配扫描、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
-- `npm run test:client`：client 组件测试（vitest + jsdom，6 个文件 90 例，CI 同跑）——撤回节点主链（preview→execute→fork→回填）与终态事件上报、快照管理树与删除流、配置/排除卡片错误路径、logger 开关矩阵、zh/en 双语渲染链；断言只锁行为与结构（className / aria / 请求载荷），不锁文案字面量；
-- `npm run test:probe`：官方 API 字段探针（依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
+- `npm test`：纯逻辑单测（vitest，39 个文件 505 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、磁盘格式守卫、操作意图 journal、撤回终态事件上报组装、i18n 词典与 key 漏配扫描、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm run test:client`：client 组件测试（vitest + jsdom，6 个文件 96 例，CI 同跑）——撤回节点主链（preview→execute→fork→回填）与终态事件上报、快照管理树与删除流、配置/排除卡片错误路径、logger 开关矩阵、zh/en 双语渲染链；断言只锁行为与结构（className / aria / 请求载荷），不锁文案字面量；
+- `npm run test:probe`：官方 API 字段探针（2 个文件 54 例，依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
 - `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件跑两个 pass（旧面桩 + 只给新面的桩），断言 inject 声明、端点注册、Config schema、卸载清理与 settings 面分派，装配回归发版前即可拦截；
-- `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）。
+- `npm run typecheck`：`tsc --noEmit` 全量类型检查（含 `tests/types` 编译期契约断言，CI 中置于单测之前）；
+- `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）；`npm run check:upgrade`：dsh 升级一键核验门禁（串联 check:dsh + test:probe + verify:host，dsh 升级后必跑）。
 - CI（GitHub Actions）跑 `npm ci --legacy-peer-deps` + `npm run typecheck` + `npm test` + `npm run test:client` + 产物新鲜度统一校验（`npm run build && git diff --exit-code lib/`；探针与装配门禁只在有 dsh 的机器跑）。
+
+### 提交规范（摘要）
+
+- 提交信息遵循 Conventional Commits（`feat:` / `fix:` / `docs:` / `test:` / `ci:` / `chore:` 前缀 + 中文摘要）；修复 bump patch、新功能 bump minor；
+- 行为变更同步更新 [CHANGELOG.md](CHANGELOG.md)（Keep a Changelog 格式）与 README 双语（[中文](README.md) / [English](README.en.md)）；
+- 对 dsh 官方 API 的字段假设发生变化时，同步 [docs/compat-audit.md](docs/compat-audit.md) 台账；
+- 完整的架构地图、开发流程、官方文档合规清单与已知坑见 [AGENTS.md](AGENTS.md)——面向 AI 编码代理与深度维护者的项目操作手册。
 
 ## License
 

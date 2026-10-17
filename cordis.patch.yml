@@ -15,7 +15,9 @@
       config:
         gcSnaps: 50            # 每积累多少条快照触发一次 git gc
         gcHours: 24            # 距上次 gc 超过多少小时触发（与条数先到先触发）
-        maxFileBytes: 104857600  # 超过该大小的文件不进快照、不被回退触碰
+        maxFileBytes: 8388608  # 超过该大小的文件不进快照、不被回退触碰
+        maxWorkspaceBytes: 268435456  # 单工作区可纳入快照的文件总量上限，超过即停用该工作区快照；0 = 不限制
+        scanBudgetMs: 10000    # 快照前扫描的时间预算（毫秒），超时即停用本次快照；0 = 不限制
         refillDraft: true      # 撤回后把被撤回的消息文本回填到输入框
         # baseExcludes 默认不在此列出：默认表随插件 schema 下发，在设置页
         # 「基础排除表」增删即可。若要在这里覆盖，必须重述完整表——patch 按行

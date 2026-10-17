@@ -30,6 +30,45 @@ export function parseSkipped(out: unknown): string[] {
   return skipped
 }
 
+// issue #24：快照前置护栏标记。脚本在 add 之前遍历工作区统计「纳入总量」与
+// 耗时，任一超限输出「SNAP_LIMIT <bytes|time> <实测> <上限>」后退出（不建
+// 快照）。旧脚本无该行 → 返回 null，走原成功路径（升级期兼容）。
+export interface SnapshotLimit {
+  kind: 'bytes' | 'time'
+  value: number
+  limit: number
+}
+
+export function parseSnapshotLimit(out: unknown): SnapshotLimit | null {
+  for (const line of String(out || '').split(/\r?\n/)) {
+    if (line.indexOf('SNAP_LIMIT ') !== 0) continue
+    const parts = line.slice('SNAP_LIMIT '.length).trim().split(/\s+/)
+    const kind = parts[0]
+    if (kind !== 'bytes' && kind !== 'time') continue
+    const value = parseInt(parts[1] ?? '', 10)
+    const limit = parseInt(parts[2] ?? '', 10)
+    if (!Number.isFinite(value) || !Number.isFinite(limit)) continue
+    return { kind, value, limit }
+  }
+  return null
+}
+
+// 字节数的可读文本：≥1MB 用 MB，更小用 KB（避免「0 MB / 0 MB」这种
+// 测试态/小工作区下无信息的文案）
+function bytesText(bytes: number): string {
+  if (bytes >= 1048576) return Math.round(bytes / 1048576) + ' MB'
+  return Math.max(1, Math.round(bytes / 1024)) + ' KB'
+}
+
+// 停用说明（snapFeedback.error 直显 + 最近错误同文案）：≤140 字符、给出
+// 可行动的出口（调大对应上限或补充排除表），修好后下一次快照自动恢复。
+export function buildSnapshotLimitNotice(limit: SnapshotLimit): string {
+  if (limit.kind === 'bytes') {
+    return '该工作区可纳入快照的文件总量超过上限（约 ' + bytesText(limit.value) + ' / ' + bytesText(limit.limit) + '），已停用快照；可调大「工作区总量上限」或补充排除表后自动恢复'
+  }
+  return '快照前的文件扫描超过时间预算（约 ' + Math.max(1, Math.round(limit.value / 1000)) + ' 秒 / ' + Math.max(1, Math.round(limit.limit / 1000)) + ' 秒），已停用快照；可调大「扫描时间预算」或补充排除表后自动恢复'
+}
+
 // POSIX 侧 diff 输出是 TSV「kind<TAB>path」逐行（bash 模板不拼 JSON，
 // 避免 jq 依赖与转义坑）；win32 侧是 ConvertTo-Json。这里按平台分叉解析。
 export function parseChanges(text: string, isWin: boolean): DiffChange[] {
@@ -327,6 +366,15 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   const FUSE_BACKOFF_BASE_MS = 5 * 60 * 1000
   const FUSE_BACKOFF_CAP_MS = 60 * 60 * 1000
   const snapFailures = new Map()
+
+  // issue #24：护栏停用记录（root → 判定结果 + 触发时的配置值 + 时间）。
+  // 为什么要在 JS 侧短路：判定本身要全量遍历一次工作区，每条消息都付一次
+  // 就等于没修——停用期间直接跳过。失效条件有两条：配置值变化（用户调大
+  // 上限/预算）立即可重试；TTL 到期（用户靠补充 exclude.txt 修复时配置
+  // 值没变）最多 10 分钟自动重试一次，重试仍超限就重新记录。
+  const SNAP_LIMIT_RETRY_MS = 10 * 60 * 1000
+  const snapLimits = new Map<string, SnapshotLimit & { at: number; maxWorkspaceBytes: number; scanBudgetMs: number }>()
+  const limitBlockedAt = new Map<string, number>()
 
   // ---- A3：磁盘格式版本守卫 ----
   // 补「新读旧」方向的防线：读取侧字段全部可选化只解决旧插件读新格式；
@@ -679,6 +727,12 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     // 不必跑，把失败重试的开销也一并止住
     const fused = snapFailures.get(root)
     if (fused && Date.now() < fused.skipUntil) return
+    // issue #24：护栏停用期同样在解析之前短路（理由见 snapLimits 声明处）
+    const limited = snapLimits.get(root)
+    if (limited
+      && limited.maxWorkspaceBytes === config.maxWorkspaceBytes
+      && limited.scanBudgetMs === config.scanBudgetMs
+      && Date.now() - limited.at < SNAP_LIMIT_RETRY_MS) return
     // issue #18：root 自身就是构建产物目录（…/target/debug、dist）时不建快照——
     // baseExcludes 是相对 root 的模式，匹配不到 root 自己，整个目录会被全量快照
     // （实测 7000 个产物全进 index、对象库 GB 级），而这类目录没有回退价值。
@@ -706,6 +760,21 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     await loadIndex(root, sessionId)
     try {
       const out = await rt.runShell(S.snapshotScript(root, store, state.gitExe || '', messageId, BASE()), { timeoutMs: 600000, stdoutMaxBytes: 65536 })
+      // issue #24：前置扫描判定超限——本次不建快照，并按停用语义走反馈
+      //（不是失败：不 prune、不进熔断），后续快照由上方短路跳过
+      const limit = parseSnapshotLimit(out)
+      if (limit) {
+        snapLimits.set(root, { ...limit, at: Date.now(), maxWorkspaceBytes: config.maxWorkspaceBytes, scanBudgetMs: config.scanBudgetMs })
+        const notice = buildSnapshotLimitNotice(limit)
+        // 最近错误 5 分钟一条：停用期内每条消息都会走到这里
+        const last = limitBlockedAt.get(root) || 0
+        if (Date.now() - last >= 5 * 60 * 1000) {
+          limitBlockedAt.set(root, Date.now())
+          rt.recordError('recall snapshot disabled for ' + root + ': ' + notice)
+        }
+        setFeedback(messageId, { failed: true, kind: 'workspaceLimit', error: notice })
+        return
+      }
       snapFailures.delete(root)
       state.snapshots.set(String(messageId), { root, time: time || Date.now(), sessionId })
       await saveIndex(root, sessionId)

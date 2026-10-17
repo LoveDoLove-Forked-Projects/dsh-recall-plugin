@@ -36,6 +36,10 @@ export interface RoutesCoreDeps {
   cfg: ResolvedConfig
   supported: boolean
   enqueue<T>(task: () => Promise<T>): Promise<T>
+  // issue #24：根就绪链（resolveStore/ensureGit/loadIndex/rebuild/recover）
+  // 与启动预热共享，in-flight 去重——每个恢复的会话各跑一遍会叠出数十条
+  // pwsh 并发。返回解析出的 store 供 init 计算降级 notice。
+  ensureRootReady(root: string, sessionId: string | null): Promise<StoreInfo | null>
   agentBusy(sessionId: string | null, root: string | null): boolean
   rescueRollback: typeof import('./snapshots.js').rescueRollback
   E: typeof import('./errors.js')
@@ -47,7 +51,7 @@ export interface RoutesCoreDeps {
 export function createRoutesCore(deps: RoutesCoreDeps) {
   // ctx 不解构（A4）：本域所有服务访问都已由 rt/snaps 封装，直接摸 ctx 会
   // 绕过工厂分层——留空位只会诱导未来代码破坏依赖注入约定
-  const { rt, snaps, state, cfg, supported, enqueue, agentBusy, rescueRollback, intentJournal, emitEvent, E } = deps
+  const { rt, snaps, state, cfg, supported, enqueue, agentBusy, rescueRollback, intentJournal, ensureRootReady, emitEvent, E } = deps
 
   return {
     'init': async (args: InitArgs): Promise<InitResponse> => {
@@ -58,19 +62,10 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       const root = await rt.resolveRoot(sessionId)
       let notice: InitNotice | null = null
       if (root) {
-        let store: StoreInfo | null = await rt.resolveStore(root)
-        store = await rt.tryUpgradeToHome(root)
-        // 非空断言：resolveStore 恒在 state.stores 写入并返回 store（含降级兜底，
-        // 不返 null），tryUpgradeToHome 只在该 store 存在时返回它——null 不可达。
-        // 保持迁移前控制流：不做守卫跳过（守卫会把「ensureGit 抛错中断 init」的
-        // 旧语义改成静默继续 loadIndex）
-        await rt.ensureGit(root, store!)
-        await snaps.loadIndex(root, sessionId)
-        await snaps.rebuildOrphans(root, sessionId)
-        // A2：中断回退续做（预热有 shellReady 放弃分支，init 是每会话必经
-        // 通道——两路幂等，journal 内部按 store 去重）。A3 拒写态下跳过
-        if (store && await snaps.guardStoreFormat(store)) await intentJournal.recover(store)
-        rt.cleanupLegacy(root)
+        // issue #24：与启动预热共享同一条根就绪链（in-flight 去重）——同一
+        // root 在本进程内只跑一次 resolveStore/ensureGit/loadIndex/rebuild/
+        // recover。失败原样上抛（端点兜底转错误响应），与改造前语义一致。
+        const store = await ensureRootReady(root, sessionId)
         // 降级状态随 init 下发，Client 弹一次性提示（每次页面加载各弹一次）：
         // gitMissing=未检测到 git CLI（撤回按钮不出现）；homeFallback=home
         // 不可写，快照降级存进项目内 .dsh-recall-snapshots。

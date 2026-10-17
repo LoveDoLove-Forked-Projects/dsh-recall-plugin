@@ -13,6 +13,10 @@ export interface ResolvedConfig {
   gcSnaps: number
   gcHours: number
   maxFileBytes: number
+  // issue #24 快照护栏：单工作区纳入总量上限与前置扫描时间预算
+  //（两者均为 0 时表示不限制）
+  maxWorkspaceBytes: number
+  scanBudgetMs: number
   maxSnapshotsPerWorkspace: number
   baseExcludes: string[]
   refillDraft: boolean

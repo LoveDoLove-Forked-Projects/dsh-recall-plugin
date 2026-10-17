@@ -42,6 +42,8 @@ export function buildConfigForm(
     gcSnaps: string
     gcHours: string
     maxFileBytes: string
+    maxWorkspaceBytes: string
+    scanBudgetMs: string
     maxSnapshotsPerWorkspace: string
     baseExcludes: string
     refillDraft: boolean
@@ -74,6 +76,9 @@ export function buildConfigForm(
             gcSnaps: String(v.gcSnaps == null ? '' : v.gcSnaps),
             gcHours: String(v.gcHours == null ? '' : v.gcHours),
             maxFileBytes: bytesToMb(v.maxFileBytes),
+            maxWorkspaceBytes: bytesToMb(v.maxWorkspaceBytes),
+            // 扫描预算持久化为毫秒、展示为秒（整数）；0 表示不限制，原样显示 0
+            scanBudgetMs: String(v.scanBudgetMs == null ? '' : Math.round(Number(v.scanBudgetMs) / 1000)),
             maxSnapshotsPerWorkspace: String(v.maxSnapshotsPerWorkspace == null ? '' : v.maxSnapshotsPerWorkspace),
             baseExcludes: Array.isArray(v.baseExcludes) ? v.baseExcludes.join('\n') : '',
             refillDraft: v.refillDraft !== false,
@@ -106,7 +111,7 @@ export function buildConfigForm(
     function save(): void {
       if (state.busy || !draft || !baseline) return
       const patch: Record<string, string | boolean> = {}
-      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'retentionDays', 'locale']) {
+      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'retentionDays', 'locale']) {
         // 按值判空再纳补丁（A6）：draft 是宽松载荷加载来的全量草稿，索引读取
         // 在类型层可能 undefined；未定义的键与基线无从比较，直接跳过（等价于
         // 原实现里「undefined !== 基线值」的隐式行为，只是不再依赖隐式）。
@@ -133,6 +138,18 @@ export function buildConfigForm(
         const mb = Number(patch.maxFileBytes)
         if (!Number.isFinite(mb) || mb < 0.01) { setState({ busy: false, message: t('config.err.maxFileBytes'), error: true }); return }
         clean.maxFileBytes = Math.round(mb * 1048576)
+      }
+      if (patch.maxWorkspaceBytes !== undefined) {
+        // 与 maxFileBytes 同款 MB↔字节往返；0 = 不限制，允许输入
+        const mb = Number(patch.maxWorkspaceBytes)
+        if (!Number.isFinite(mb) || mb < 0) { setState({ busy: false, message: t('config.err.maxWorkspaceBytes'), error: true }); return }
+        clean.maxWorkspaceBytes = Math.round(mb * 1048576)
+      }
+      if (patch.scanBudgetMs !== undefined) {
+        // 展示单位是秒，持久化毫秒；0 = 不限制
+        const s = Number(patch.scanBudgetMs)
+        if (!Number.isFinite(s) || s < 0) { setState({ busy: false, message: t('config.err.scanBudgetMs'), error: true }); return }
+        clean.scanBudgetMs = Math.round(s * 1000)
       }
       if (patch.maxSnapshotsPerWorkspace !== undefined) {
         const n = parseInt(String(patch.maxSnapshotsPerWorkspace), 10)
@@ -303,6 +320,9 @@ export function buildConfigForm(
       numRow('gcSnaps', t('config.gcSnaps.label'), t('config.gcSnaps.hint'), { suffixKey: 'config.gcSnaps.suffix', min: 1, step: 1 }),
       numRow('gcHours', t('config.gcHours.label'), t('config.gcHours.hint'), { suffixKey: 'config.gcHours.suffix', min: 1, step: 1 }),
       numRow('maxFileBytes', t('config.maxFileBytes.label'), t('config.maxFileBytes.hint'), { suffixKey: 'config.maxFileBytes.suffix', min: 0.01, step: 0.5 }),
+      // issue #24 护栏：单文件上限之外的两道闸（总量 + 扫描耗时），0 = 不限制
+      numRow('maxWorkspaceBytes', t('config.maxWorkspaceBytes.label'), t('config.maxWorkspaceBytes.hint'), { suffixKey: 'config.maxWorkspaceBytes.suffix', min: 0, step: 16 }),
+      numRow('scanBudgetMs', t('config.scanBudgetMs.label'), t('config.scanBudgetMs.hint'), { suffixKey: 'config.scanBudgetMs.suffix', min: 0, step: 1 }),
       numRow('maxSnapshotsPerWorkspace', t('config.maxSnapshotsPerWorkspace.label'), t('config.maxSnapshotsPerWorkspace.hint'), { suffixKey: 'config.maxSnapshotsPerWorkspace.suffix', min: 0, step: 1 }),
       numRow('retentionDays', t('config.retentionDays.label'), t('config.retentionDays.hint'), { suffixKey: 'config.retentionDays.suffix', min: 0, step: 1 }),
       React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.ui')),
