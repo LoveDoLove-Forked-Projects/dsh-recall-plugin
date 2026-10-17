@@ -7,6 +7,30 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.2.1-rc.2 核验（2026-10-17）——零破坏版本（已实装）：rc.1 汇总版 Breaking 逐条排除，34 个关键包 `lib/` 漂移仅 3 处且均非功能，peer 窗口无需追加**：
+> **版本链路**：`0.2.1-alpha.4`(10-15) → `alpha.5`(10-16) → `rc.1`(10-17) → `rc.2`(10-17)，无 rc.0；评估起点为本机 alpha.4，故按 **alpha.4→rc.2 全链**核验；同日已升级实装 rc.2 并补跑门禁（段末）。
+> **rc.1 是 0.2.1 首个候选版，release notes 汇总自 v0.2.0-rc.2 以来全部变更（含大量 Breaking）**，其中多数在 alpha.1~alpha.5 已落地；rc.2 仅其上的 9 commit 小增量——
+> 2 条新特性（DeepSeek-V4.1-Flash-1017 适配、DeepSeek Search/Fetch API 设置开关），无修复、无 Breaking、无依赖更新。**核验方式**：双 lockfile（alpha.4 / rc.2 各在独立临时目录
+> `npm install --package-lock-only` 生成）+ **34 个关键包 `lib/` 逐字节哈希/diff**（registry tarball 解压 vs 本机 alpha.4 实装；只 diff `lib/`）。**包集合** 311→313、无移除，
+> 仅新增 `dsh-client-ui-deepseek-model-label-1017`（模型徽标）与 `dsh-web-deepseek-api`（搜索插件），与撤回链路零交集。**第三方依赖零漂移**：cordis `4.0.5`、schemastery `3.18.5`、
+> pi-ai `1.3.0` 两版一致；实装 cordis `4.0.5-alpha.2` 与正式 `4.0.5`、schemastery `3.18.5-alpha.2` 与 `3.18.5` 的 `lib/` 均逐字节相同。
+> **消费面漂移仅 3 包、均非功能**：`dsh-client-modules` 仅 commit 字面量（`cc6a8f5`→`332895e`）；`dsh-cordis-client-runner` 仅 slot 教学目录新增 `conversation.input.model.label`
+> 一条（+38 行）；`dsh-api-remotes` 仅账号 bonus 的 zod schema（新增 title / 字段放宽 json）。**零漂移**含 `dsh-session`（`sessions.fork`）、`dsh-session-query`、`dsh-settings`、`dsh-shell`、
+> `dsh-host-webserver`、`dsh-workspace`、`dsh-api-gateway`、`dsh-api-session-controller`、`dsh-client-connection`、`dsh-client-ui-chat` / `ui-conversation` / `ui-renderer` / `ui-attachment` /
+> `ui-session` / `ui-settings-plugins` / `ui-slots` / `ui-secret-mask`、`dsh-cordis-host-runner`、`dsh-host-plugin-inventory`、`dsh-host-frontend-static`、`dsh-app-boot`、`dsh-plugin-manager`、
+> `dsh-hmr`、`dsh-base`、`dsh-web-app`、`dsh-web-frontend`、`dsh-agent`、`dsh-attachment` 等。**rc.1 汇总版 Breaking 逐条排除**：stats 拆 `activity`/`usage`（插件未注册
+> `conversation.input.stats`）、移除 `invariant`（未用）、移除工具展示 `both`（未用）、Agent Team 改投 Inbox（未用）、API Key 优先级（不读凭据）、子路径 `package.json`
+> （bundle patch 形态 + 门禁包零漂移）、`engines.dsh` 优先判定（未声明 → peer 路径，`>=0.2.1-alpha.1 <0.3.0` 覆盖 rc.2）、Session 状态记录接口（纯加法可选）。**slot 面**：目录仍含
+> 插件三个注册 key（`conversation.chat.node` / `settings.plugin.item` / `plugins.bundle.config`），新增 `conversation.input.model.label` 位于模型选择器内部、与撤回按钮无 key/priority
+> 竞争；`dsh-client-ui-secret-mask`（`conversation.user.text.node`，priority 100）零漂移且只作用于渲染层，回填 draft 仍为原文。**正向间接**：命令芯片草稿恢复、会话恢复/切换失败修复、
+> 插件样式误删修复、插件元信息不可读不再阻断请求。**台账动作**：`dshReleases` 补 `0.2.1-alpha.5` / `0.2.1-rc.1` / `0.2.1-rc.2` 三项。**实装与门禁（同日）**：全局
+> `npm install -g @deepseek-ai/dsh@0.2.1-rc.2`（added 2 / changed 611，约 2 分钟；`dsh --version` 与包内 `package.json` 双确认），`test:probe` **54/54**、`verify:host` 装配断言全过
+> （inject=shell,sessions,agents、端点 13 项、agents 桩访问 1 次；stderr 的 `ensureGit` 告警为桩环境既有现象），六条 peer 对 rc.2 全满足；npm 清理失败留下的
+> `@deepseek-ai/.dsh-EBhnoWNL`（702.8 MB / 63638 文件）已删除。**回填**：镜像九次重拉 **13/13 逐字节相同**（首个零差异轮次）、README 双语徽章/范围至 rc.2、
+> `docs/dsh-contract.md`「对应版本」+ 沿革⑩、`docs/reference/README.md` 头两字段，`check:dsh` 复跑全绿。核验记录归口
+> [upgrade-assessments/dsh-0.2.1-rc.2.md](./upgrade-assessments/dsh-0.2.1-rc.2.md)（跨 alpha.5 / rc.1 全链）与
+> [upgrade-assessments/dsh-0.2.1-rc.1.md](./upgrade-assessments/dsh-0.2.1-rc.1.md)（rc.1 单版静态核验 + rc.2 门禁外推：32/36 包逐字节相同）。
+>
 > **2.4.12 发版核验（2026-10-16）——issue #23 修复版：两面判据重写 + 新面内容官方单入口，双环境实弹闭环**：插件 **2.4.12 已发布**（npm `latest`＝2.4.12，shasum `45acaba2e17cd836c31c8adc7322cb2456964f6d` 与本地 `npm pack` 一致，24 文件 / 183.0 kB / 解包 562.8 kB）；GitHub Release `v2.4.12` 非 draft/prerelease，tag 指向发版提交 `f3b02b8`（`3561ad0` fix(client) → `713a6ac` docs(compat) → `f3b02b8` chore(release)）。**发布前门禁**：typecheck、单测 39 文件 **505**、client 6 文件 **96**、probe **54**、build `lib/client.js` **172001 B**、verify:host（端点 13 项）、check:dsh「全部一致」、check:upgrade 三层全绿。
 > **双环境活体冒烟**（记录见 [plans/completed/smoke-checklist-records.md](./plans/completed/smoke-checklist-records.md) 第十二节）：0.2.1-alpha.4 全链 4 项通过（官方 `userStack`/`fileCard` 命中、插件自绘零命中、撤回 fork/归档/STALE、status 零错误）；**0.2.0-rc.2 A/B 对照**——registry 2.4.11 在该版本正文空白（issue #23 精确复现）、2.4.12 正文恢复，原场景闭环。
 > **本机实装**：web profile npm 模式 2.4.11 → **2.4.12**（`lib/client.js` 172001 B、`resolveUserContentFace` 标记在位）；供应链策略需 `minimumReleaseAgeExclude` 补 `dsh-recall-plugin@2.4.12`——另发现 **`dshmarket@<ver>` 独立行写法不生效**（pnpm 11.7.0 策略检查仍拦），合并进既有 `||` 链式行后通过（176 条目 5.5s；属 profile 侧操作、非插件问题）；宿主启停冒烟通过（`dsh web` 零 skip/compat，仅 `recall shell dialect probe: pwsh`），页面实装验证：历史会话经新面渲染（官方 `userStack` + 官方 `fileCard` + 脱敏文本 + 插件自绘退场、动作行在位）。

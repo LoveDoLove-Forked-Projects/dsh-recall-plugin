@@ -2,6 +2,18 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.4.13] - 2026-10-17
+
+### 兼容
+
+- **dsh 0.2.1-rc.2 兼容（零破坏核验，无代码改动）**（升级核查见 [docs/compat-audit.md](docs/compat-audit.md) 头部 0.2.1-rc.2 段）：rc.2 自身只有模型适配（DeepSeek-V4.1-Flash-1017）与 DeepSeek Search/Fetch API 两条新特性；跨 alpha.5 / rc.1 的累计变更中，rc.1 汇总版 Breaking（输入区 stats 拆分、移除 `invariant`、移除工具展示 `both`、Agent Team inbox 直投、API Key 优先级、子路径 `package.json`）均不作用于本插件。34 个关键包 `lib/` 逐字节 diff 仅 3 处非功能漂移（`dsh-client-modules` commit 字面量、`dsh-cordis-client-runner` slot 教学目录、`dsh-api-remotes` 账号 bonus schema）；`sessions.fork`、slot 定义方、设置面、兼容门禁全部零漂移。
+- **实装核验**：全局升级 `@deepseek-ai/dsh@0.2.1-rc.2` 后 `test:probe` **54/54**、`verify:host` 装配断言全过（inject=shell,sessions,agents、端点 13 项）、`check:dsh` 全绿（六条 `@deepseek-ai/dsh-*` peer 对 rc.2 全满足）；`dsh.compatibility.dshReleases` 补 `0.2.1-alpha.5` / `0.2.1-rc.1` / `0.2.1-rc.2` 三项。
+
+### 文档
+
+- `docs/reference/` 镜像按 tag `dsh-v0.2.1-rc.2` 九次重拉：13 源全部逐字节相同（首个零差异轮次），仅更新头部「归档日期 / 归档 dsh 版本」两字段。
+- `docs/dsh-contract.md`（版本段 + 沿革 ⑩）/ `docs/compat-audit.md`（新增 0.2.1-rc.2 核验段）/ 新增 [docs/upgrade-assessments/dsh-0.2.1-rc.2.md](docs/upgrade-assessments/dsh-0.2.1-rc.2.md) 与 [docs/upgrade-assessments/dsh-0.2.1-rc.1.md](docs/upgrade-assessments/dsh-0.2.1-rc.1.md) / README 双语兼容范围与徽章同步至 0.2.1-rc.2。
+
 ## [2.4.12] - 2026-10-16
 
 ### 修复

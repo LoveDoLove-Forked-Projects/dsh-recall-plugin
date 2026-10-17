@@ -2,9 +2,9 @@
 
 > 用途：dsh 插件开发相关官方文档的本地副本，改代码前优先查这里，避免每次联网翻文档。
 >
-> 归档日期：2026-10-15，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-alpha.4` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
+> 归档日期：2026-10-17，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-rc.2` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
 >
-> 归档 dsh 版本：0.2.1-alpha.4（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
+> 归档 dsh 版本：0.2.1-rc.2（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
 >
 > 在线站点：https://deepseek-harness.github.io/deepseek-harness/ ｜ 每份文件头部都带「来源」注释，可溯回官方原文。
 
@@ -118,3 +118,7 @@ iwr -UseBasicParsing 'https://raw.githubusercontent.com/deepseek-ai/deepseek-har
 > 没有 `engines.dsh` 时，改为检查其 `@deepseek-ai/dsh*` peer 依赖范围」——对应本版 `dsh-app-boot` 兼容性门禁的
 > 「`engines.dsh` 优先判定」变更（本插件未声明 `engines.dsh`，走 peer 路径；核验见
 > [upgrade-assessments/dsh-0.2.1-alpha.4.md](../upgrade-assessments/dsh-0.2.1-alpha.4.md)）。本轮 Node fetch 直连一次成功，13/13 齐，无需代理或重试。
+>
+> 2026-10-17 九次重拉（`dsh-v0.2.1-alpha.4` → `dsh-v0.2.1-rc.2`，跨 `alpha.5` / `rc.1` 两版）：**13 源全部逐字节相同**（归一化 CRLF 后比较，delta 均为 0 B）——首次出现零差异轮次。
+> 与代码面证据一致：rc.1 的 release notes 虽汇总了自 v0.2.0-rc.2 以来的全部变更（含大量 Breaking），但插件消费面文档无措辞调整；rc.2 自身只有模型适配与 Search/Fetch API 两条新特性。
+> 本轮 Node fetch 直连一次成功，13/13 齐，无需代理或重试，**无文件覆盖**（仅更新头部两字段）。
