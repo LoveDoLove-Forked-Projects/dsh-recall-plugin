@@ -25,6 +25,7 @@ import { createSessionInfo, titleFromEvents, messageTextFromEvents } from './ses
 import { createRoutesCore } from './routes-core.js'
 import { createRoutesManage } from './routes-manage.js'
 import { createIntentJournal } from './intent-journal.js'
+import { createEnsureRootReady } from './root-ready.js'
 import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as E from './errors.js'
 import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
@@ -364,33 +365,9 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   })
 
   // ---- 根就绪链（预热与 init 共用，in-flight 去重）----
-  // 为什么去重：预热对每个工作区跑一条链，而每个被恢复的会话还会经 init
-  // 端点跑同一条链（resolveStore/ensureGit/loadIndex/rebuild/recover）——
-  // 7 个工作区叠加就是数十条 pwsh 冷启动并发（issue #24 的命令风暴）。
-  // 同一 root 在本进程内只跑一次；失败不缓存，留给下次 init/预热重试。
-  const rootReady = new Map<string, Promise<StoreInfo | null>>()
-  function ensureRootReady(root: string, sessionId: string | null): Promise<StoreInfo | null> {
-    const cached = rootReady.get(root)
-    if (cached) return cached
-    const task = (async (): Promise<StoreInfo | null> => {
-      let store: StoreInfo | null = await rt.resolveStore(root)
-      // 非空断言：resolveStore 恒在 state.stores 写入并返回（含降级兜底），
-      // tryUpgradeToHome 只在该 store 存在时返回它——null 不可达（沿用原控制流）
-      store = (await rt.tryUpgradeToHome(root))!
-      await rt.ensureGit(root, store)
-      await snaps.loadIndex(root, sessionId)
-      await snaps.rebuildOrphans(root, sessionId || '')
-      // A3：拒写态下跳过恢复——reset 是写操作，fail-closed 同样适用
-      if (await snaps.guardStoreFormat(store)) await intentJournal.recover(store)
-      rt.cleanupLegacy(root)
-      return store
-    })()
-    rootReady.set(root, task)
-    // 失败不缓存（与 loadIndex「读失败不标记已载入」同款纪律）：shell 未就绪
-    // 等瞬态故障应留给下一次 init/预热重试。catch 就地消化，防 unhandled rejection
-    task.catch(() => { rootReady.delete(root) })
-    return task
-  }
+  // 实现与「产物 root 早退」判据住 root-ready.ts（独立成模块才能被单测直接
+  // 钉住）；这里只做装配，链本体对预热与 init 端点完全同一条。
+  const ensureRootReady = createEnsureRootReady({ rt, snaps, journal: intentJournal, cfg })
 
   // ---- 端点表组装：核心路由 + 管理路由，合并进单一 endpoints 对象，
   // 由下方 connection exact 路由逐端点注册（端点名 = /api/recall/ 后第一段，

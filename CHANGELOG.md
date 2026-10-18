@@ -2,6 +2,16 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.4.15] - 2026-10-18
+
+### 修复
+
+- **构建产物工作区根在启动预热时仍被建仓/列 tag（issue #24 报告者指出的边角）**：`captureSnapshot` 与 init/snapshot-info 早已对「产物 root」（`dist/`、`…/target/debug` 等）停用快照，但预热链入口没有同一道判断——工作区开在 `dist/`、`build/` 里时每次启动都会白付 `resolveStore + ensureGit + rebuildOrphans` 的进程开销。判据与 `captureSnapshot` 同源，补单测（含 POSIX 大小写敏感语义）。
+
+### 变更
+
+- 根就绪链（预热与 init 共享、in-flight 去重）从 `index.ts` 闭包迁到独立模块 `src/host/root-ready.ts`：入口早退分支与幂等契约可被单测直接钉住，`index.ts` 只留装配。
+
 ## [2.4.14] - 2026-10-18
 
 ### 修复
