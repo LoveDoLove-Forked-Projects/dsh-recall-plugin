@@ -818,8 +818,11 @@ export function buildRecallNode(
       }, React.createElement(UndoIcon, {})))
     }
 
+    // 宽度约束按面分派：官方面需要外层全宽，官方 .userStack 的百分比才能按整列
+    // 解析；legacy/回落面保留 stack 原 cap，自绘气泡的长文本宽度才与官方一致
+    const stackClass = 'dsh-recall-stack' + (officialFace ? ' dsh-recall-stack-official' : '')
     return React.createElement('div', { className: 'dsh-recall-row', 'data-time-hover-root': true },
-      bubbleChildren.length > 0 ? React.createElement('div', { className: 'dsh-recall-stack', key: 'stack' }, ...bubbleChildren) : null,
+      bubbleChildren.length > 0 ? React.createElement('div', { className: stackClass, key: 'stack' }, ...bubbleChildren) : null,
       React.createElement('div', { className: 'dsh-recall-actions', key: 'actions' }, ...actions),
       recallPanel(recall, closePanel, executeRecall, scope, setScope)
     )
