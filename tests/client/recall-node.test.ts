@@ -358,6 +358,8 @@ describe('撤回节点：消息渲染与复制', () => {
     // 主路径不再自绘：气泡与文件卡片都由官方节点承载
     expect(qa(container, '.dsh-recall-bubble').length).toBe(0)
     expect(qa(container, '.dsh-recall-filecard').length).toBe(0)
+    // 宽度全宽只在官方面生效：官方 .userStack 的 82% 需要整列作为包含块
+    expect(q(container, '.dsh-recall-stack')?.classList.contains('dsh-recall-stack-official')).toBe(true)
   })
 
   it('新面：referenceLabels/skillNames 透传（content.referenceLabels + facts 装配）', async () => {
@@ -400,6 +402,8 @@ describe('撤回节点：消息渲染与复制', () => {
     expect(factoryCalls).toEqual([])
     expect(qa(container, '.official-content').length).toBe(0)
     expect(q(container, '.dsh-recall-bubble')?.textContent).toBe('hi')
+    // legacy 面不得拿到全宽标记：自绘气泡的长文本宽度靠 stack 原 cap 约束
+    expect(q(container, '.dsh-recall-stack')?.classList.contains('dsh-recall-stack-official')).toBe(false)
   })
 
   it('新面 Factory 返回空（槽位未注册）→ 回落自绘并告警，正文不静默空白', async () => {
@@ -414,6 +418,8 @@ describe('撤回节点：消息渲染与复制', () => {
     })
 
     expect(q(container, '.dsh-recall-bubble')?.textContent).toBe('hi')
+    // factory 失败即回落 legacy 渲染，宽度标记必须同步退回（不能只按函数存在性判面）
+    expect(q(container, '.dsh-recall-stack')?.classList.contains('dsh-recall-stack-official')).toBe(false)
     // 降级必须可见（warn 恒输出）——静默空白正是 issue #23 的失效模式
     expect(spy.entries.filter((e) => e.level === 'warn').length).toBeGreaterThanOrEqual(1)
   })

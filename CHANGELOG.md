@@ -2,6 +2,12 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.4.16] - 2026-10-18
+
+### 修复
+
+- **用户消息气泡被压窄、二十来个字也要折两行**：新面（factory 分支）本层 `.dsh-recall-stack` 仍带旧版的 `max-width:min(525px,82%)`，而它包裹的官方 `UserContent` 内层 `.userStack` 自己已有一道 `max-width:…82%`——两层百分比叠加成 0.82×0.82≈0.67，气泡可用宽度只剩列宽的 2/3（1600px 视口实测 254px，20 字中文 15px 字号约需 300px，于是折行）。外层在官方面改为 `width:100%;max-width:100%`（新增 `dsh-recall-stack-official` 标记），只保留右对齐与间距，宽度交回官方内层按满列宽计算（修复后同一条消息 310px、单行）；legacy 自绘面（0.1.x 与 factory 回落）仍保留原 `min(525px,82%)` 上限，长消息宽度不变。
+
 ## [2.4.15] - 2026-10-18
 
 ### 修复
