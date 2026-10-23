@@ -49,6 +49,7 @@ export function buildConfigForm(
     refillDraft: boolean
     snapshotEnabled: boolean
     archiveOriginal: boolean
+    editSubmitsImmediately: boolean
     retentionDays: string
     locale: string
     [key: string]: string | boolean
@@ -84,6 +85,8 @@ export function buildConfigForm(
             refillDraft: v.refillDraft !== false,
             snapshotEnabled: v.snapshotEnabled !== false,
             archiveOriginal: v.archiveOriginal !== false,
+            // issue #26：老 Host 的 values 无该字段时按默认 true（与 util 同口径）
+            editSubmitsImmediately: v.editSubmitsImmediately !== false,
             retentionDays: String(v.retentionDays == null ? '' : v.retentionDays),
             locale: typeof v.locale === 'string' && v.locale ? v.locale : 'auto',
           }
@@ -111,7 +114,7 @@ export function buildConfigForm(
     function save(): void {
       if (state.busy || !draft || !baseline) return
       const patch: Record<string, string | boolean> = {}
-      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'retentionDays', 'locale']) {
+      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'editSubmitsImmediately', 'retentionDays', 'locale']) {
         // 按值判空再纳补丁（A6）：draft 是宽松载荷加载来的全量草稿，索引读取
         // 在类型层可能 undefined；未定义的键与基线无从比较，直接跳过（等价于
         // 原实现里「undefined !== 基线值」的隐式行为，只是不再依赖隐式）。
@@ -159,6 +162,7 @@ export function buildConfigForm(
       if (patch.refillDraft !== undefined) clean.refillDraft = Boolean(patch.refillDraft)
       if (patch.snapshotEnabled !== undefined) clean.snapshotEnabled = Boolean(patch.snapshotEnabled)
       if (patch.archiveOriginal !== undefined) clean.archiveOriginal = Boolean(patch.archiveOriginal)
+      if (patch.editSubmitsImmediately !== undefined) clean.editSubmitsImmediately = Boolean(patch.editSubmitsImmediately)
       if (patch.retentionDays !== undefined) {
         const n = parseInt(String(patch.retentionDays), 10)
         if (!Number.isFinite(n) || n < 0) { setState({ busy: false, message: t('config.err.retentionDays'), error: true }); return }
@@ -314,6 +318,7 @@ export function buildConfigForm(
       boolRow('snapshotEnabled', t('config.snapshotEnabled.label'), t('config.snapshotEnabled.hint')),
       boolRow('refillDraft', t('config.refillDraft.label'), t('config.refillDraft.hint')),
       boolRow('archiveOriginal', t('config.archiveOriginal.label'), t('config.archiveOriginal.hint')),
+      boolRow('editSubmitsImmediately', t('config.editSubmitsImmediately.label'), t('config.editSubmitsImmediately.hint')),
       React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.auto')),
       // 单位后缀统一挂输入框右侧（与状态标签同基线），不再只藏在说明文字里；
       // 传词表键而非字面量——单位词也是语言事实（条/小时 vs snapshots/hours）

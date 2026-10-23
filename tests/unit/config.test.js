@@ -57,6 +57,7 @@ describe('createConfig', () => {
       refillDraft: true,
       snapshotEnabled: true,
       archiveOriginal: true,
+      editSubmitsImmediately: true,
       retentionDays: 0,
       locale: 'auto',
     })
@@ -139,6 +140,13 @@ describe('createConfig', () => {
     expect(createConfig({}).archiveOriginal).toBe(true)
   })
 
+  it('editSubmitsImmediately：仅显式 false 关闭，缺失/非法回退 true（issue #26）', () => {
+    expect(createConfig({ editSubmitsImmediately: false }).editSubmitsImmediately).toBe(false)
+    expect(createConfig({ editSubmitsImmediately: 'no' }).editSubmitsImmediately).toBe(true)
+    expect(createConfig({ editSubmitsImmediately: 0 }).editSubmitsImmediately).toBe(true)
+    expect(createConfig({}).editSubmitsImmediately).toBe(true)
+  })
+
   it('retentionDays：正常值生效，0/负值 = 不启用，非法回退 0', () => {
     expect(createConfig({ retentionDays: 30 }).retentionDays).toBe(30)
     expect(createConfig({ retentionDays: 0 }).retentionDays).toBe(0)
@@ -168,6 +176,7 @@ describe('createConfig', () => {
       refillDraft: fresh.refillDraft,
       snapshotEnabled: fresh.snapshotEnabled,
       archiveOriginal: fresh.archiveOriginal,
+      editSubmitsImmediately: fresh.editSubmitsImmediately,
       retentionDays: fresh.retentionDays,
       locale: fresh.locale,
     })

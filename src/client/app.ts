@@ -11,6 +11,7 @@ import { CSS } from './css.js'
 import { buildUtil } from './util.js'
 import { buildRecallNode } from './recall-node.js'
 import { buildSettingsCards } from './settings-cards.js'
+import { buildVersionPager } from './version-pager.js'
 import { appLog } from './log.js'
 import type { ReactApi, UtilApi } from './util.js'
 import type { ClientContext, ClientSessionsService, ClientWorkspacesService, SlotsService, SlotEntryOptions, StylesService } from '../types/client-contract.js'
@@ -58,6 +59,9 @@ export function createApp(React: ReactApi) {
     const uiWorkspaceSvc = ctx.uiWorkspace
     const { UserRecallNode } = buildRecallNode(React, util, ctx, sessionsSvc, workspacesSvc, uiWorkspaceSvc)
     const { RecallSettingsCard } = buildSettingsCards(React, util, sessionsSvc, workspacesSvc, uiWorkspaceSvc)
+    // 版本翻页器：挂在回合末尾的官方 assistant-actions list 槽（0.2.1 起存在；
+    // 旧版宿主没有该槽时 inject 静默 no-op，撤回/编辑主链不受影响）
+    const { VersionPager } = buildVersionPager(React, util, workspacesSvc, uiWorkspaceSvc)
 
     // conversation.chat.node 是 keyed slot，同一 key 的最低 priority 渲染。
     // 默认平台渲染器通常为 0，dsh-turn-fold 等插件可能已占 -1；旧实现固定
@@ -80,6 +84,25 @@ export function createApp(React: ReactApi) {
         // 单 slot 注册失败只记日志不抛：其余 slot 与插件主链继续（降级可用）
         appLog.error('slot register failed (' + slotKey + '):', error)
       }
+    }
+
+    // 版本翻页器（‹ X/N ›）：assistant-actions 是 list 槽（非 keyed），官方在
+    // 每个回合的 turn-tail 里渲染一次；组件自身判断「是否当前会话最后一轮」
+    // 后才显示，避免同一页出现多个入口。旧版宿主无此槽时 inject 静默 no-op。
+    try {
+      // list 槽按 id 认条目、order 排位置；inject 拿到的是当前 sessionId
+      // （官方 message-feedback 同款写法），翻页器据此查自己的版本家族
+      slots.inject('conversation.chat.assistant-actions', () => slots.register(
+        {
+          name: 'conversation.chat.assistant-actions',
+          id: 'recall-version-pager',
+          order: 20,
+          inject: (sessionId: string) => ({ sessionId }),
+        },
+        VersionPager
+      ))
+    } catch (error) {
+      appLog.error('version pager register failed:', error)
     }
 
     // 「插件配置」分区挂撤回卡片：settings.plugin.item 是 root 级 keyed slot

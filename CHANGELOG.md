@@ -2,6 +2,35 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [2.5.0] - 2026-10-23
+
+### 新增
+
+- **「编辑并重发」：就地改完直接发出（issue #26）**：用户消息动作行在「↶ 撤回」旁新增「✎ 编辑」——点击就地展开编辑框并预填原文，改完提交即新建会话并把改后的文本自动发出。复用撤回的 fork 链（preview 取切点 → execute → `sessions.fork` → 归档原会话），但 scope 固定 `session-only`：**编辑语义不动项目文件**，也不打安全快照。原消息的图片/文件附件经 `createDrafts → addAttachments` 一并带入新消息。
+- 配置项 `editSubmitsImmediately`（默认 `true`）：提交后自动发送；关闭则退化为「只回填输入框」，由用户按回车发送（适合只想改稿不想立刻发）。设置页「插件配置」卡片可直接切换，热生效；老 Host 不下发该字段时按 `true` 处理。
+- 发送时机按草稿落地校验：`setDraft` → `actions.submit()` 之间读输入态快照比对草稿文本，未落地则最多等 6×50ms 再提交——`submit` 读的是输入态快照，同一 tick 内投影未刷新会按空草稿静默返回。快照不可读的跨版本面降级为让出一拍直接提交（草稿为空时官方自身拒发，最坏是「没发」，不会「发错」）。
+- **版本翻页器 `‹ X/N ›`**：每次撤回/编辑重发 fork 出的会话构成同一段对话的版本家族，最后一轮回答的操作区嵌入 `‹ X/N ›`——点击切换：归档当前版本 → 解档目标版本 → 打开目标会话，侧栏始终只保留一个活动版本；切换后按 `data-chat-anchor-key` 恢复视口位置（消息内容不同、行高不同，只靠 `scrollTop` 会跳位）。家族登记在客户端 `localStorage`（`dsh-recall:versions:<根会话>`），与 host 侧 `lineage.json` 互补：丢了只影响翻页器，会话本身不受影响。
+
+### 变更
+
+- **消息位置出现「官方同款」编辑卡**：点 ✎ 后气泡换成一张按官方 composer 配方画的卡片（panel 圆角 / `input-major` 底 / soft 阴影 / 14-24 字号行高），预填原文、随内容增高，**底部官方输入框保持原样**。卡内可用：Enter 发送（Shift+Enter 换行）、附件增删与粘贴/拖入、只读的权限与模型 chip（值抄自底部输入框当前显示）、`Esc` 取消。
+- **为什么不是第二个官方输入框**：`conversation.composer.bar` 是 single 槽且已被宿主的 `conversation.content` 独占声明——插件渲染任何槽都要先在自己 children 里声明它，重复声明会在加载期抛错，组件实例也没有导出。因此这张卡是插件自绘的同款，官方样式变动时需要跟版。
+- 附件语义改为显式：原消息附件渲染成可移除的 chip，提交时只带保留下来的那些；卡里新加的附件（粘贴/拖入/选择）与原图/文件一起交给 `fillDraft` 在子会话重建。图片附件显示为 56px 缩略图（原消息图片走官方 `loadImage` 通道、与消息里的大图同源；新加图片用 object URL，移除/关闭时回收），非图片仍按文件名 chip 展示。
+- 编辑卡里的模型菜单按官方同构重建：主段两行「模型 / 推理等级」，点进去分别是模型列表（搜索 + 按供应商分组 + 当前项打勾）与档位列表（Default / Low / High / Xhigh）。选择走官方 `ctx.modelDirectories` 的 `directoryFor(session).select()`——与底部 chip、`/model` 命令同一条 `selectModel` 通道，选中后底部输入框的 chip 同步更新，fork 出的子会话沿用；换模型用该模型的默认档，重选同一模型保留当前档位。触发 chip 与官方同构：模型名用常规色、思考强度用更淡的字色，尾部带展开箭头（展开时翻转、给一层 hover 底）。服务缺失（旧宿主）时退回只读展示。
+- 编辑态隐藏底部输入框的统计 dock（回合/步骤、tok/s、缓存命中、Trace）：编辑焦点在消息处，dock 属全局概览，留着只会分心。规则挂在既有的 `data-editing` 上，不引入额外 JS 状态。
+
+### 修复
+
+- **编辑态再点「✎」导致编辑框塌成窄条、已改文本被重置**：编辑态下气泡已被编辑框顶替，此时再进一次编辑会重新测量——`stackRef` 指向的气泡已卸载，测到空值后宽度塌回 textarea 固有宽度（约 220px）；同时 `setEdit` 用原文覆盖了用户改到一半的文本。三处收口：编辑态不再渲染 ✎（点了也是空操作）、`openEdit` 对 editing 幂等且 error 态保留已改文本、测量失败时保留上次宽度并以 360px 兜底，另给编辑容器 `min-width:min(360px,100%)` 兜底。
+- 输入区回填链（文本 + 附件 + 可选发送）从 `recall-node.ts` 抽到新模块 `src/client/draft-fill.ts`：撤回回填与编辑重发必须共用同一条官方写入通道，分叉必然漂移；`defaultAttachmentName` 随迁并保持 `recall-node.js` 的 re-export 路径不变。
+- 编辑渲染层独立成 `src/client/edit-node.ts`（与撤回确认面板的 stage 语义不同），骨架与执行链仍在 `recall-node.ts`；版本翻页器拆为 `src/client/version-tree.ts`（家族登记/查询）与 `src/client/version-pager.ts`（`conversation.chat.assistant-actions` 槽组件）。
+- 撤回执行链 `executeRecall` 参数化（scope / 切点 / 预览摘要 / 编辑文本），编辑与撤回共用同一段 fork 收尾；scope 判定改白名单，避免被当作 `onClick` 处理器时把 React 合成事件当 scope 透传。
+
+### 边界
+
+- 会话第一条用户消息没有更早的 `turn/end` 边界，编辑提交会被明确拒绝（错误面板），不静默降级为「仅回填」。
+- fork 失败时不回填也不发送：原会话与原消息都还在，补发会变成同一会话里的重复消息。
+
 ## [2.4.16] - 2026-10-18
 
 ### 修复
