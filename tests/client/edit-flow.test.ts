@@ -11,7 +11,7 @@
 import * as React from 'react'
 import { describe, it, expect, afterEach } from 'vitest'
 import { buildRecallNode } from '../../src/client/recall-node.js'
-import { makeUtil, makeCtx, stubFetch, stubSessions, stubWorkspaces, stubUiWorkspace, renderIntoDocument, q, qa, first, click, typeInto, chatNode, flush, wait } from './helpers.js'
+import { makeUtil, makeCtx, stubFetch, stubSessions, stubWorkspaces, stubUiWorkspace, renderIntoDocument, q, qa, first, click, typeInto, pressEscape, chatNode, flush, wait } from './helpers.js'
 
 const PREVIEW_OK = {
   ok: true,
@@ -78,7 +78,7 @@ function editArea(container: HTMLElement): HTMLTextAreaElement | null {
 }
 
 function submitButton(container: HTMLElement): HTMLElement | null {
-  return q(container, '.dsh-recall-edit .dsh-recall-btn-primary')
+  return q(container, '.dsh-recall-composer-send')
 }
 
 async function openEditor(container: HTMLElement): Promise<void> {
@@ -98,10 +98,10 @@ describe('编辑并重发：入口与面板', () => {
     expect(m.fetchStub.callsOf('preview').length).toBe(0)
   })
 
-  it('取消 → 面板关闭，不发任何请求', async () => {
+  it('Esc → 面板关闭，不发任何请求', async () => {
     const m = await mount()
     await openEditor(m.container)
-    await click(q(m.container, '.dsh-recall-edit .dsh-recall-btn'))
+    await pressEscape()
     await flush()
 
     expect(editArea(m.container)).toBeNull()
@@ -126,15 +126,16 @@ describe('编辑并重发：入口与面板', () => {
     expect(qa(m.container, '.dsh-recall-actions .dsh-recall-action').length).toBe(2)
   })
 
-  it('文本清空且原消息无附件 → 本地拦截，不发 preview', async () => {
+  it('文本清空且原消息无附件 → 发送键禁用，不发 preview', async () => {
     const m = await mount()
     await openEditor(m.container)
     await typeInto(editArea(m.container) as HTMLTextAreaElement, '   ')
-    await click(submitButton(m.container))
+    const send = submitButton(m.container) as HTMLButtonElement | null
+    expect(send ? send.disabled : null).toBe(true)
+    await click(send)
     await flush()
 
     expect(m.fetchStub.callsOf('preview').length).toBe(0)
-    expect(q(m.container, '.dsh-recall-edit-error')).not.toBeNull()
   })
 })
 

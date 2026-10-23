@@ -104,6 +104,19 @@ export const zh: Record<string, string> = {
   'edit.noCut': '该消息是本会话中第一条用户消息，没有可回退的对话切点，无法编辑重发。',
   'edit.forkFailed': '对话未能回退（未创建新会话），编辑重发已中止。',
   'edit.empty': '消息内容不能为空。',
+  // 官方输入框锚定面（issue #26 二次迭代）：输入面就是官方 composer 本身，
+  // 这里只提示两条键盘出口，不重复画输入控件
+  'edit.official.hint': 'Enter 发送并新建会话 · Esc 取消',
+  'edit.official.retry': 'Enter 重试 · Esc 取消编辑',
+  'edit.attachment.add': '添加附件',
+  'edit.attachment.remove': '移除附件 {name}',
+  'edit.model.label': '模型',
+  'edit.model.menu': '模型与推理等级',
+  'edit.model.effort': '推理等级',
+  'edit.model.search': '搜索模型…',
+  'edit.model.empty': '没有匹配的模型',
+  'edit.model.noLevels': '该模型没有可选等级',
+  'edit.model.providerDefault': 'Default',
 
   // ---- 版本翻页器（‹ X/N ›）----
   'pager.prev': '上一版本',

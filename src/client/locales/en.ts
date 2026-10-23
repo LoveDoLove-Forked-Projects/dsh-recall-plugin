@@ -99,6 +99,17 @@ export const en: Record<string, string> = {
   'edit.noCut': 'This is the first user message in the session, so there is no earlier turn boundary to fork from.',
   'edit.forkFailed': 'The chat could not be rolled back (no new session was created), so the edit was not sent.',
   'edit.empty': 'Message text cannot be empty.',
+  'edit.official.hint': 'Enter sends into a new session · Esc cancels',
+  'edit.official.retry': 'Enter to retry · Esc to cancel',
+  'edit.attachment.add': 'Add attachment',
+  'edit.attachment.remove': 'Remove attachment {name}',
+  'edit.model.label': 'Model',
+  'edit.model.menu': 'Model and reasoning effort',
+  'edit.model.effort': 'Reasoning effort',
+  'edit.model.search': 'Search models…',
+  'edit.model.empty': 'No matching models',
+  'edit.model.noLevels': 'No effort levels for this model',
+  'edit.model.providerDefault': 'Default',
 
   // ---- 版本翻页器（‹ X/N ›）----
   'pager.prev': 'Previous version',

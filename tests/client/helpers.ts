@@ -117,6 +117,13 @@ export async function pressEnter(el: Element | null | undefined): Promise<void> 
   })
 }
 
+// Esc：编辑卡的取消出口（捕获阶段挂在 document 上，从任意节点派发都能命中）
+export async function pressEscape(): Promise<void> {
+  await act(async () => {
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+  })
+}
+
 // ---- 网络 ----
 
 export interface FetchCall {
@@ -176,19 +183,25 @@ export interface CtxStub {
   drafts: string[]
   submits: number
 }
-export function makeCtx(): CtxStub {
+export interface CtxOptions {
+  // 官方输入态 shell 工厂：草稿回填会经它写入
+  shell?: (sessionId: string) => unknown
+  // 其它按名字解析的服务（模型目录等）：get(name) 命中即返回
+  services?: Record<string, unknown>
+}
+
+export function makeCtx(opts: CtxOptions = {}): CtxStub {
   const drafts: string[] = []
   // 编辑重发在 setDraft 之后经同一 actions 面按下发送；计数即可验证「发了几次」
   const counter = { submits: 0 }
-  const conversation = {
-    input: {
-      shell: () => ({
-        actions: {
-          setDraft: (text: string) => { drafts.push(text) },
-          submit: () => { counter.submits++ },
-        },
-      }),
+  const shellFactory = opts.shell ?? (() => ({
+    actions: {
+      setDraft: (text: string) => { drafts.push(text) },
+      submit: () => { counter.submits++ },
     },
+  }))
+  const conversation = {
+    input: { shell: shellFactory },
   }
   const ctx = {
     slots: { inject: () => undefined, register: () => undefined, entries: () => [] },
@@ -196,7 +209,10 @@ export function makeCtx(): CtxStub {
     workspaces: {},
     uiWorkspace: {},
     timer: { timeout: (fn: () => void, ms: number) => setTimeout(fn, ms) },
-    get: <T = unknown>(name: string): T | undefined => (name === 'conversation' ? conversation as T : undefined),
+    get: <T = unknown>(name: string): T | undefined => {
+      if (opts.services && Object.prototype.hasOwnProperty.call(opts.services, name)) return opts.services[name] as T
+      return name === 'conversation' ? conversation as T : undefined
+    },
   } as unknown as import('../../src/types/client-contract.js').ClientContext
   // getter 而不是快照：发送发生在被测组件内部，断言时读的是最新计数
   return {
