@@ -38,7 +38,7 @@ function installOfficialComposer(permission = '完全权限', model = 'DeepSeek-
   document.body.appendChild(card)
 }
 
-async function mount(opts: { content?: unknown[]; routes?: Record<string, unknown>; services?: Record<string, unknown> } = {}) {
+async function mount(opts: { content?: unknown[]; routes?: Record<string, unknown>; services?: Record<string, unknown>; loadImage?: (attachment: unknown) => Promise<string> } = {}) {
   const fetchStub = stubFetch(Object.assign({ 'snapshot-info': { has: true }, preview: PREVIEW_OK, execute: EXECUTE_OK }, opts.routes || {}))
   const util = makeUtil()
   const ctxStub = makeCtx({ services: opts.services })
@@ -50,7 +50,9 @@ async function mount(opts: { content?: unknown[]; routes?: Record<string, unknow
   const node = opts.content
     ? { id: 'm1', key: 'm1', kind: 'user', data: { content: opts.content, time: Date.now() } }
     : undefined
-  const handle = await renderIntoDocument(React.createElement(Node, node ? chatNode({ node }) : chatNode()))
+  const props = node ? chatNode({ node }) : chatNode()
+  const withLoad = opts.loadImage ? Object.assign({}, props, { loadImage: opts.loadImage }) : props
+  const handle = await renderIntoDocument(React.createElement(Node, withLoad))
   cleanups.push(handle.unmount, fetchStub.restore)
   await flush()
   return { container: handle.container, sessions, fetchStub }
@@ -197,6 +199,25 @@ describe('消息位置编辑卡', () => {
     await flush()
     await wait(10)
     expect(picked[1]).toEqual({ provider: 'deepseek', model: 'm2' })
+  })
+
+  it('原消息图片附件显示缩略图（走官方 loadImage 通道）', async () => {
+    const m = await mount({
+      content: [
+        { type: 'text', text: 'hello' },
+        { type: 'image', attachment: { attachmentId: 'img-1', name: 'image.png' } },
+      ],
+      loadImage: async () => 'blob:thumb-1',
+    })
+    await openEditor(m.container)
+    await flush()
+    await wait(20)
+
+    const thumb = q(m.container, '.dsh-recall-composer-thumb') as HTMLImageElement | null
+    expect(thumb ? thumb.getAttribute('src') : null).toBe('blob:thumb-1')
+    // 缩略图模式下删除键仍在（角标），且不再渲染文件名 chip
+    expect(q(m.container, '.dsh-recall-composer-attach-x-badge')).not.toBeNull()
+    expect(q(m.container, '.dsh-recall-composer-attach-name')).toBeNull()
   })
 
   it('文本清空且无附件 → 发送键禁用，不发 preview', async () => {

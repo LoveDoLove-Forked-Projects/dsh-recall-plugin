@@ -51,7 +51,7 @@ export function attachmentRefsFromBlocks(blocks: ChatBlock[]): DraftAttachmentRe
     if (!block || (block.type !== 'image' && block.type !== 'file')) continue
     const ref = block.attachment as { attachmentId?: unknown; name?: unknown } | null | undefined
     if (!ref || typeof ref.attachmentId !== 'string' || ref.attachmentId === '') continue
-    const entry: DraftAttachmentRef = { attachmentId: ref.attachmentId }
+    const entry: DraftAttachmentRef = { attachmentId: ref.attachmentId, kind: block.type }
     if (typeof ref.name === 'string' && ref.name !== '') entry.name = ref.name
     refs.push(entry)
   }
@@ -393,6 +393,10 @@ export function buildRecallNode(
     // 编辑卡上的附件：原消息附件可逐个移除，新加的（粘贴/拖入/选择）随消息发出
     const [editFiles, setEditFiles] = React.useState<File[]>([])
     const [droppedRefs, setDroppedRefs] = React.useState<string[]>([])
+    // 图片缩略图：原消息图片走官方 loadImage（与消息里大图同源），本地新加图片
+    // 用 object URL；加载完成前先按文件名 chip 渲染，拿到 URL 后换成缩略图
+    const [refPreviews, setRefPreviews] = React.useState<Record<string, string>>({})
+    const fileUrlsRef = React.useRef<Map<File, string>>(new Map())
     // 元信息：权限只读（抄自底部官方输入框当前显示）；模型走官方目录服务，
     // 打开编辑时加载一次，选择后同步到底部 chip 与后续 fork 的子会话
     const [editMeta, setEditMeta] = React.useState<EditMeta>({ permission: '', model: '' })
@@ -504,17 +508,44 @@ export function buildRecallNode(
       return { permission: textOf('conversation.input.permission'), model: textOf('conversation.input.model') }
     }
 
+    // 官方 loadImage(attachment) → Promise<url>：消息里的大图与缩略图同一来源，
+    // 原消息图片不必自己读字节。旧宿主可能没有该 props，缺失就退回文件名 chip
+    const resolveImage = typeof loadImage === 'function'
+      ? loadImage as (attachment: unknown) => Promise<unknown>
+      : null
+    // 只回收自己创建的 blob: URL；loadImage 返回的 URL 由宿主管理
+    const revokePreview = (url: string) => {
+      if (url.indexOf('blob:') !== 0) return
+      if (typeof URL !== 'undefined' && typeof URL.revokeObjectURL === 'function') URL.revokeObjectURL(url)
+    }
+    const previewOfFile = (file: File): string => {
+      const cached = fileUrlsRef.current.get(file)
+      if (cached !== undefined) return cached
+      if (typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') return ''
+      const url = URL.createObjectURL(file)
+      fileUrlsRef.current.set(file, url)
+      return url
+    }
+
     // 未被移除的原消息附件：提交时按此清单早读字节，fork 后重新登记到子会话
     const keptRefs = (): DraftAttachmentRef[] => attachmentRefs.filter((ref) => droppedRefs.indexOf(ref.attachmentId) < 0)
     const editAttachments = (): EditAttachmentItem[] => {
       const items: EditAttachmentItem[] = []
       let index = 0
       for (const ref of keptRefs()) {
-        items.push({ key: 'ref:' + ref.attachmentId, name: ref.name || defaultAttachmentName('application/octet-stream', index) })
+        const item: EditAttachmentItem = { key: 'ref:' + ref.attachmentId, name: ref.name || defaultAttachmentName('application/octet-stream', index) }
+        const preview = refPreviews[ref.attachmentId]
+        if (ref.kind === 'image' && typeof preview === 'string' && preview !== '') item.previewUrl = preview
+        items.push(item)
         index++
       }
       for (const [fileIndex, file] of editFiles.entries()) {
-        items.push({ key: 'file:' + fileIndex, name: file.name || ('attachment-' + (fileIndex + 1)) })
+        const item: EditAttachmentItem = { key: 'file:' + fileIndex, name: file.name || ('attachment-' + (fileIndex + 1)) }
+        if (typeof file.type === 'string' && file.type.indexOf('image/') === 0) {
+          const preview = previewOfFile(file)
+          if (preview !== '') item.previewUrl = preview
+        }
+        items.push(item)
       }
       return items
     }
@@ -522,6 +553,12 @@ export function buildRecallNode(
       if (key.indexOf('ref:') === 0) { setDroppedRefs((prev) => prev.concat(key.slice(4))); return }
       if (key.indexOf('file:') !== 0) return
       const index = Number(key.slice(5))
+      if (!Number.isFinite(index)) return
+      const removed = editFiles[index]
+      if (removed !== undefined) {
+        const url = fileUrlsRef.current.get(removed)
+        if (url !== undefined) { revokePreview(url); fileUrlsRef.current.delete(removed) }
+      }
       setEditFiles((prev) => prev.filter((_, i) => i !== index))
     }
 
@@ -540,6 +577,7 @@ export function buildRecallNode(
       setRecall({ stage: 'idle' })
       setEditFiles([])
       setDroppedRefs([])
+      setRefPreviews({})
       setEditMeta(readComposerMeta())
       setModelState(null)
       setModelOpen(false)
@@ -551,6 +589,18 @@ export function buildRecallNode(
       pickerRef.current = picker
       if (picker) {
         picker.load().then((state) => { if (state) setModelState(state) }).catch(() => {})
+      }
+      // 原消息里的图片：按块并发取缩略图，先渲染文件名 chip、拿到 URL 再替换
+      if (resolveImage) {
+        for (const block of imageBlocks) {
+          const attachment = block.attachment as { attachmentId?: unknown } | null
+          const id = attachment && typeof attachment.attachmentId === 'string' ? attachment.attachmentId : ''
+          if (id === '') continue
+          Promise.resolve(resolveImage(attachment)).then((url) => {
+            if (typeof url !== 'string' || url === '') return
+            setRefPreviews((prev) => (prev[id] !== undefined ? prev : { ...prev, [id]: url }))
+          }).catch(() => {})
+        }
       }
       setEdit({ stage: 'editing', text, attachments: attachmentRefs.length })
     }
@@ -564,10 +614,19 @@ export function buildRecallNode(
       setEdit({ stage: 'idle' })
       setEditFiles([])
       setDroppedRefs([])
+      setRefPreviews({})
+      for (const url of fileUrlsRef.current.values()) revokePreview(url)
+      fileUrlsRef.current.clear()
       setModelState(null)
       setModelOpen(false)
       pickerRef.current = null
     }
+
+    // 节点卸载（切会话/换视图）也要回收本地缩略图，否则 blob URL 会一直挂着
+    React.useEffect(() => () => {
+      for (const url of fileUrlsRef.current.values()) revokePreview(url)
+      fileUrlsRef.current.clear()
+    }, [])
 
     // 模型菜单：点开先回主段（模型 / 推理等级两行）；选择走官方 selectModel，
     // 落地后重读目录刷新标签。失败只提示、菜单留在原处，不打断编辑

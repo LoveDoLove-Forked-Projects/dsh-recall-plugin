@@ -172,9 +172,10 @@ describe('撤回回填的附件引用提取（I34）', () => {
       { type: 'image', attachment: { attachmentId: 'sha256:a', mediaType: 'image/png' } },
       { type: 'file', attachment: { attachmentId: 'sha256:b', name: '报告.pdf' } },
     ])
+    // kind 带上块类型：编辑卡据此把图片渲染成缩略图
     expect(refs).toEqual([
-      { attachmentId: 'sha256:a' },
-      { attachmentId: 'sha256:b', name: '报告.pdf' },
+      { attachmentId: 'sha256:a', kind: 'image' },
+      { attachmentId: 'sha256:b', kind: 'file', name: '报告.pdf' },
     ])
   })
 

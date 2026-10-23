@@ -15,6 +15,8 @@ import { recallNodeLog } from './log.js'
 export interface DraftAttachmentRef {
   attachmentId: string
   name?: string
+  // 块类型：编辑卡据此决定渲染缩略图（image）还是文件名 chip（file）
+  kind?: 'image' | 'file'
 }
 
 // 缺省附件文件名：媒体类型 → 「attachment-N.<subtype>」（image/png → png）。

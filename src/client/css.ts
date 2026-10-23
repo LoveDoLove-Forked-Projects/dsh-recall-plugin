@@ -50,6 +50,11 @@ export const CSS = [
   '.dsh-recall-composer-attach-name{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
   '.dsh-recall-composer-attach-x{border:0;background:0;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:14px;line-height:1;padding:2px 6px;border-radius:999px;corner-shape:round}',
   '.dsh-recall-composer-attach-x:hover{background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary)}',
+  // 图片附件：固定 56px 缩略图，删除键做成角标，避免名字挤占宽度
+  '.dsh-recall-composer-attach-image{position:relative;width:56px;height:56px;padding:0;border-radius:10px;overflow:hidden;background:var(--dsw-alias-bg-layer-3)}',
+  '.dsh-recall-composer-thumb{display:block;width:100%;height:100%;object-fit:cover}',
+  '.dsh-recall-composer-attach-x-badge{position:absolute;top:2px;right:2px;width:18px;height:18px;padding:0;display:grid;place-items:center;font-size:12px;line-height:1;color:#fff;background:rgba(0,0,0,.55)}',
+  '.dsh-recall-composer-attach-x-badge:hover{background:var(--dsw-alias-state-error-primary);color:#fff}',
   // 底行：加号 → 只读 chip → 提示 → 发送。发送键对齐官方（圆形 brand 底）
   '.dsh-recall-composer-foot{display:flex;align-items:center;gap:8px;min-height:32px}',
   '.dsh-recall-composer-add{position:relative;flex:none;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:50%;corner-shape:round;background:0 0;color:var(--dsw-alias-label-secondary);cursor:pointer}',

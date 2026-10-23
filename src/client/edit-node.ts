@@ -22,10 +22,12 @@ export type EditStage =
   | { stage: 'submitting' }
   | { stage: 'error'; text: string; attachments: number; message: string }
 
-// 卡内附件条目：key 用于移除（原消息引用 id 或本地新文件下标）
+// 卡内附件条目：key 用于移除（原消息引用 id 或本地新文件下标）；
+// previewUrl 存在时渲染缩略图（图片附件），否则渲染文件名 chip
 export interface EditAttachmentItem {
   key: string
   name: string
+  previewUrl?: string
 }
 
 // 只读元信息：从底部官方输入框当前显示抄来，仅作上下文提示
@@ -128,15 +130,26 @@ export function buildEditFlow(React: ReactApi, t: Translate): EditFlowApi {
       }),
       props.attachments.length > 0
         ? React.createElement('div', { className: 'dsh-recall-composer-attachments' },
-            props.attachments.map((item) => React.createElement('span', { className: 'dsh-recall-composer-attach', key: item.key },
-              React.createElement('span', { className: 'dsh-recall-composer-attach-name', title: item.name }, item.name),
-              React.createElement('button', {
-                type: 'button',
-                className: 'dsh-recall-composer-attach-x',
-                'aria-label': t('edit.attachment.remove', { name: item.name }),
-                onClick: () => props.onRemoveAttachment(item.key),
-              }, '×')
-            ))
+            props.attachments.map((item) => item.previewUrl !== undefined
+              // 图片：56px 缩略图 + 角标删除键（文件名走 title/alt）
+              ? React.createElement('span', { className: 'dsh-recall-composer-attach dsh-recall-composer-attach-image', key: item.key },
+                  React.createElement('img', { className: 'dsh-recall-composer-thumb', src: item.previewUrl, alt: item.name, title: item.name }),
+                  React.createElement('button', {
+                    type: 'button',
+                    className: 'dsh-recall-composer-attach-x dsh-recall-composer-attach-x-badge',
+                    'aria-label': t('edit.attachment.remove', { name: item.name }),
+                    onClick: () => props.onRemoveAttachment(item.key),
+                  }, '×')
+                )
+              : React.createElement('span', { className: 'dsh-recall-composer-attach', key: item.key },
+                  React.createElement('span', { className: 'dsh-recall-composer-attach-name', title: item.name }, item.name),
+                  React.createElement('button', {
+                    type: 'button',
+                    className: 'dsh-recall-composer-attach-x',
+                    'aria-label': t('edit.attachment.remove', { name: item.name }),
+                    onClick: () => props.onRemoveAttachment(item.key),
+                  }, '×')
+                ))
           )
         : null,
       error !== '' ? React.createElement('div', { className: 'dsh-recall-edit-error', role: 'alert' }, error) : null,
