@@ -370,6 +370,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           refillDraft: cfg.refillDraft,
           snapshotEnabled: cfg.snapshotEnabled,
           archiveOriginal: cfg.archiveOriginal,
+          editSubmitsImmediately: cfg.editSubmitsImmediately,
           retentionDays: cfg.retentionDays,
           // A4：界面语言偏好随 values 下发（设置卡片据此渲染下拉并即时切语言）
           locale: cfg.locale,
@@ -415,6 +416,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       if (patch.refillDraft !== undefined) clean.refillDraft = Boolean(patch.refillDraft)
       if (patch.snapshotEnabled !== undefined) clean.snapshotEnabled = Boolean(patch.snapshotEnabled)
       if (patch.archiveOriginal !== undefined) clean.archiveOriginal = Boolean(patch.archiveOriginal)
+      if (patch.editSubmitsImmediately !== undefined) clean.editSubmitsImmediately = Boolean(patch.editSubmitsImmediately)
       if (patch.retentionDays !== undefined) {
         const n = Number(patch.retentionDays)
         // 0/负值 = 不启用（schema 校验 base 由 number 承担，NaN 由 settings.write 拒）

@@ -71,9 +71,9 @@ function toasts(): HTMLElement[] {
 }
 
 describe('撤回节点：快照存在性轮询', () => {
-  it('has:true → 撤回按钮出现（复制 + 撤回两个动作）', async () => {
+  it('has:true → 撤回/编辑按钮出现（复制 + 撤回 + 编辑三个动作）', async () => {
     const { container, fetchStub } = await mount()
-    expect(actionButtons(container).length).toBe(2)
+    expect(actionButtons(container).length).toBe(3)
     expect(fetchStub.callsOf('snapshot-info').length).toBe(1)
   })
 
@@ -100,7 +100,7 @@ describe('撤回节点：快照存在性轮询', () => {
 
   it('has:true 且带 skipped → toast 列出跳过路径，按钮照常出现', async () => {
     const { container } = await mount({ routes: { 'snapshot-info': { has: true, skipped: ['a/', 'b/'] } } })
-    expect(actionButtons(container).length).toBe(2)
+    expect(actionButtons(container).length).toBe(3)
     const toast = toasts()[0]
     expect(toast && toast.textContent).toContain('a/')
   })

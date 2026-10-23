@@ -48,6 +48,11 @@ export async function flush(): Promise<void> {
   await act(async () => { await Promise.resolve() })
 }
 
+// 跑真实定时器（回填链的 submit 刻意让出一拍、附件注册是异步的，微任务冲不掉）
+export async function wait(ms = 0): Promise<void> {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)) })
+}
+
 export function q(container: ParentNode, selector: string): HTMLElement | null {
   return container.querySelector(selector)
 }
@@ -169,11 +174,21 @@ export function makeUtil(overrides: Partial<UtilApi> = {}): UtilApi {
 export interface CtxStub {
   ctx: import('../../src/types/client-contract.js').ClientContext
   drafts: string[]
+  submits: number
 }
 export function makeCtx(): CtxStub {
   const drafts: string[] = []
+  // 编辑重发在 setDraft 之后经同一 actions 面按下发送；计数即可验证「发了几次」
+  const counter = { submits: 0 }
   const conversation = {
-    input: { shell: () => ({ actions: { setDraft: (text: string) => { drafts.push(text) } } }) },
+    input: {
+      shell: () => ({
+        actions: {
+          setDraft: (text: string) => { drafts.push(text) },
+          submit: () => { counter.submits++ },
+        },
+      }),
+    },
   }
   const ctx = {
     slots: { inject: () => undefined, register: () => undefined, entries: () => [] },
@@ -183,7 +198,12 @@ export function makeCtx(): CtxStub {
     timer: { timeout: (fn: () => void, ms: number) => setTimeout(fn, ms) },
     get: <T = unknown>(name: string): T | undefined => (name === 'conversation' ? conversation as T : undefined),
   } as unknown as import('../../src/types/client-contract.js').ClientContext
-  return { ctx, drafts }
+  // getter 而不是快照：发送发生在被测组件内部，断言时读的是最新计数
+  return {
+    ctx,
+    drafts,
+    get submits(): number { return counter.submits },
+  }
 }
 
 // ---- 服务桩 ----

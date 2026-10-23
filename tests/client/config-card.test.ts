@@ -58,7 +58,7 @@ function actionButtons(container: HTMLElement): HTMLElement[] {
 }
 
 describe('config-card 读取与渲染', () => {
-  it('读取成功：渲染 11 字段控件，值来自 config-get 载荷', async () => {
+  it('读取成功：渲染 12 字段控件，值来自 config-get 载荷', async () => {
     const { container } = await mount()
     expect(qid(container, 'dsh-recall-cfg-gcSnaps')).not.toBeNull()
     expect((qid(container, 'dsh-recall-cfg-gcSnaps') as HTMLInputElement).value).toBe('50')
@@ -66,7 +66,7 @@ describe('config-card 读取与渲染', () => {
     expect((qid(container, 'dsh-recall-cfg-maxFileBytes') as HTMLInputElement).value).toBe('8')
     expect((qid(container, 'dsh-recall-cfg-maxWorkspaceBytes') as HTMLInputElement).value).toBe('256')
     expect((qid(container, 'dsh-recall-cfg-scanBudgetMs') as HTMLInputElement).value).toBe('10')
-    expect(qa(container, '.dsh-recall-cfg-switch').length).toBe(3)
+    expect(qa(container, '.dsh-recall-cfg-switch').length).toBe(4)
     expect(qa(container, '.dsh-recall-cfg-row').length).toBeGreaterThanOrEqual(10)
   })
 

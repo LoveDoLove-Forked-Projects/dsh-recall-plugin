@@ -185,6 +185,10 @@ export interface ConversationInputShell {
     // 官方 composer 的 addFiles 走 shell.addAttachments（actions 面是同一实现
     // 的公开通道）；返回 false 表示未接纳（调用方应释放已注册的草稿附件）
     addAttachments?(ids: string[]): boolean | unknown
+    // 官方「发送」动词（0.2.1-rc.2 实证：actions.submit 无参，内部即
+    // submit('queue')，与按回车同一条管线）。编辑重发用：setDraft 后调用。
+    // 无参是刻意的——mode 参数是 shell 内部方法的默认值，不由调用方决定
+    submit?(): void
   }
   setDraft?(text: string): void
   addAttachments?(ids: string[]): boolean | unknown
@@ -225,7 +229,21 @@ export interface SlotEntryOptions {
 
 export interface SlotsService {
   inject(name: SlotName | string, factory: () => unknown): unknown
-  register(opts: { name: string; key?: string; priority?: number }, component: unknown): unknown
+  register(opts: {
+    name: string
+    // keyed 槽：key + priority 决定覆盖关系（conversation.chat.node）
+    key?: string
+    priority?: number
+    // list 槽：id 是条目身份，order 决定同槽内的排列（官方 message-feedback
+    // 在 conversation.chat.assistant-actions 上就是 { id, order } 写法）
+    id?: string
+    order?: number
+    // list 槽可声明 inject：owner 会把「当前作用域 id」传进来（该槽为
+    // sessionId），返回值并入组件 props——插件据此定位自己的会话数据，
+    // 不必从 DOM 或共享变量反推
+    inject?: (scopeId: string) => Record<string, unknown>
+    locale?: unknown
+  }, component: unknown): unknown
   entries(name: string): SlotEntryOptions[]
 }
 

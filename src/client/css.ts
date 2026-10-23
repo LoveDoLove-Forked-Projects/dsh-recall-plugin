@@ -34,6 +34,33 @@ export const CSS = [
   '.dsh-recall-panel{width:min(480px,100%);box-sizing:border-box;background:var(--dsw-alias-bg-base);border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px 14px;display:flex;flex-direction:column;gap:8px;text-align:left;box-shadow:0 8px 28px rgba(0,0,0,.22)}',
   '.dsh-recall-panel-title{color:var(--dsw-alias-label-primary);font-size:14px;font-weight:600;line-height:1.5}',
   '.dsh-recall-panel-note{color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.5;word-break:break-word}',
+  // 就地编辑框（issue #26）：沿用输入类控件的 field 配方（layer-3 底 + 发丝
+  // 对齐官方输入区（实机读取 computed style）：28px 大圆角、无边框、bg-base 底、
+  // 发丝环 + 双层柔光阴影；字号 14/行高 24 与 composer 文本区一致。阴影的
+  // 0.5px 环用 border-l3 而不是硬编码 rgba——深色主题下硬编码黑色描边会消失
+  '.dsh-recall-edit-area{width:100%;box-sizing:border-box;min-height:52px;max-height:260px;background:var(--dsw-alias-bg-base);color:var(--dsw-alias-label-primary);border:0;border-radius:28px;padding:12px 18px;font-size:14px;line-height:24px;font-family:inherit;resize:vertical;box-shadow:0 0 0 .5px var(--dsw-alias-border-l3),0 4px 16px rgba(0,0,0,.04),0 0 24px rgba(0,0,0,.03)}',
+  // 官方输入区聚焦时没有边框/描边变化（只有光标），编辑框跟随
+  '.dsh-recall-edit-area:focus,.dsh-recall-edit-area:focus-visible{outline:none;border:0}',
+  // 气泡原位编辑（issue #26 二次迭代）：编辑框直接长在气泡位置，容器不套气泡
+  // 外壳（再套一层会让「输入框在气泡里」多出一道边），宽度由内联 style 给
+  // min-width 兜底：宽度由内联 style 给，但测量失败的极端面下不能让编辑框塌成
+  // textarea 的固有宽度（约 220px），min(360px,100%) 保证任何列宽下都可用
+  '.dsh-recall-edit-inline{display:flex;flex-direction:column;gap:6px;align-items:stretch;min-width:min(360px,100%)}',
+  '.dsh-recall-edit-note{color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1.5}',
+  '.dsh-recall-edit-error{color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.5}',
+  '.dsh-recall-edit-busy{color:var(--dsw-alias-label-secondary);font-size:13px;line-height:1.5;padding:8px 2px}',
+  '.dsh-recall-edit-actions{display:flex;justify-content:flex-end;gap:8px}',
+  '.dsh-recall-btn-sm{padding:3px 10px;font-size:12px}',
+  // 版本翻页器（‹ X/N ›）：灰字 + 无边框的轻量控件，附在回合操作区末尾，
+  // 视觉重量低于复制/重试等官方动作，不抢注意力
+  '.dsh-recall-pager{display:inline-flex;align-items:center;gap:2px;color:var(--dsw-alias-label-secondary);font-size:12px;line-height:1}',
+  '.dsh-recall-pager-btn{border:0;background:0;color:inherit;cursor:pointer;padding:3px 6px;border-radius:6px;font-size:13px;line-height:1}',
+  '.dsh-recall-pager-btn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}',
+  '.dsh-recall-pager-btn:disabled{opacity:.35;cursor:default}',
+  '.dsh-recall-pager-count{min-width:30px;text-align:center;font-variant-numeric:tabular-nums}',
+  '.dsh-recall-pager[data-busy=true]{opacity:.6;pointer-events:none}',
+  // 无家族可翻时容器是空的：:empty 让占位为 0，不在操作区留一段空隙
+  '.dsh-recall-pager:empty{display:none}',
   '.dsh-recall-list{max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:2px;padding:4px 0}',
   '.dsh-recall-file{display:flex;gap:8px;align-items:baseline;font-size:12px;line-height:1.5}',
   '.dsh-recall-badge{flex:none;font-size:12px;line-height:1.5;padding:0 6px;border-radius:6px}',

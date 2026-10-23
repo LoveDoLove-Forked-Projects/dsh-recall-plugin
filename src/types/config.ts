@@ -22,6 +22,8 @@ export interface ResolvedConfig {
   refillDraft: boolean
   snapshotEnabled: boolean
   archiveOriginal: boolean
+  // issue #26：编辑提交后自动发出改后的文本（关闭则只回填输入框）
+  editSubmitsImmediately: boolean
   retentionDays: number
   locale: LocalePref
 }

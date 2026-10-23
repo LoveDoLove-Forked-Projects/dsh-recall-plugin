@@ -16,10 +16,19 @@ import { buildRecallNotify } from './util.js'
 import type { RecallNotifyOutcome } from './util.js'
 import { recallNodeLog } from './log.js'
 import { resolveUserContentFace, renderOfficialUserContent } from './user-content.js'
+import { buildEditFlow } from './edit-node.js'
+import type { EditStage } from './edit-node.js'
+import { buildDraftFill, defaultAttachmentName } from './draft-fill.js'
+import { activeSession, recordVersion } from './version-tree.js'
+import type { DraftAttachmentRef } from './draft-fill.js'
 import { zhTranslate } from './locales/index.js'
 import type { Translate } from './locales/index.js'
-import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps, ConversationService, ConversationInputShell } from '../types/client-contract.js'
+import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange, RecallScope } from '../types/api.js'
+
+// defaultAttachmentName 的实现随附件回填链迁到 draft-fill.ts；此 re-export 保住
+// 既有 import 路径（tests/unit/client-pure.test.js 直测它）
+export { defaultAttachmentName }
 
 // 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
 export interface ChatBlock {
@@ -27,13 +36,6 @@ export interface ChatBlock {
   text?: string
   attachment?: unknown
   [key: string]: unknown
-}
-
-// 被撤回消息里可回填为草稿附件的块引用：image / file 两类块都带 durable
-// attachment 引用（{attachmentId, ...}）。
-export interface DraftAttachmentRef {
-  attachmentId: string
-  name?: string
 }
 
 // 纯函数（模块级导出供单测）：从内容块提取附件引用。只认带非空 attachmentId 的
@@ -49,14 +51,6 @@ export function attachmentRefsFromBlocks(blocks: ChatBlock[]): DraftAttachmentRe
     refs.push(entry)
   }
   return refs
-}
-
-// 缺省附件文件名：媒体类型 → 「attachment-N.<subtype>」（image/png → png）
-export function defaultAttachmentName(mediaType: unknown, index: number): string {
-  const text = String(mediaType || '')
-  const slash = text.indexOf('/')
-  const sub = (slash >= 0 ? text.slice(slash + 1) : text).replace(/[^a-z0-9.+-]/gi, '')
-  return 'attachment-' + String(index + 1) + '.' + (sub || 'bin')
 }
 
 // 文件卡片的展示信息（官方 UserStyleBubble 对 file 块渲染成「图标 + 文件名 +
@@ -153,6 +147,12 @@ export function buildRecallNode(
   uiWorkspaceSvc?: ClientUiWorkspaceService
 ): RecallNodeApi {
   const { api, ensureInit, showThrottledToast, writeClipboard, clockText, pluginConfig, messageFor, t } = util
+  // 编辑面板与图标走独立模块（issue #26）：撤回面板与编辑面板的 stage 语义
+  // 不同（确认 vs 直接发送），强行合并会让两套文案矩阵互相污染
+  const { EditIcon, EditPanel } = buildEditFlow(React, t)
+  // 输入区回填（文本 + 附件 + 可选发送）：撤回回填与编辑重发共用同一条官方
+  // 写入通道，实现见 draft-fill.ts
+  const { fillDraft, preloadAttachmentFiles } = buildDraftFill(ctx)
 
   function CopyIcon() {
     return React.createElement('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', stroke: 'currentColor', strokeWidth: 1.4, 'aria-hidden': true },
@@ -301,107 +301,6 @@ export function buildRecallNode(
     return null
   }
 
-  // 撤回后把被撤回消息的文本与附件回填到输入框，方便用户修改后重新发送。
-  // 官方 conversation 服务提供 input（InputHub）→ per-session shell → actions，
-  // 走与输入框自身同一条官方写入通道。附件沿用官方 composer 的 addFiles 链路
-  // （ui-conversation 实证）：sessions.binding 门禁 → session.readAttachment 取回
-  // 字节 → conversation.createDrafts 注册草稿附件 → shell 的 addAttachments 进
-  // 输入态（未接纳时 releaseDraftAttachments 释放）。fork + open 之后 shell /
-  // binding 可能需要一个 tick 才就绪，做有界重试：最多 8 次、间隔 150ms；服务面
-  // 缺失时静默跳过（文本与附件各自独立降级，附件读不出不影响撤回主流程）。
-  function fillDraft(targetSessionId: string, draftText: string, attachmentFiles: Promise<File[]> | null): void {
-    if (!targetSessionId || (!draftText && attachmentFiles === null)) return
-    let attempts = 0
-    let attachStarted = false
-    const attempt = () => {
-      let textDone = draftText === ''
-      try {
-        // conversation 服务 0.1.2 才有（0.1.1-rc.2 无，ui-conversation 提供），
-        // 不能进静态 inject——否则 0.1.1-rc.2 上声明缺失服务插件静默不启动。
-        // 走 ctx.get 探测：guard 的 get 对缺失/未声明服务安全返回 undefined，
-        // 拿不到就降级重试（0.1.1-rc.2 恒降级；0.1.2 视服务可见性而定）。
-        const conversation = ctx.get<ConversationService>('conversation')
-        if (conversation && conversation.input && typeof conversation.input.shell === 'function') {
-          const shell = conversation.input.shell(targetSessionId)
-          if (shell) {
-            if (!textDone) {
-              if (shell.actions && typeof shell.actions.setDraft === 'function') {
-                shell.actions.setDraft(draftText)
-                textDone = true
-              } else if (typeof shell.setDraft === 'function') {
-                shell.setDraft(draftText)
-                textDone = true
-              }
-            }
-            if (!attachStarted && attachmentFiles !== null) {
-              attachStarted = startAttachDrafts(conversation, shell, targetSessionId, attachmentFiles)
-            }
-          }
-        }
-      } catch (e) { /* fall through to retry */ }
-      const attachDone = attachmentFiles === null || attachStarted
-      if ((!textDone || !attachDone) && attempts++ < 8) setTimeout(attempt, 150)
-    }
-    attempt()
-  }
-
-  // 附件回填（后半程）：把早读好的 File 注册为子会话的草稿附件。返回「链路是否
-  // 已发起」——服务面缺失返回 false，交由调用方有界重试；发起后逐项失败只降级
-  // 该项，不再重试。
-  function startAttachDrafts(conversation: ConversationService, shell: ConversationInputShell, sessionId: string, files: Promise<File[]>): boolean {
-    if (typeof conversation.createDrafts !== 'function') return false
-    const actions = shell.actions
-    let add: ((ids: string[]) => unknown) | null = null
-    if (actions && typeof actions.addAttachments === 'function') add = (ids) => actions.addAttachments ? actions.addAttachments(ids) : false
-    else if (typeof shell.addAttachments === 'function') add = (ids) => shell.addAttachments ? shell.addAttachments(ids) : false
-    if (add === null) return false
-    ;(async () => {
-      let list: File[] = []
-      try { list = await files } catch (e) { return } // 附件早读失败放弃附件回填（文本回填不受影响）
-      if (!Array.isArray(list) || list.length === 0) return
-      try {
-        const drafts = conversation.createDrafts ? conversation.createDrafts(sessionId, list) : []
-        const descriptors = Array.isArray(drafts) ? drafts : []
-        const ids = descriptors.map((draft) => draft && draft.id).filter((id): id is string => typeof id === 'string' && id !== '')
-        if (ids.length === 0) return
-        const accepted = add(ids)
-        // 官方 addFiles 的失败回滚：未接纳时释放已注册的草稿附件
-        if (accepted === false && typeof conversation.releaseDraftAttachments === 'function') conversation.releaseDraftAttachments(descriptors)
-      } catch (e) { /* 附件未回填；文本回填不受影响 */ }
-    })()
-    return true
-  }
-
-  // 附件早读（前半程）：撤回执行一开始调用——此刻源会话仍在册（归档在 fork
-  // 之后才发生）、附件引用可解析；fork + open 完成后再由 fillDraft 注册进子会话。
-  // readAttachment 的授权绑定在「消息所在会话」上（官方图片回显同款），故必须用
-  // 源会话 id。逐项 try/catch：单项失败跳过，不阻断其余附件。
-  function preloadAttachmentFiles(sourceSessionId: string, refs: DraftAttachmentRef[]): Promise<File[]> {
-    return (async () => {
-      const sessions = ctx.sessions
-      const binding = sessions && typeof sessions.binding === 'function' ? sessions.binding(sourceSessionId) : undefined
-      const session = binding && binding.session
-      if (!session || typeof session.readAttachment !== 'function') return []
-      const out: File[] = []
-      for (const ref of refs) {
-        try {
-          const result = await session.readAttachment(ref.attachmentId)
-          if (!result || result.ok !== true || !result.value || result.value.data === undefined || result.value.data === null) continue
-          const raw = result.value.data
-          const bytes = raw instanceof Uint8Array ? raw : Uint8Array.from(raw as ArrayLike<number>)
-          const meta = result.value.attachment
-          const mediaType = meta && typeof meta.mediaType === 'string' && meta.mediaType !== '' ? meta.mediaType : 'application/octet-stream'
-          const name = ref.name || (meta && typeof meta.name === 'string' && meta.name !== '' ? meta.name : defaultAttachmentName(mediaType, out.length))
-          // 拷贝出独立 ArrayBuffer 再建 File：Uint8Array<ArrayBufferLike> 不满足
-          // 新版 TS 的 BlobPart（SharedArrayBuffer 分支），且避免视图共享底层缓冲
-          const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer
-          out.push(new File([buffer], name, { type: mediaType }))
-        } catch (e) { /* 单项失败跳过 */ }
-      }
-      return out
-    })()
-  }
-
   // 撤回后清理 fork 子会话里被 seed 重放出来的排队消息：官方 fork 的切点会
   // 把「被撤回消息的 inbox 入队事件」一并复制进子会话（Host 侧
   // scanStaleQueueItemIds 的窗口说明），子会话重建 inbox 后输入框上方就凭空
@@ -471,6 +370,10 @@ export function buildRecallNode(
     const rest: ChatBlock[] = blocks.filter((b) => !b || !(b.type === 'text' && typeof b.text === 'string') && !(b.type === 'image' && b.attachment) && b.type !== 'file')
     // 回填用附件引用（image/file 块）：撤回后连同文本一起回填到输入框
     const attachmentRefs = attachmentRefsFromBlocks(blocks)
+    // 版本翻页器所在的 assistant-actions 槽只收 messageId，拿不到 sessionId：
+    // 由消息节点在渲染时把当前会话记到共享位（列表里最后渲染的即当前会话，
+    // 而 turn-tail 的 pager 在同一次提交中后渲染，读到的一定是最新值）
+    activeSession.id = String(sessionId || '')
 
     const [copied, setCopied] = React.useState(false)
     const [hasSnapshot, setHasSnapshot] = React.useState(false)
@@ -478,6 +381,19 @@ export function buildRecallNode(
     // 撤回范围（确认面板内临场选择）：默认 both 与现状一致；openPreview/
     // closePanel 时复位——每次面板打开都是确定起点，不残留上一次选择
     const [scope, setScope] = React.useState<RecallScope>('both')
+    // 就地编辑（issue #26）：与撤回面板互斥——两条入口共用同一段 fork 收尾，
+    // 但面板语义不同（不可逆确认 vs 改完直接发），stage 各自独立不互相污染
+    const [edit, setEdit] = React.useState<EditStage>({ stage: 'idle' })
+    // 气泡原位编辑：编辑框宽度取原气泡实测值，进编辑前量一次——一旦气泡被编辑
+    // 框替换就再也量不到了
+    const stackRef = React.useRef<HTMLElement | null>(null)
+    const [editSize, setEditSize] = React.useState<number | null>(null)
+    const measureBubbleWidth = (): number | null => {
+      const stack = stackRef.current
+      const bubble = stack ? stack.firstElementChild : null
+      const width = bubble instanceof HTMLElement ? bubble.getBoundingClientRect().width : 0
+      return width > 0 ? width : null
+    }
 
     React.useEffect(() => {
       let alive = true
@@ -560,8 +476,77 @@ export function buildRecallNode(
       })
     }
 
+    // ---- 就地编辑（issue #26）----
+    // 打开面板只改 UI 状态：preview 放到提交时做——「只是想改一个字」的路径
+    // 不该先等一次 git 目录遍历
+    // 两条入口互斥：preview 在途时不接编辑（否则回流后两个面板并存），
+    // 打开编辑则把撤回面板收回 idle。进入前量一次气泡宽度——编辑框要顶在
+    // 气泡原来的宽度上，错过这一刻（气泡已被替换）就量不到了
+    const openEdit = () => {
+      if (edit.stage === 'submitting' || recall.stage === 'loading' || recall.stage === 'executing') return
+      // 已在编辑态：忽略重复点击。否则会用原文覆盖用户改到一半的文本，而且
+      // 此时气泡已被编辑框顶替，再量宽度只会读到空值→宽度塌成 textarea 固有宽
+      if (edit.stage === 'editing') return
+      // 错误态重开 = 回到编辑态并保留改过的文本与已测宽度
+      if (edit.stage === 'error') {
+        setEdit({ stage: 'editing', text: edit.text, attachments: edit.attachments })
+        return
+      }
+      setRecall({ stage: 'idle' })
+      // 测不到（气泡尚未挂载/节点被复用）时保留上次宽度，其次用 360 兜底：
+      // 塌成固有宽度比「略宽/略窄」难看得多
+      const measured = measureBubbleWidth()
+      setEditSize(measured !== null ? measured : (editSize !== null ? editSize : 360))
+      setEdit({ stage: 'editing', text, attachments: attachmentRefs.length })
+    }
+
+    const editFail = (nextText: string, message: string) => {
+      setEdit({ stage: 'error', text: nextText, attachments: attachmentRefs.length, message })
+    }
+
+    // 关闭一律回 idle：错误态的「关闭」是放弃本次编辑，用户再点 ✎ 重新开始
+    const closeEdit = () => {
+      setEdit({ stage: 'idle' })
+    }
+
+    // 编辑提交：preview 取切点 → execute(scope=session-only) → fork → 回填并发送。
+    // scope 固定 session-only：编辑语义不动项目文件（与撤回面板的二选一是两回事）
+    const submitEdit = () => {
+      if (edit.stage !== 'editing' && edit.stage !== 'error') return
+      const nextText = edit.text
+      if (nextText.trim() === '' && attachmentRefs.length === 0) {
+        editFail(nextText, t('edit.empty'))
+        return
+      }
+      setEdit({ stage: 'submitting' })
+      api<PreviewResponse>('preview', { messageId, sessionId }).then((res) => {
+        if (!res || !res.ok) {
+          editFail(nextText, messageFor(res, t('fallback.preview')))
+          return
+        }
+        const cut = typeof res.cutSeq === 'number' ? res.cutSeq : null
+        // 首条用户消息没有更早的 turn 边界：fork 只会复制整段会话，编辑必须
+        // 明确拒绝而不是悄悄退化成「仅回填」
+        if (cut === null) {
+          editFail(nextText, t('edit.noCut'))
+          return
+        }
+        executeRecall({
+          scope: 'session-only',
+          cutSeq: cut,
+          total: typeof res.total === 'number' ? res.total : (res.changes || []).length,
+          treeId: res.treeId || null,
+          editText: nextText,
+        })
+      }).catch((error) => {
+        editFail(nextText, String(error))
+      })
+    }
+
     const openPreview = () => {
       if (recall.stage === 'loading' || recall.stage === 'executing') return
+      // 撤回入口抢占用编辑面板：同一时刻只留一个面板，避免确认与编辑并存
+      setEdit({ stage: 'idle' })
       setScope('both')
       setRecall({ stage: 'loading' })
       api<PreviewResponse>('preview', { messageId, sessionId }).then((res) => {
@@ -586,40 +571,73 @@ export function buildRecallNode(
       })
     }
 
-    const executeRecall = () => {
-      if (recall.stage !== 'confirm') return
-      const changes = recall.changes || []
-      const previewCut = typeof recall.cutSeq === 'number' ? recall.cutSeq : null
+    // 撤回与编辑共用的执行链：编辑只是把「终态面板」换成「回填后自动发送」，
+    // fork / 归档 / 残留排队清理 / lineage 走同一条路径（各写一份必然漂移）
+    const executeRecall = (overrides?: { scope?: RecallScope; cutSeq?: number | null; total?: number; treeId?: string | null; editText?: string }) => {
+      const editText = overrides && typeof overrides.editText === 'string' ? overrides.editText : null
+      const isEdit = editText !== null
+      if (!isEdit && recall.stage !== 'confirm') return
+      const changes = recall.stage === 'confirm' ? recall.changes || [] : []
+      // 白名单判定而不是 truthy：executeRecall 也会被当作 onClick 处理器传进
+      // 事件对象（React 合成事件），真值检查会把事件当 scope 透传给 Host
+      const activeScope: RecallScope = overrides && overrides.scope === 'session-only'
+        ? 'session-only'
+        : overrides && overrides.scope === 'both' ? 'both' : scope
+      const previewCut = overrides && overrides.cutSeq !== undefined
+        ? overrides.cutSeq
+        : (recall.stage === 'confirm' && typeof recall.cutSeq === 'number' ? recall.cutSeq : null)
+      // 编辑路径的阶段映射：loading/executing 都归入 submitting，error 写进编辑
+      // 面板（保留用户改到一半的文本）；done 由收尾处按 fork 结果决定
+      const setStage = (stage: RecallStage) => {
+        if (!isEdit) { setRecall(stage); return }
+        if (stage.stage === 'error') {
+          setEdit({ stage: 'error', text: editText === null ? '' : editText, attachments: attachmentRefs.length, message: stage.message })
+        }
+      }
       // 终态上报基座（issue #19）：五处上报点共用；sessionId 断言收口语义同
       // fork 处（撤回按钮可见时恒有）。载荷组装在 util.buildRecallNotify（纯函数，
       // 六场景矩阵单测直钉），这里只负责 fire-and-forget 发送
-      const notifyBase = { sessionId: String(sessionId || ''), messageId, scope }
+      const notifyBase = { sessionId: String(sessionId || ''), messageId, scope: activeScope }
       // P0-3：携带预览摘要（total 是完整计数，与 Host 侧 diffFor 的 total
       // 对齐；changes 截断到 500 条，不能用来比对）。Host 端据此在 execute
       // 时校验「预览后文件集是否变化」，变了则返回 STALE 拒绝执行。
       // PF-1：新版同时透传 previewTreeId（内容级指纹），Host 优先用它比对
       // 且免一次重复 diff；老 Host 忽略未知字段自动退回 total 校验。
-      const previewTotal = typeof recall.total === 'number' ? recall.total : changes.length
+      const previewTotal = overrides && typeof overrides.total === 'number'
+        ? overrides.total
+        : (recall.stage === 'confirm' && typeof recall.total === 'number' ? recall.total : changes.length)
+      const previewTreeId = overrides && overrides.treeId !== undefined
+        ? overrides.treeId
+        : (recall.stage === 'confirm' ? recall.treeId : null)
       // 附件早读：此刻源会话仍在册（归档在 fork 之后才发生）、附件引用可解析；
       // 读成的 File 在 fork 出的子会话里由 fillDraft 注册为草稿附件（见上）。
-      const attachmentFiles = pluginConfig.refillDraft && attachmentRefs.length > 0 && sessionId
+      // 编辑路径不看 refillDraft（那是「撤回后是否回填」的开关）——原消息带
+      // 附件就必须带过去，否则编辑重发会静默丢附件
+      const wantAttachments = attachmentRefs.length > 0 && sessionId && (isEdit || pluginConfig.refillDraft)
+      const attachmentFiles = wantAttachments
         ? preloadAttachmentFiles(sessionId as string, attachmentRefs)
         : null
-      setRecall({ stage: 'executing', changes })
+      setStage({ stage: 'executing', changes })
       // scope 透传：Host 端 session-only 走零 git 短路径；previewTreeId/
       // previewTotal 照常携带（Host 按 scope 忽略 STALE 校验）。cutSeq 为 null
       // 时 scope 恒为 both（radio 未渲染，无 session-only 可选）
-      api<ExecuteResponse>('execute', { messageId, sessionId, previewTotal, previewTreeId: recall.treeId || undefined, scope, previewAt: Date.now() }).then(async (res) => {
+      api<ExecuteResponse>('execute', { messageId, sessionId, previewTotal, previewTreeId: previewTreeId || undefined, scope: activeScope, previewAt: Date.now() }).then(async (res) => {
         if (!res || !res.ok) {
           // STALE：预览后文件变了——自动重新拉一次最新清单回到确认阶段
           if (res && res.code === 'STALE') {
-            setRecall({ stage: 'loading' })
+            // 编辑走 session-only，Host 本就跳过 STALE 校验；真收到只可能是版本
+            // 错位——给明确错误而不是把面板停在 submitting
+            if (isEdit) {
+              setStage({ stage: 'error', message: t('err.STALE') })
+              return
+            }
+            setStage({ stage: 'loading' })
             api<PreviewResponse>('preview', { messageId, sessionId }).then((res2) => {
               if (!res2 || !res2.ok) {
-                setRecall({ stage: 'error', message: messageFor(res2, t('fallback.preview')) })
+                setStage({ stage: 'error', message: messageFor(res2, t('fallback.preview')) })
                 return
               }
-              setRecall({
+              setStage({
                 stage: 'confirm',
                 changes: res2.changes || [],
                 total: typeof res2.total === 'number' ? res2.total : (res2.changes || []).length,
@@ -630,7 +648,7 @@ export function buildRecallNode(
               })
             }).catch((error) => {
               // 重拉失败落错误态（与首次 preview 同显式面）
-              setRecall({ stage: 'error', message: String(error) })
+              setStage({ stage: 'error', message: String(error) })
             })
             return
           }
@@ -643,7 +661,7 @@ export function buildRecallNode(
             code: res && typeof res.code === 'string' ? res.code : undefined,
             error: messageFor(res, ''),
           })).catch(() => {})
-          setRecall({ stage: 'error', message: messageFor(res, t('fallback.rollback')) })
+          setStage({ stage: 'error', message: messageFor(res, t('fallback.rollback')) })
           return
         }
         // 文件已回退；对话回退独立进行，失败只降级为“仅文件回退”而不是整体失败
@@ -672,6 +690,9 @@ export function buildRecallNode(
               else if (typeof sessionsSvc.open === 'function') sessionsSvc.open(childId)
               chatReverted = true
               fillTarget = childId
+              // 版本家族登记：撤回与编辑重发走同一条 fork 收尾，两个入口都要记
+              // （翻页器按家族根聚合，这里只给父子对，聚合在 version-tree 内做）
+              recordVersion(String(sessionId || ''), childId)
               // 子会话从 seed 继承了一份「被撤回消息的 inbox 入队记录」，不清理
               // 就会在输入框上方显示成一条排队消息（Host 已解析出它对应的
               // item id 集合）
@@ -710,21 +731,34 @@ export function buildRecallNode(
             api('notify', buildRecallNotify(notifyBase, { outcome: 'fork-failed', cutSeq, error: chatError })).catch(() => {})
           }
         }
-        // 把被撤回的消息文本回填到输入框（可在设置页关闭）
-        // fillTarget 只在撤回链路上赋值（fork 出的 childId 或原 sessionId），
-        // 断言收口——撤回执行必有会话上下文
-        if (pluginConfig.refillDraft) {
-          fillDraft(fillTarget as string, text, attachmentFiles)
-          // 文件附件（非图片）没有回读通道：官方 session.attachment 只认图片引用
-          // （Host 侧 referencedImage + readImage，file 块直接判 ATTACHMENT_NOT_
-          // REFERENCED），插件侧读不到字节就必然填不回输入框。文本与图片照常
-          // 回填，这里只把「少了什么」讲清楚，免得用户以为回填是完整的。
-          if (fileBlocks.length > 0) showThrottledToast(t('toast.fileAttachRefill'))
-        }
         setHasSnapshot(false)
-        // 注：快照 tag 在 Host 侧有意保留（幂等回退），刷新页面后该消息的
-        // 撤回按钮会重新出现——这是「可再次回退到同一点」的特性而非 bug。
-        setRecall({ stage: 'done', count: typeof res.count === 'number' ? res.count : changes.length, chatReverted, chatError })
+        if (isEdit) {
+          // 编辑收尾：只有真的 fork 出新会话才回填并发送——fork 失败时原会话
+          // 还在、原消息也还在，自动发出会变成同一会话里的重复消息
+          if (chatReverted) {
+            fillDraft(fillTarget as string, editText === null ? '' : editText, attachmentFiles, {
+              submit: pluginConfig.editSubmitsImmediately,
+            })
+            setEdit({ stage: 'idle' })
+          } else {
+            setEdit({ stage: 'error', text: editText === null ? '' : editText, attachments: attachmentRefs.length, message: chatError || t('edit.forkFailed') })
+          }
+        } else {
+          // 把被撤回的消息文本回填到输入框（可在设置页关闭）
+          // fillTarget 只在撤回链路上赋值（fork 出的 childId 或原 sessionId），
+          // 断言收口——撤回执行必有会话上下文
+          if (pluginConfig.refillDraft) {
+            fillDraft(fillTarget as string, text, attachmentFiles)
+            // 文件附件（非图片）没有回读通道：官方 session.attachment 只认图片引用
+            // （Host 侧 referencedImage + readImage，file 块直接判 ATTACHMENT_NOT_
+            // REFERENCED），插件侧读不到字节就必然填不回输入框。文本与图片照常
+            // 回填，这里只把「少了什么」讲清楚，免得用户以为回填是完整的。
+            if (fileBlocks.length > 0) showThrottledToast(t('toast.fileAttachRefill'))
+          }
+          // 注：快照 tag 在 Host 侧有意保留（幂等回退），刷新页面后该消息的
+          // 撤回按钮会重新出现——这是「可再次回退到同一点」的特性而非 bug。
+          setRecall({ stage: 'done', count: typeof res.count === 'number' ? res.count : changes.length, chatReverted, chatError })
+        }
         // 终态上报（issue #19）：撤回链完整走完才发 complete（fork 失败路径
         // 已发过 failed(fork)，按 chatError 收口防双发矛盾终态——complete 与
         // failed 并存会让下游按 (sessionId,messageId,cutSeq) 幂等去重失灵）
@@ -738,7 +772,7 @@ export function buildRecallNode(
         }
       }).catch((error) => {
         // 端点异常落错误态（文件可能未回退，面板提示可重试）
-        setRecall({ stage: 'error', message: String(error) })
+        setStage({ stage: 'error', message: String(error) })
         // 终态上报（issue #19）：execute 抛异常发 failed(execute)——此时文件
         // 是否已回退不确定（规格 §一注明），下游按 stage 自行决定保守策略
         api('notify', buildRecallNotify(notifyBase, { outcome: 'execute-threw', cutSeq: previewCut, error: String(error) })).catch(() => {})
@@ -816,15 +850,53 @@ export function buildRecallNode(
         title: t('action.recall.title'),
         onClick: openPreview
       }, React.createElement(UndoIcon, {})))
+      // 编辑入口与撤回并列（issue #26）：撤回是破坏性操作，编辑是新增路径，
+      // 混成一个二级菜单会让「确认回退」的语义被稀释。已在编辑态则不再显示
+      // ✎（点了也是空操作，留着只会让人以为「再点一次能重置」）
+      if (edit.stage === 'idle') {
+        actions.push(React.createElement('button', {
+          key: 'edit',
+          type: 'button',
+          className: 'dsh-recall-action',
+          'aria-label': t('action.edit'),
+          title: t('action.edit.title'),
+          onClick: openEdit
+        }, React.createElement(EditIcon, {})))
+      }
     }
 
     // 宽度约束按面分派：官方面需要外层全宽，官方 .userStack 的百分比才能按整列
     // 解析；legacy/回落面保留 stack 原 cap，自绘气泡的长文本宽度才与官方一致
     const stackClass = 'dsh-recall-stack' + (officialFace ? ' dsh-recall-stack-official' : '')
-    return React.createElement('div', { className: 'dsh-recall-row', 'data-time-hover-root': true },
-      bubbleChildren.length > 0 ? React.createElement('div', { className: stackClass, key: 'stack' }, ...bubbleChildren) : null,
+    // 气泡原位编辑：编辑态用编辑框顶替气泡本身（不是另起面板），宽度沿用进
+    // 编辑前实测的气泡宽，动作行仍在下方原位不动
+    const editing = edit.stage !== 'idle'
+    const stack = editing
+      ? React.createElement('div', { className: stackClass + ' dsh-recall-stack-editing', key: 'stack' },
+          EditPanel({
+            stage: edit,
+            submitLabel: t(pluginConfig.editSubmitsImmediately ? 'edit.submit' : 'edit.submit.draftOnly'),
+            width: editSize,
+            onChange: (next: string) => setEdit((prev) => (prev.stage === 'editing' || prev.stage === 'error')
+              ? { stage: 'editing', text: next, attachments: prev.attachments }
+              : prev),
+            onSubmit: submitEdit,
+            onClose: closeEdit,
+          })
+        )
+      : (bubbleChildren.length > 0
+          ? React.createElement('div', { className: stackClass, key: 'stack', ref: stackRef }, ...bubbleChildren)
+          : null)
+    return React.createElement('div', {
+      className: 'dsh-recall-row',
+      'data-time-hover-root': true,
+      'data-editing': editing ? 'true' : undefined,
+      // 版本翻页器据此确认「当前是哪个会话」（官方槽只给 messageId）
+      'data-recall-session': sessionId || undefined,
+    },
+      stack,
       React.createElement('div', { className: 'dsh-recall-actions', key: 'actions' }, ...actions),
-      recallPanel(recall, closePanel, executeRecall, scope, setScope)
+      recallPanel(recall, closePanel, () => executeRecall(), scope, setScope)
     )
   }
 

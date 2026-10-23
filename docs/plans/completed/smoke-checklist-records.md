@@ -301,3 +301,26 @@
 - **撤回链（rc.2 上）— 通过**：① P0-1 护栏正常拦截（agent 运行中点撤回 → 面板「无法回退：Agent 正在运行中」）；② 停止生成后撤回：首条消息 `cutSeq=null` → 「仅回退项目文件」，agent 生成期间新增的 `_probe/png_probe.py` 删除（`_probe/` 空目录残留＝git 语义，非缺陷）、`a3.txt` v5→v2 恢复、结果面板「回退完成」；③ **STALE 自动重拉实测**：预览后文件再变 → 确认时面板自动刷新为「修改 1 · 删除 1」（不执行旧预览）✓。
 - **环境坑（非插件）**：本机 `write_to_file` 对**已存在文件**的写入两次出现未落盘（`a3.txt` mtime 未变），改用 `node fs.writeFileSync` 直写后一切正常——撤回/diff 全程基于真实磁盘，结论不受影响；记录以备后续测试避坑。
 - **收尾**：`.bak-rc2smoke` 还原（170298 B）、3081 已停、浏览器已关、截图 `D:\tmp\recall-rc2-smoke.png`；rc.2 临时安装保留在 `D:\tmp\dsh-rc2`（可删）。
+
+## 2026-10-23 编辑并重发（issue #26，清单第十节）
+
+- **环境**：Windows 10 ｜ dsh 0.2.1-rc.2（全局）｜ `dsh --profile web --port 7899 --no-open` ｜ 插件＝web profile 临时切 `link:D:\workspace\dsh-plugin\dsh-recall-plugin`（工作区构建 2.5.0，`lib/client.js` 175,326 B）｜ 工作区 `D:\tmp\recall-h0` ｜ agent-browser 实弹
+- **结果**：E-1〜E-4 全通过、E-5 由组件测试覆盖；连续两次编辑（B01→B02、C01→C02）均正常，无新缺陷
+- **链路证据**：
+  - 编辑面板：标题「编辑并重发」、textarea 预填与原消息逐字一致、主按钮「编辑并发送」、附件场景多一行「原消息的 1 个附件会一并带入新消息」；打开面板零网络请求
+  - 提交：新会话历史恰为 `A01/A1 → B02/B2 → C02/C2`，`B01` 与 `C01` 均不存在；输入框在自动发送后已清空
+  - 归档：原会话「冒烟A01与B01回复验证」在「视图选项 → 仅显示已归档」可见，切回「隐藏已归档」后主列表只剩新会话
+  - 磁盘：`lineage.json` 精确 +1（`childId` ↔ `parentId`，time 与 store mtime 对齐）；`recall-intent.json` 无本次残留（最新写入仍是 10-16）；无新增 `snap-pre-rollback-*`（session-only 不打安全快照）
+  - 附件：C02 消息带 `smoke-attach.png` 缩略图且 agent 回复「收到C2」——附件随该轮消息发出、未滞留在输入框，说明「等附件链路走完再 submit」的时序生效
+- **发现**：无阻塞项。三条观察：① 编辑后标题由官方 titles bundle 重新生成为「冒烟测试A01与B02」，未出现「xxx 2」递增（fork 未传 `increaseTitle`）；② 两次编辑都在 agent 空闲态发起，`AGENT_BUSY` 护栏未被触发（该面由 P0-1 全链既有验收覆盖）；③ 首条消息拒绝面实机未构造（新会话首条消息即 `cutSeq=null`，单独构造需再跑一轮 agent），由 `tests/client/edit-flow.test.ts` 的「cutSeq null → 零 execute、零 setDraft」覆盖
+- **收尾**：web profile 已还原 npm 模式（`pnpm install` 回 2.4.16、junction 解除、备份文件删除）、7899 已停、浏览器已关、`D:\tmp\smoke-attach.png` 与启动日志已清理；测试会话「冒烟测试A01与B02」保留在 `D:\tmp\recall-h0` 供复验
+
+## 2026-10-23 气泡原位编辑 + 版本翻页器（同日二次迭代，清单第十节 E-6/E-7）
+
+- **环境**：Windows 10 ｜ dsh 0.2.1-rc.2 ｜ `dsh --profile web --port 7901 --no-open` ｜ web profile **常驻 link 模式**（工作区 2.5.0，`lib/client.js` 185,552 B）｜ 工作区 `D:\tmp\recall-h0` ｜ agent-browser
+- **结果**：E-6/E-7 通过；E-5（首条消息拒绝）在第二轮实机中顺带命中。两轮迭代各修掉一个实现缺陷，见下
+- **E-6 气泡原位编辑**：点 ✎ 后气泡本体被编辑框顶替（`data-editing` 落在消息行上，动作行保留原位），编辑框宽度取进入前 `getBoundingClientRect()` 实测的气泡宽（短消息 220px，即 `min 220` 下限），textarea 预填原文逐字一致；取消后气泡恢复。原实现（消息下方面板）的纵向冗余消失
+- **E-7 版本翻页器**：一次编辑重发后最后一轮回答操作区出现 `‹2/2›`；点 ‹ 后标题回退到第一版会话、翻页器变 `‹1/2›`、侧栏只剩该版本（另一版本已归档）；点 › 切回，`‹2/2›` 与标题同步恢复；历史回合的空容器被 `:empty` 隐藏，不占位
+- **缺陷 1（翻页器不出场）**：`pagers:0` 但 `tails:2`、localStorage 里家族已写入。两个原因叠加：① 首版只在 `visible` 为真时渲染，而 `visible` 靠 `ref.current.closest('[data-turn-tail]')` 判定——返回 `null` 时 ref 从未挂载，永远判不出「我是最后一个回合」（自锁）；② list 槽注册只给了 `name`，缺 `id`，条目未登场。修复：容器无条件渲染、空则 `:empty` 隐藏；注册补 `{ id, order, inject(sessionId) }`（对照官方 `dsh-client-ui-message-feedback` 写法）
+- **缺陷 2（会话 id 拿不到）**：assistant-actions 槽 props 只有 `messageId`，无法查版本家族。修复：用槽的 `inject(sessionId)` 回调注入；并保留两条兜底——消息行上的 `data-recall-session` 与 `activeSession` 共享位
+- **收尾**：7901 已停、浏览器已关、启动日志清理；`link` 模式保留（用户要求）
