@@ -48,8 +48,8 @@ export const Config = Schema.object({
   // issue #24：单文件上限挡不住「大量小文件」——下载目录 321 个 ≤100MB 文件
   // 合计 1.05GB 全部进快照。总量超限时**整体停用该工作区快照**而非截断：
   // 截断快照回退时，未纳入的文件会命中回退脚本的「当前有、目标无」删除侧。
-  maxWorkspaceBytes: withVolatile(Schema.number().default(268435456).description('单工作区可纳入快照的文件总量上限，超过即停用该工作区快照；0 表示不限制')),
-  scanBudgetMs: withVolatile(Schema.number().default(10000).description('快照前扫描（遍历工作区统计总量）的时间预算，超时即停用本次快照；0 表示不限制')),
+  maxWorkspaceBytes: withVolatile(Schema.number().default(268435456).description('单工作区可纳入快照的文件总量上限，口径与 git add 一致（含 .gitignore），超过即停用该工作区快照；0 表示不限制')),
+  scanBudgetMs: withVolatile(Schema.number().default(10000).description('快照前统计纳入总量的时间预算，超时即停用本次快照；0 表示不限制')),
   maxSnapshotsPerWorkspace: withVolatile(Schema.number().default(500).description('每个工作区保留的最大快照数，超限删除最旧的')),
   baseExcludes: withVolatile(Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）')),
   refillDraft: withVolatile(Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框')),

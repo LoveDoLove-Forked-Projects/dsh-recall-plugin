@@ -49,4 +49,12 @@ describe('buildSnapshotLimitNotice', () => {
     expect(buildSnapshotLimitNotice({ kind: 'time', value: 12000, limit: 10000 })).toContain('12 秒')
     expect(buildSnapshotLimitNotice({ kind: 'time', value: 200, limit: 100 })).toContain('1 秒')
   })
+
+  // issue #28：不写明口径，用户会以为工作区真的这么大，去调大上限——那反而把
+  // .gitignore 里的产物真的收进对象库，与该护栏的初衷相反。
+  it('bytes：写明已按 .gitignore 与排除表过滤，且仍在长度预算内', () => {
+    const s = buildSnapshotLimitNotice({ kind: 'bytes', value: 311184016, limit: 268435456 })
+    expect(s).toContain('.gitignore')
+    expect(s.length).toBeLessThanOrEqual(140)
+  })
 })

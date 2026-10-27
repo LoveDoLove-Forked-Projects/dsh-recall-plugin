@@ -62,9 +62,12 @@ function bytesText(bytes: number): string {
 
 // 停用说明（snapFeedback.error 直显 + 最近错误同文案）：≤140 字符、给出
 // 可行动的出口（调大对应上限或补充排除表），修好后下一次快照自动恢复。
+// 字节口径必须写明「已按 .gitignore 与排除表过滤」（issue #28）：不写会让人
+// 以为工作区真的这么大，进而去调大上限——那反而把 gitignore 里的垃圾真的收进
+// 对象库，与该护栏的初衷相反。
 export function buildSnapshotLimitNotice(limit: SnapshotLimit): string {
   if (limit.kind === 'bytes') {
-    return '该工作区可纳入快照的文件总量超过上限（约 ' + bytesText(limit.value) + ' / ' + bytesText(limit.limit) + '），已停用快照；可调大「工作区总量上限」或补充排除表后自动恢复'
+    return '该工作区可纳入快照的文件总量超过上限（约 ' + bytesText(limit.value) + ' / ' + bytesText(limit.limit) + '，已按 .gitignore 与排除表过滤），已停用快照；可调大「工作区总量上限」或补充排除表后自动恢复'
   }
   return '快照前的文件扫描超过时间预算（约 ' + Math.max(1, Math.round(limit.value / 1000)) + ' 秒 / ' + Math.max(1, Math.round(limit.limit / 1000)) + ' 秒），已停用快照；可调大「扫描时间预算」或补充排除表后自动恢复'
 }

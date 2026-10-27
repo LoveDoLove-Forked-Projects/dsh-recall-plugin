@@ -67,15 +67,17 @@ function dropGitlinksBlock() {
   return [
     '"$git" --git-dir="$g" ls-files -z --stage | while IFS= read -r -d \'\' e; do',
     '  case "$e" in',
-    "    160000\\ *) p=${e#*$'\\t'}; \"$git\" --literal-pathspecs --git-dir=\"$g\" update-index --force-remove -- \"$p\" ;;",
+    // --work-tree 不可省：影子仓库是 bare 仓库，裸 --git-dir 下 update-index 会
+    // fatal "this operation must be run in a work tree"，set -e 直接终止整条快照
+    "    160000\\ *) p=${e#*$'\\t'}; \"$git\" --literal-pathspecs --git-dir=\"$g\" --work-tree=\"$root\" update-index --force-remove -- \"$p\" ;;",
     '  esac',
     'done'
   ].join('\n')
 }
 
 // exclude 表 basename 形式 pattern（见 pwsh 版同注释）转 find 的目录剪枝前缀。
-// 抽成独立块：oversizeBlock 与 issue #24 的 limitScanBlock 都要用同一份 prune
-// 数组；两处各自调用一次（重复构建同一数组，无状态副作用）。
+// 只服务 oversizeBlock：issue #28 起 limitScanBlock 的清单由 git 给，不再自己
+// 遍历工作区，也就不再需要这份剪枝数组。
 // 依赖前置的 excludeSyncBlock 定义的 $new_exc。
 // 括号是数组元素里的**数据**，不经过 shell 分词——写成 "\(" 时 bash 不剥
 // 反斜杠，find 收到两字符 token \( 直接报「paths must precede expression」
@@ -114,32 +116,48 @@ function oversizeBlock(maxBytes: number): string {
     dirPruneArgsBlock(),
     'find "$root" "${oversize_prune[@]}" -type f -size +' + String(maxBytes || MAX_FILE_BYTES) + 'c -print0 2>/dev/null | while IFS= read -r -d \'\' f; do',
     '  printf \'%s\\0\' "${f#"$root"/}"',
-    "done | xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" update-index --force-remove -- 2>/dev/null || true",
+    // --work-tree 不可省：bare 影子仓库下裸 update-index fatal（被 || true 吞掉
+    // 后大文件会静默留在 index 里），maxFileBytes 的承诺会形同虚设
+    "done | xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" --work-tree=\"$root\" update-index --force-remove -- 2>/dev/null || true",
   ].join('\n')
 }
 
-// issue #24：快照前置护栏——统计「可纳入快照的文件总量」与耗时，任一超限即
+// issue #24：快照前置护栏——统计「真正会进快照的文件总量」与耗时，任一超限即
 // 整体停用本次快照（输出 SNAP_LIMIT 后 exit 0），不执行 add。停用而非截断的
-// 理由与 pwsh 版同名函数注释一致（截断快照回退会误删未纳入文件）。
-// GNU find 有 -printf、macOS BSD find 没有：探测后二选一，两条路径都批量输出
-// 文件大小——逐文件 stat 在十万文件量级会退化成十万次进程。
+// 理由、issue #28 的口径修正（清单由 git 给、-c/--exclude-standard 为何都必须
+// 带上、失败为何 fail-open）与 pwsh 版同名函数注释一致，此处不重复。
+// GNU find 有 -printf、macOS BSD find 没有：探测后二选一（只用来判别 stat 方言）。
+// 批量 stat 而非逐文件 fork——十万文件量级逐次 fork 会退化成十万次进程。
 // 预算只有秒精度（date +%s）：遍历中无法中断，事后比较已足够——超预算即停用，
-// 中途省下的遍历时间不是语义要求。依赖 $root/$new_exc 与前置 excludeSyncBlock。
+// 中途省下的遍历时间不是语义要求。
+// 依赖 $git/$g/$root 与前置 excludeSyncBlock（info/exclude 必须先是最新的，
+// 否则 --exclude-standard 读到的还是上一轮的排除表）。
 function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number): string {
   const limit = maxBytes > 0 ? String(maxBytes) : '0'
   const fileLimit = String(fileMaxBytes || MAX_FILE_BYTES)
   const budgetS = budgetMs > 0 ? String(Math.ceil(budgetMs / 1000)) : '0'
   return [
-    dirPruneArgsBlock(),
     'limit_start=$(date +%s)',
-    'if find "$root" -maxdepth 0 -printf \'\' >/dev/null 2>&1; then',
-    '  limit_sizes=$(find "$root" "${oversize_prune[@]}" -type f -printf \'%s\\n\' 2>/dev/null)',
-    'else',
-    '  limit_sizes=$(find "$root" "${oversize_prune[@]}" -type f -exec stat -f%z {} + 2>/dev/null)',
+    'limit_tmp="$g/limit-scan.$$"',
+    'limit_scan_ok=0',
+    // set -e：条件位置豁免，ls-files 失败不终止脚本——fail-open 只放行不判定
+    'if "$git" -c core.quotePath=false --git-dir="$g" --work-tree="$root" ls-files -z -co --exclude-standard > "$limit_tmp" 2>/dev/null; then',
+    '  limit_scan_ok=1',
     'fi',
-    // 口径 = 实际会进快照的字节：超过单文件上限的文件随后被 oversizeBlock
-    // 移出 index，不计入总量（同 pwsh 侧，防一个大文件把干净项目误判超限）
-    'limit_total=$(printf \'%s\\n\' "$limit_sizes" | awk -v lim=' + limit + ' -v flim=' + fileLimit + ' \'{ if ($1 <= flim) { s += $1; if (lim > 0 && s > lim) { print "OVER " s; exit } } } END { if (lim <= 0 || s <= lim) print s }\')',
+    'limit_sizes=""',
+    'if [ "$limit_scan_ok" = 1 ] && [ -s "$limit_tmp" ]; then',
+    // ls-files 输出相对 root 的路径，而脚本 cwd 是宿主工作目录：必须 cd 进去再 stat
+    '  if find "$root" -maxdepth 0 -printf \'\' >/dev/null 2>&1; then',
+    "    limit_sizes=$(cd \"$root\" && xargs -0 stat -c '%s %F' -- < \"$limit_tmp\" 2>/dev/null || true)",
+    '  else',
+    "    limit_sizes=$(cd \"$root\" && xargs -0 stat -f '%z %HT' -- < \"$limit_tmp\" 2>/dev/null || true)",
+    '  fi',
+    'fi',
+    'rm -f "$limit_tmp"',
+    // 目录条目（嵌套仓库在 ls-files 里输出 `dir/`）不计入：add 侧同样不纳入它
+    // 的内容（gitlink 被剔除 / 无提交时 unable to index）；越过单文件上限的也
+    // 不计入——oversizeBlock 随后会把它移出 index
+    'limit_total=$(printf \'%s\\n\' "$limit_sizes" | awk -v lim=' + limit + ' -v flim=' + fileLimit + ' \'{ if (tolower($0) ~ /directory/) next; if ($1 <= flim) { s += $1; if (lim > 0 && s > lim) { print "OVER " s; exit } } } END { if (lim <= 0 || s <= lim) print s }\')',
     'limit_elapsed=$(( $(date +%s) - limit_start ))',
     'case "$limit_total" in',
     '  OVER\\ *) echo "SNAP_LIMIT bytes ${limit_total#OVER } ' + limit + '"; exit 0 ;;',
@@ -193,7 +211,14 @@ function excludeSyncBlock(excludeFile: string, base: string[]): string {
     'old_exc=$(cat "$exc" 2>/dev/null || true)',
     'if [ "$new_exc" != "$old_exc" ]; then',
     "  printf '%s\\n' \"$new_exc\" > \"$exc\"",
-    '  "$git" -c core.quotePath=false --literal-pathspecs --git-dir="$g" ls-files -i -c --exclude-from="$exc" -z 2>/dev/null | xargs -0 "$git" --literal-pathspecs --git-dir="$g" update-index --force-remove -- 2>/dev/null || true',
+    // 影子仓库是 bare：写 index 必须显式 --work-tree，否则 update-index fatal
+    // 并被 || true 吞成「排除对已跟踪条目从未生效」。ensureGitScript 也走本函数
+    // 但没有 root（建仓不遍历工作区），那时退回原调用（命中通常为空，fail-open）
+    '  if [ -n "${root:-}" ]; then',
+    '    "$git" -c core.quotePath=false --literal-pathspecs --git-dir="$g" ls-files -i -c --exclude-from="$exc" -z 2>/dev/null | xargs -0 "$git" --literal-pathspecs --git-dir="$g" --work-tree="$root" update-index --force-remove -- 2>/dev/null || true',
+    '  else',
+    '    "$git" -c core.quotePath=false --literal-pathspecs --git-dir="$g" ls-files -i -c --exclude-from="$exc" -z 2>/dev/null | xargs -0 "$git" --literal-pathspecs --git-dir="$g" update-index --force-remove -- 2>/dev/null || true',
+    '  fi',
     'fi',
   ].join('\n')
 }

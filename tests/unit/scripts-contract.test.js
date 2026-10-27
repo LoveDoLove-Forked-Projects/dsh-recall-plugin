@@ -206,6 +206,61 @@ describe('关键模板结构断言', () => {
     }
   })
 
+  // issue #28：口径必须与 add -A 同源。护栏自己遍历目录时只认 baseExcludes +
+  // exclude.txt，看不见 .gitignore / 全局 excludesFile / 反选规则——实测把 130 MB
+  // 的项目量成 297 MB 并整区停用。`ls-files -z -co --exclude-standard` 是唯一
+  // 与 add 共用排除引擎的口径；-c（已跟踪）或 --exclude-standard 缺一都会失真，
+  // 故三个开关逐字钉在断言里。
+  it('issue #28：护栏清单走 ls-files -z -co --exclude-standard（两侧）', () => {
+    for (const module of [pwsh, posix]) {
+      const s = module.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+      const listAt = s.indexOf('ls-files -z -co --exclude-standard')
+      expect(listAt).toBeGreaterThan(-1)
+      expect(listAt).toBeLessThan(s.indexOf('SNAP_LIMIT'))
+      // 旧的自我遍历两种形态都不得复活：pwsh 的 .NET 目录栈、posix 的 find 求和
+      expect(s).not.toContain('$limitStack')
+      expect(s).not.toContain('limit_sizes=$(find')
+    }
+  })
+
+  // PS 5.1 特有：EAP=Stop 时 native stderr 会被包成 ErrorRecord 直接抛（pwsh 7
+  // 不抛），win32 直连通道跑的正是 5.1——ls-files 的一条 warning 就能让整条快照
+  // 挂掉，必须与 add 段同款临时降级并在 finally 恢复。
+  it('issue #28：pwsh 侧调 ls-files 前降 EAP 并在 finally 恢复', () => {
+    const s = pwsh.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    const lines = s.split(/\r?\n/)
+    const listAt = lines.findIndex((line) => line.includes('ls-files -z -co --exclude-standard'))
+    const downAt = lines.findIndex((line) => line.trim() === "$ErrorActionPreference = 'Continue'")
+    expect(listAt).toBeGreaterThan(-1)
+    expect(downAt).toBeGreaterThan(-1)
+    expect(downAt).toBeLessThan(listAt)
+    expect(s).toContain('} finally { $ErrorActionPreference = $limitEap }')
+  })
+
+  // posix 侧靠 xargs 批量 stat（逐文件 fork 在十万级会退化成十万次进程），
+  // 目录条目（嵌套仓库输出 dir/）按 %F/%HT 的类型列排除；临时清单无条件清理。
+  it('issue #28：posix 侧批量 stat、排除目录条目并清理临时清单', () => {
+    const s = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect(s).toContain("xargs -0 stat -c '%s %F'")
+    expect(s).toContain("xargs -0 stat -f '%z %HT'")
+    expect(s).toContain('tolower($0) ~ /directory/')
+    expect(s).toContain('rm -f "$limit_tmp"')
+    // set -e 下条件位置豁免：ls-files 失败只让 limit_scan_ok 保持 0（fail-open）
+    expect(s).toContain('limit_scan_ok=0')
+  })
+
+  // 影子仓库是 `git init --bare` 建的：裸 `--git-dir` 下 git 认为没有工作树，
+  // update-index 直接 fatal "this operation must be run in a work tree"。
+  // pwsh 对 native 非零不抛 → gitlink / 超大文件静默留在 index；posix 在 set -e
+  // 下整条快照失败，或被 `|| true` 吞成「排除对已跟踪条目从未生效」。
+  // 三处写 index 的调用（dropGitlinks / oversize / excludeSync）必须都带。
+  it('bare 影子仓库：update-index 一律显式 --work-tree', () => {
+    const pwshSnap = pwsh.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect((pwshSnap.match(/--git-dir=\$g --work-tree=\$root update-index/g) || []).length).toBeGreaterThanOrEqual(3)
+    const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect((posixSnap.match(/--git-dir="\$g" --work-tree="\$root" update-index/g) || []).length).toBeGreaterThanOrEqual(3)
+  })
+
   it('两侧 UTF8_PRELUDE 非空（编码前导是 runShell 统一前置注入的契约）', () => {
     expect(pwsh.UTF8_PRELUDE.length).toBeGreaterThan(0)
     expect(posix.UTF8_PRELUDE.length).toBeGreaterThan(0)
@@ -368,9 +423,14 @@ describe('关键模板结构断言', () => {
     // 旧的逐条 update-index（对单个 $rel / $_ 调用）退役
     expect(pwshSnap).not.toContain('update-index --force-remove -- $_')
     expect(pwshSnap).not.toContain("Replace('\\','/')\n        & $git")
-    // posix：xargs -0 自适应批次（空格/中文路径不分裂），excludeSync + oversize 两处
+    // posix：xargs -0 自适应批次（空格/中文路径不分裂）。用途各自钉住——
+    // excludeSync 清命中条目（有 root / 无 root 两条分支各一条）、oversize
+    // 剔大文件（都用 --literal-pathspecs），外加 issue #28 护栏的 stat 两种
+    // 方言（GNU %F / BSD %HT）各一处
     const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
-    expect(posixSnap.match(/xargs -0/g).length).toBe(2)
+    expect(posixSnap.match(/xargs -0/g).length).toBe(5)
+    expect(posixSnap.match(/xargs -0 "\$git" --literal-pathspecs/g).length).toBe(3)
+    expect(posixSnap.match(/xargs -0 stat /g).length).toBe(2)
     // oversize 侧不再逐条（" $rel" 逐条退役）；dropGitlinks 的逐条 "$p" 是
     // PF-9 方案明确「保留不动」的（gitlink 常态 0 条，无收益）
     expect(posixSnap).not.toContain('update-index --force-remove -- "$rel"')

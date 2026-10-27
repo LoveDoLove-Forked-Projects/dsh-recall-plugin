@@ -64,12 +64,16 @@ export function stripBom(text: string): string {
 // 嵌套 git 仓库（工作区里的子项目自带 .git）会被 add -A 记成 gitlink（160000）；
 // gitlink 残留在 index 时 add -A 会 fatal "in unpopulated submodule"，
 // 且 gitlink 对文件回退毫无意义——所以 add 前后各清一次，子仓库内容不进快照。
-// 依赖外层脚本已定义的 $git/$g；被 snapshot/diff/rollback 三处复用。
+// 写 index 的调用必须显式 --work-tree：影子仓库是 `git init --bare` 建的，
+// 裸 `--git-dir` 下 git 认为没有工作树，update-index 直接 fatal
+// "this operation must be run in a work tree"（pwsh 对 native 非零不抛，
+// 表现为 gitlink 静默留在 index 里）。
+// 依赖外层脚本已定义的 $git/$g/$root；被 snapshot/diff/rollback 三处复用。
 function dropGitlinksBlock() {
   return [
     "& $git --git-dir=$g ls-files --stage | Where-Object { $_ -like '160000*' } | ForEach-Object {",
     "  $p = ($_ -split \"`t\")[1]",
-    '  & $git --literal-pathspecs --git-dir=$g update-index --force-remove -- $p',
+    '  & $git --literal-pathspecs --git-dir=$g --work-tree=$root update-index --force-remove -- $p',
     '}'
   ].join('\n')
 }
@@ -183,46 +187,59 @@ function oversizeBlock(maxBytes: number): string {
     '}',
     'for ($i = 0; $i -lt $oversizeRel.Count; $i += 100) {',
     '  $batch = $oversizeRel.GetRange($i, [Math]::Min(100, $oversizeRel.Count - $i))',
-    '  & $git --literal-pathspecs --git-dir=$g update-index --force-remove -- $batch',
+    // --work-tree 不可省：bare 影子仓库下裸 update-index 会 fatal，pwsh 不抛
+    // → 大文件静默留在 index 里，maxFileBytes 的承诺形同虚设
+    '  & $git --literal-pathspecs --git-dir=$g --work-tree=$root update-index --force-remove -- $batch',
     '}'
   ].join('\n')
 }
 
-// issue #24：快照前置护栏——一次目录遍历同时统计「可纳入快照的文件总量」与
-// 耗时，任一超限即整体停用本次快照（输出 SNAP_LIMIT 后 exit 0），不执行
-// add/write-tree/tag。为什么停用而不是截断：回退脚本按 index 清单删「当前有、
-// 目标无」的文件，截断快照里缺失的文件会在回退时被当新增删除。为什么放在
-// add 之前：总量超限时 add -A 的 hash 与对象写入才是 CPU/磁盘的主要开销，
-// 先判后跑才止得住血。目录剪枝判据与 oversizeBlock 同源（exclude 表 basename
-// 项 + reparse 点），两次遍历各自建集而非共享：两者在脚本里独立可调用。
-// 依赖外层已定义的 $git/$g/$root/$lines。
+// issue #24：快照前置护栏——统计「真正会进快照的文件总量」与耗时，任一超限
+// 即整体停用本次快照（输出 SNAP_LIMIT 后 exit 0），不执行 add/write-tree/tag。
+// 为什么停用而不是截断：回退脚本按 index 清单删「当前有、目标无」的文件，截断
+// 快照里缺失的文件会在回退时被当新增删除。为什么放在 add 之前：总量超限时
+// add 的 hash 与对象写入才是 CPU/磁盘的主要开销，先判后跑才止得住血。
+// issue #28 口径修正：清单必须由 git 给。起先自己遍历目录、只认 baseExcludes +
+// exclude.txt，与 add -A 实际遵守的 .gitignore（每层继承）/ core.excludesFile /
+// 反选规则不是一回事——实测把 130 MB 的项目量成 297 MB 并整区停用，还把用户
+// 引向「调大上限」这个反向处置。`ls-files -co --exclude-standard` 与 add -A
+// 共用同一套排除引擎，两个开关都不能省：-c 省了会低估（已跟踪文件不会因后来
+// 命中 .gitignore 被移出快照），--exclude-standard 省了连被 ignore 的文件都会
+// 列出来（实测）。
+// 失败即 fail-open 不判定（不回落目录遍历）：两套口径并存会让同一工作区随
+// git 状态跳变，且此刻 add 多半也会失败，护栏已无意义。
+// 依赖外层已定义的 $git/$g/$root。
 function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number): string {
   const limit = maxBytes > 0 ? String(maxBytes) : '0'
   const fileLimit = String(fileMaxBytes || MAX_FILE_BYTES)
   const budget = budgetMs > 0 ? String(budgetMs) : '0'
   return [
     '$limitSw = [Diagnostics.Stopwatch]::StartNew()',
-    dirSkipSetBlock('limitSkip'),
-    '$limitStack = [System.Collections.Generic.Stack[string]]::new()',
-    '$limitStack.Push($root)',
     '$limitBytes = [long]0',
     "$limitHit = ''",
-    'while ($limitStack.Count -gt 0) {',
-    '  if (' + budget + ' -gt 0 -and $limitSw.ElapsedMilliseconds -gt ' + budget + ') { $limitHit = \'time\'; break }',
-    '  $dir = $limitStack.Pop()',
-    '  try {',
-    '    $di = [System.IO.DirectoryInfo]::new($dir)',
+    '$limitRc = 0',
+    '$limitFiles = @()',
+    // PS 5.1：native stderr 在 EAP=Stop 下会被包成 ErrorRecord 直接抛（pwsh 7
+    // 不抛），一条 warning 就能让整条快照挂掉——与下方 add 段同款临时降级
+    '$limitEap = $ErrorActionPreference',
+    "$ErrorActionPreference = 'Continue'",
+    'try {',
+    // -z：路径含换行也不分裂（实测 PS 5.1/7 的 @() 都保留 NUL）
+    "  $limitFiles = @(((& $git -c core.quotePath=false --git-dir=$g --work-tree=$root ls-files -z -co --exclude-standard 2>$null) -join '').Split([char]0))",
+    '  $limitRc = $LASTEXITCODE',
+    '} finally { $ErrorActionPreference = $limitEap }',
+    'if ($limitRc -eq 0) {',
+    '  foreach ($limitRel in $limitFiles) {',
+    // 两道守卫吸收两类异常条目：5.1 的 Split 会留尾部空串；目录条目（嵌套仓库
+    // 输出 `dir/`）的 Length 为空或抛——两者都不该计入（add 侧同样不纳入）
+    '    if (-not $limitRel) { continue }',
+    '    if (' + budget + ' -gt 0 -and $limitSw.ElapsedMilliseconds -gt ' + budget + ') { $limitHit = \'time\'; break }',
+    "    try { $limitLen = [System.IO.FileInfo]::new($root + '/' + $limitRel).Length } catch { $limitLen = [long]0 }",
     // 口径 = 实际会进快照的字节：超过单文件上限的文件随后被 oversizeBlock
     // 移出 index，不该计入总量（否则一个 300MB 视频就能把干净项目误判超限）
-    '    foreach ($f in $di.EnumerateFiles()) { if ($f.Length -le ' + fileLimit + ') { $limitBytes += $f.Length } }',
-    '    if (' + limit + ' -gt 0 -and $limitBytes -gt ' + limit + ') { $limitHit = \'bytes\' }',
-    '    if ($limitHit) { break }',
-    '    foreach ($d in $di.EnumerateDirectories()) {',
-    '      if ($limitSkip.Contains($d.Name)) { continue }',
-    '      if (($d.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { continue }',
-    '      $limitStack.Push($d.FullName)',
-    '    }',
-    '  } catch {}',
+    '    if ($limitLen -gt 0 -and $limitLen -le ' + fileLimit + ') { $limitBytes += $limitLen }',
+    '    if (' + limit + ' -gt 0 -and $limitBytes -gt ' + limit + ') { $limitHit = \'bytes\'; break }',
+    '  }',
     '}',
     "if ($limitHit -eq 'bytes') { Write-Output ('SNAP_LIMIT bytes ' + $limitBytes + ' ' + " + limit + "); exit 0 }",
     "if ($limitHit -eq 'time') { Write-Output ('SNAP_LIMIT time ' + $limitSw.ElapsedMilliseconds + ' ' + " + budget + "); exit 0 }",
@@ -291,7 +308,14 @@ function excludeSyncBlock(excludeFile: string, base: string[]): string {
     '  } else {',
     '    for ($i = 0; $i -lt $hit.Count; $i += 100) {',
     '      $batch = @($hit[$i..([Math]::Min($i + 99, $hit.Count - 1))])',
-    '      & $git --literal-pathspecs --git-dir=$g update-index --force-remove -- $batch',
+    // 影子仓库是 bare：写 index 必须显式 --work-tree，否则 update-index fatal。
+    // ensureGitScript 也走本函数但没有 $root（建仓不遍历工作区）——那时保留
+    // 原样调用，命中列表通常为空，最坏是清理静默跳过（fail-open）
+    '      if ($root) {',
+    '        & $git --literal-pathspecs --git-dir=$g --work-tree=$root update-index --force-remove -- $batch',
+    '      } else {',
+    '        & $git --literal-pathspecs --git-dir=$g update-index --force-remove -- $batch',
+    '      }',
     '    }',
     '  }',
     '}',
