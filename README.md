@@ -5,11 +5,11 @@
 [![npm version](https://img.shields.io/npm/v/dsh-recall-plugin?style=flat-square&label=npm&color=3178C6)](https://www.npmjs.com/package/dsh-recall-plugin)
 [![npm downloads](https://img.shields.io/npm/dm/dsh-recall-plugin?style=flat-square&label=downloads&color=1F883D)](https://www.npmjs.com/package/dsh-recall-plugin)
 ![License](https://img.shields.io/badge/license-MIT-blue)
-[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.2)
+[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.3-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.3)
 
 在任意一条你发过的消息下方点「↶ 撤回」——**工作区文件和对话历史一起回到那条消息发出之前的状态**。
 
-每条消息发送时，工作区先被快照进一个独立的影子 git 仓库（不碰项目自身的 git）；撤回时按快照恢复文件，并经 DSH 官方 `sessions.fork` 把对话切回该消息之前的 turn 边界，原会话归档保留、随时可找回。被撤回消息的文本与附件自动放回输入框，改完即可重发。快照存储默认落在 `$DSH_HOME` 下。最主要的边界：快照只在**消息发送时**创建，插件启用前的历史消息没有快照、不显示撤回按钮。
+每条消息发送时，工作区先被快照进一个独立的影子 git 仓库（不碰项目自身的 git）；撤回时按快照恢复文件，并经 DSH 官方 `sessions.fork` 把对话切回该消息之前的 turn 边界，原会话归档保留、随时可找回。被撤回消息的文本与附件自动放回输入框，改完即可重发；也可以点消息旁的「✎ 编辑」就地改完直接重发（不动文件），同一段对话的多个版本经 `‹ X/N ›` 翻页器来回切换。快照存储默认落在 `$DSH_HOME` 下。最主要的边界：快照只在**消息发送时**创建，插件启用前的历史消息没有快照、不显示撤回按钮。
 
 [更新日志](CHANGELOG.md)
 
@@ -17,11 +17,13 @@
 
 - [界面预览](#界面预览)
 - [功能亮点](#功能亮点)
+- [技术栈与依赖](#技术栈与依赖)
 - [已知限制](#已知限制)
 - [安装](#安装)
 - [使用](#使用)
 - [配置项](#配置项)
 - [快照维护与清理](#快照维护与清理)
+- [常见问题](#常见问题)
 - [工作原理](#工作原理)
 - [事件契约（供同宿主插件监听）](#事件契约供同宿主插件监听)
 - [参与贡献](#参与贡献)
@@ -52,6 +54,15 @@
 - **磁盘友好、自动维护**：快照走 git delta 增量压缩，大文件自动跳过（阈值可配）；定期无损 `git gc`、会话删除联动清理、按条数与保留天数自动清理；设置页提供**工作区 → 会话 → 快照**三级树形管理，支持搜索与分级删除。
 - **失败不静默、能自愈**（自愈 2.1+）：失败按根因分类（git 缺失 / 磁盘满 / 无权限 / 锁冲突 / 目录冲突）给出可行动提示，同类故障 10 分钟只打扰一次，原因进设置卡片「最近错误」；自动清理残骸、连续 3 次失败指数退避、多实例按心跳互让；无法索引的路径跳过并告知，不中断整条快照（撤回时也不触碰它们）。
 
+## 技术栈与依赖
+
+本插件是 DSH bundle 形态：host 半跑在 DSH 进程内（Node ESM），client 半跑在浏览器会话页内，两侧同出一个 npm 包，包本体零运行时 dependencies。
+
+- **运行时**：Node.js ≥ 20、git CLI；Windows 走 PowerShell 5.1/7，Linux/macOS 走 bash（按平台自动分叉）。
+- **语言与构建**：TypeScript + ESM；`npm run build` 经 esbuild 产出 `lib/`（host 逐文件转译、client 打包为单文件），产物随源码提交。
+- **测试与门禁**：vitest（纯逻辑单测、jsdom client 组件测试、官方 API 字段探针）+ `tsc --noEmit` 类型门禁 + 装配门禁脚本，详见「参与贡献 → 测试」。
+- **宿主依赖**（peerDependencies，随 DSH 安装提供，无需单独安装）：`@deepseek-ai/cordis` 4、`@deepseek-ai/dsh-*`（host-webserver / sandbox-policy / session / session-query / settings / shell）、`@deepseek-ai/schemastery` 3.18；`react` 18 为可选 peer（client 由宿主注入）。
+
 ## 已知限制
 
 设计上接受的边界与尚未覆盖的极端情形，使用前值得先确认。
@@ -73,7 +84,7 @@
 
 - git CLI：未安装时撤回按钮不出现（页面顶部会提示安装 git），不影响 DSH 运行。
 - shell：Windows 上 PowerShell 5.1 / 7 均可；Linux/macOS 需 bash。
-- DSH 版本：`0.1.2-alpha.1` 至 `0.2.1-rc.2`；已核验 minor 线内的后续版本自动放行，未核验的新 minor 线会被启动期兼容门禁拦截（开窗机制见下方折叠块）。
+- DSH 版本：`0.1.2-alpha.1` 至 `0.2.1-rc.3`；已核验 minor 线内的后续版本自动放行，未核验的新 minor 线会被启动期兼容门禁拦截（开窗机制见下方折叠块）。
 - **0.1.7-alpha.1 是破坏性版本**（shell 执行与 settings 面接口更换），插件内置双分支共存适配：同一发布同时兼容 0.1.2–0.1.6 各线与 0.1.7+，老版本 DSH 上行为不变。
 - `0.1.1-rc.2` 及更早不支持：那条线的客户端运行时没有 `sessions`/`workspaces`/`uiWorkspace` 服务，插件 UI 会静默不渲染。
 
@@ -142,8 +153,8 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 | `gcSnaps` | 50 | 每积累多少条快照触发一次 `git gc`（env `DSH_RECALL_GC_SNAPS` 可强制覆盖） |
 | `gcHours` | 24 | 距上次 gc 超过多少小时触发（与条数先到先触发；env `DSH_RECALL_GC_HOURS`） |
 | `maxFileBytes` | 8388608（8MB） | 超过该大小的文件不进快照、不被回退触碰 |
-| `maxWorkspaceBytes` | 268435456（256MB） | 单工作区可纳入快照的文件总量上限。超过时**停用该工作区快照**（不截断——截断快照回退时会误删未纳入的文件），并在最近消息上提示；调大该值或补充排除表后自动恢复；0 = 不限制 |
-| `scanBudgetMs` | 10000（10 秒） | 快照前的文件扫描时间预算。超过时停用本次快照并提示（防病态大目录拖死启动）；0 = 不限制 |
+| `maxWorkspaceBytes` | 268435456（256MB） | 单工作区可纳入快照的文件总量上限，口径与 `git add` 一致（`.gitignore`、`.git/info/exclude`、全局 excludesFile 都算数）。超过时**停用该工作区快照**（不截断——截断快照回退时会误删未纳入的文件），并在最近消息上提示；调大该值或补充排除表后自动恢复；0 = 不限制 |
+| `scanBudgetMs` | 10000（10 秒） | 快照前统计纳入总量的时间预算。超过时停用本次快照并提示（防病态大目录拖死启动）；0 = 不限制 |
 | `maxSnapshotsPerWorkspace` | 500 | 每个工作区保留的最大快照数，超限自动删除最旧的；0 = 不限制 |
 | `retentionDays` | 0 | 按天数保留快照，超期自动删除；0 = 不启用（与条数上限各自独立生效） |
 | `baseExcludes` | `.git`、`node_modules/`、`.dsh-recall-snapshots/`、`dsh-recall-snapshots/`、`target/`、`dist/`、`build/`、`out/`、`coverage/`、`.next/`、`.nuxt/`、`.output/`、`.cache/`、`.gradle/`、`*.exe`、`*.dll`、`*.pdb`、`*.so`、`*.dylib`、`*.msi`、`*.zip`、`*.7z`、`*.rar`、`*.tar`、`*.tar.gz`、`*.iso` | 基础排除表（gitignore 语法，优先级低于 exclude.txt）；被排除的大目录整棵子树不进快照扫描。其中「目录形态」项（如 `target/`）另有一层含义：**工作区根自身的路径段命中时，该工作区不启用快照**——在构建产物目录里开会话时排除表本来就管不到它自己（模式是相对该 root 的），这类目录也没有回退价值；删掉对应项即恢复 |
@@ -179,6 +190,20 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 
   对所有项目生效（home 不可写而降级到项目内存储时，该工作区有独立的排除配置，设置页会分卡片列出）。新增排除只影响之后的快照；**回退到更早的快照时，当时尚未排除的文件仍会被恢复**（回到当时的状态，这正是回退语义）。想彻底清掉已进快照的目录，可手动删除 home 下 `dsh-recall-snapshots/` 里对应项目的哈希目录。
 - **树形快照管理**：打开「**设置 → 插件配置 → 撤回插件 → 快照管理**」可看到三级树——工作区（文件夹名）→ 会话（会话标题，撤回链聚成版本家族）→ 快照（时间 + 消息内容摘要，悬停看完整内容）。支持搜索与「加载更多」，工作区与会话节点可展开/折叠；每一级右侧都有删除按钮，删除前二次确认——删工作区 = 清掉该工作区全部快照，删会话 = 清掉该会话全部快照，删叶子 = 只删那一条；顶部另有带确认的「全部删除」。
+
+## 常见问题
+
+使用中最常遇到的几类问题与排查路径；更完整的设计边界见上文「已知限制」，环境类失败（git 缺失 / 磁盘满 / 无权限等）的原因在设置卡片「最近错误」里可查。
+
+**消息旁没有「↶ 撤回」按钮？** 按概率排查：① 装完没重启 DSH 进程——重启后硬刷新页面（Ctrl+Shift+R）；② git CLI 不在 PATH——页面顶部会有安装提示；③ 该消息发送于插件启用之前——快照只在消息发送时创建，历史消息无快照；④ 该工作区被停用快照——工作区开在 `dist/`、`target/` 这类命中基础排除表目录形态的位置，或超出 `maxWorkspaceBytes` / `scanBudgetMs` 护栏，最近消息上会给出恢复提示（调大上限或补充排除表后自动恢复）。
+
+**撤回后个别文件没有恢复？** 该文件不在快照里：超过 `maxFileBytes`（默认 8MB）、命中排除表，或位于嵌套 git 仓库 / win32 目录重解析点内（见「已知限制」）。撤回前确认面板的清单就是实际回退范围，以它为准。
+
+**快照占用磁盘太多？** 打开「设置 → 插件配置 → 撤回插件 → 快照管理」查看各工作区占用，可「立即 gc」或按工作区 / 会话 / 单条分级删除；长期可压低 `maxSnapshotsPerWorkspace`、设置 `retentionDays`，或把大目录补进排除表。
+
+**如何彻底删除全部快照数据？** 卸载插件后手动删除 home 下 `dsh-recall-snapshots/`（即 `$DSH_HOME/dsh-recall-snapshots/`，未设置时为 `~/.dsh/dsh-recall-snapshots/`）；曾降级存储的工作区另删项目内 `.dsh-recall-snapshots/`。
+
+**会话第一条消息能撤回或编辑吗？** 文件可以回退，对话不能——fork 需要该消息之前的 turn 边界；「编辑并重发」对首条消息会被明确拒绝（原消息还在，补发即成重复消息）。
 
 ## 工作原理
 
@@ -289,9 +314,9 @@ pnpm install
 
 ### 测试
 
-- `npm test`：纯逻辑单测（vitest，39 个文件 505 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、磁盘格式守卫、操作意图 journal、撤回终态事件上报组装、i18n 词典与 key 漏配扫描、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
-- `npm run test:client`：client 组件测试（vitest + jsdom，6 个文件 96 例，CI 同跑）——撤回节点主链（preview→execute→fork→回填）与终态事件上报、快照管理树与删除流、配置/排除卡片错误路径、logger 开关矩阵、zh/en 双语渲染链；断言只锁行为与结构（className / aria / 请求载荷），不锁文案字面量；
-- `npm run test:probe`：官方 API 字段探针（2 个文件 54 例，依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
+- `npm test`：纯逻辑单测（vitest，41 个文件 524 例，无 DSH 依赖，CI 与本地同跑）——配置解析、快照解析器、救援编排、错误分类、磁盘格式守卫、操作意图 journal、撤回终态事件上报组装、i18n 词典与 key 漏配扫描、脚本模板同名导出契约、执行通道双分支与失败分级、settings 双代桥接、产物 root 与快照总量护栏、撤回 scope 分流、客户端纯函数、发布包内容布局、快照索引持久化、存储上限与保留天数等；
+- `npm run test:client`：client 组件测试（vitest + jsdom，9 个文件 121 例，CI 同跑）——撤回节点主链（preview→execute→fork→回填）与终态事件上报、编辑卡提交链与官方内容投影、版本家族登记与翻页、快照管理树与删除流、配置/排除卡片错误路径、logger 开关矩阵、zh/en 双语渲染链；断言只锁行为与结构（className / aria / 请求载荷），不锁文案字面量；
+- `npm run test:probe`：官方 API 字段探针（2 个文件 58 例，依赖本机 dsh 安装；dsh 升级后本地必跑）——钉住 `renderMessageImages`/`node`/`cwd`、`sessions.fork` 的 `atSeq`/`increaseTitle` 与切点锚点、`listSessions` 记录结构、`AgentRegistry`、shell 执行接缝（`execute`/`ShellExecution.result`）、settings 面（`SettingsForms`/profile 条目 id/volatile 门槛）、输入区写入链（`setDraft`/`addAttachments`/`submit`/`snapshot`/`createDrafts`）与 `loader/volatile-update`/`Fiber.entry` 形状等字段，违反即红；
 - `npm run verify:host`：装配门禁（依赖本机 dsh 安装）——用真实 cordis 起插件跑两个 pass（旧面桩 + 只给新面的桩），断言 inject 声明、端点注册、Config schema、卸载清理与 settings 面分派，装配回归发版前即可拦截；
 - `npm run typecheck`：`tsc --noEmit` 全量类型检查（含 `tests/types` 编译期契约断言，CI 中置于单测之前）；
 - `npm run build`：host+client 全量打包（改任何 `src/` 后必跑）；`npm run check:dsh`：dsh 版本巡检（发布前）；`npm run check:upgrade`：dsh 升级一键核验门禁（串联 check:dsh + test:probe + verify:host，dsh 升级后必跑）。

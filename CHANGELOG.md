@@ -2,6 +2,28 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
+## [Unreleased]
+
+## [2.5.1] - 2026-10-27
+
+### 兼容
+
+- **dsh 0.2.1-rc.3 零破坏（无需改码）**：6 个 commit 全是纯加法与内部修复——新增客户端包 `dsh-client-ui-entry-customization`（左/右侧栏与会话视图的「更多」菜单）只声明并注册三个 root scope list 槽，与插件四个注册 key 零交集；新会话草稿修复落在 `ui-workspace.startSession` / `createInWorkspace` 的 blank 复用，插件不调用该入口；API Key 路由模型列表改跟官方 `/models`，客户端目录契约 `dsh-client-ui-model-selection` 零漂移。`sessions.fork`、`setDraft`/`createDrafts`/`addAttachments`、`openSession`/`unarchiveSession`、slot 定义方（`ui-chat`）、兼容门禁（`dsh-app-boot`）逐字节零变更；`test:probe` 58/58、`verify:host` 全过、六条 peer 对 rc.3 全满足，宿主启停冒烟零 compat/skip。评估见 [docs/upgrade-assessments/dsh-0.2.1-rc.3.md](./docs/upgrade-assessments/dsh-0.2.1-rc.3.md)。
+
+### 变更
+
+- **`check:dsh` 改按 `dist-tags` 判定「npm 最新版」**：官方 rc 线发在 `next` 上、`latest` 停在上一版（0.2.1-rc.3 实测 `latest=rc.2` / `next=rc.3`），原实现只读 `version`（= latest），会把已发布的候选版误报成「无新版本」。现在两标签取较新者作 peer 覆盖与升级提示的基准，并在该行注明判定依据；`dist-tags` 读取失败时回退单版本探测（fail-open）。新增 5 条单测（报告判定 2 + 取较新者 3）。
+- **`test:probe` 补输入区写入链 4 条（54 → 58）**：回填与编辑重发依赖的官方入口此前只有运行时能力探测兜底、探针零覆盖——官方若把 `setDraft` 并入新的 `whenDraftExists` 策略模型或改签名，没有任何红灯。现钉住 `InputActions.setDraft/addAttachments/submit`、`InputState.draft`、`SessionInputShell.actions` + `get snapshot()`、`createDrafts`/`releaseDraftAttachments`。
+
+### 修复
+
+- **影子仓库写 index 的调用补 `--work-tree`（既有缺陷，与 issue #28 同批发现）**：影子仓库用 `git init --bare` 建，裸 `--git-dir` 下 git 认为没有工作树，`update-index` 直接 fatal `this operation must be run in a work tree`。后果按平台分叉：win32 上 git 非零退出不抛，**超大文件剔除（`maxFileBytes`）与 gitlink 剔除静默失效**——10 MB 文件照样进快照；POSIX 上 `set -e` 让「工作区里有带 `.git` 的子项目」这类场景**每条消息都快照失败**。三处调用（`dropGitlinks` / `oversize` / `excludeSync` 的已跟踪条目清理）统一补上，`excludeSync` 因建仓路径没有 `$root` 而走条件分支。契约单测钉住「写 index 的 `update-index` 一律带 `--work-tree`」。
+- **快照总量护栏不再把 `.gitignore` 排除的目录算进去（issue #28）**：`maxWorkspaceBytes` 的前置统计改为按 `git ls-files -z -co --exclude-standard` 的清单求和，与 `add -A` 共用同一套排除引擎——`.gitignore`（每层继承）、`.git/info/exclude`、全局 excludesFile、`!` 反选与嵌套仓库的判定从此与真正进快照的口径一致。此前只认基础排除表与 `exclude.txt`，实测把 130 MB 的项目量成 297 MB 并整区停用快照（用户直接失去撤回能力），提示还会把人引向「调大上限」这个反向处置。顺带修好「父级工作区把带自己 `.git` 的子项目算进总量」。`ls-files` 失败时 fail-open 不判定（不回落目录遍历，避免两套口径随 git 状态跳变）；停用提示与设置页 hint 补注「已按 .gitignore 与排除表过滤」。
+
+### 文档
+
+- 台账同步 dsh 0.2.1-rc.3：`dshReleases` 补 `0.2.1-rc.3`、`docs/reference/` 第十次重拉（13 源逐字节相同，连续第二轮零差异）、`docs/dsh-contract.md` 对应版本与沿革⑪、`docs/compat-audit.md` rc.3 核验段、README 双语徽章与版本范围。
+
 ## [2.5.0] - 2026-10-24
 
 ### 新增

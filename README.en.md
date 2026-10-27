@@ -7,12 +7,12 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)
 ![Build](https://img.shields.io/badge/pure%20JS-green)
 
-[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.2)
+[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.3-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.3)
 ![DSH](https://img.shields.io/badge/DSH-Desktop-blue)
 
 Under any message you've sent, click "↶ Recall" — **your workspace files and the conversation history roll back to just before that message was sent**.
 
-As each message is sent, the workspace is first snapshotted into an independent shadow git repository (your project's own git is never touched); a recall restores files from that snapshot and rewinds the conversation through DSH's official `sessions.fork` to the turn boundary before the message, with the original session archived and recoverable. The recalled message's text and attachments are placed back into the input box, ready to edit and resend. Snapshot storage lives under `$DSH_HOME` by default. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
+As each message is sent, the workspace is first snapshotted into an independent shadow git repository (your project's own git is never touched); a recall restores files from that snapshot and rewinds the conversation through DSH's official `sessions.fork` to the turn boundary before the message, with the original session archived and recoverable. The recalled message's text and attachments are placed back into the input box, ready to edit and resend; you can also click "✎ Edit" next to a message to revise and resend it in place (files untouched), and flip between versions of the same stretch of conversation with the `‹ X/N ›` pager. Snapshot storage lives under `$DSH_HOME` by default. The main boundary: snapshots are created only **when a message is sent** — messages from before the plugin was enabled have no snapshot and show no recall button.
 
 [Changelog](CHANGELOG.md)
 
@@ -20,11 +20,13 @@ As each message is sent, the workspace is first snapshotted into an independent 
 
 - [UI Preview](#ui-preview)
 - [Highlights](#highlights)
+- [Tech Stack & Dependencies](#tech-stack--dependencies)
 - [Known Limitations](#known-limitations)
 - [Installation](#installation)
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Snapshot Maintenance & Cleanup](#snapshot-maintenance--cleanup)
+- [FAQ](#faq)
 - [How It Works](#how-it-works)
 - [Event Contract (for same-host plugins)](#event-contract-for-same-host-plugins)
 - [Contributing](#contributing)
@@ -55,6 +57,15 @@ Abilities with a version in parentheses require that version or later; the rest 
 - **Disk-friendly, self-maintaining**: snapshots use git delta compression and large files are skipped automatically (threshold configurable); periodic lossless `git gc`, session-deletion cleanup, and cleanup by cap or retention age — plus a **workspace → session → snapshot** tree manager on the settings page with search and per-level deletion.
 - **Failures speak up and heal** (self-healing 2.1+): failures are classified by root cause (git missing / disk full / permission denied / lock conflict / directory conflict) with actionable guidance (the same fault only bothers you once per 10 minutes; reasons land in the settings card's "Recent errors"); leftover objects are pruned, 3 consecutive failures trigger exponential backoff, concurrent instances yield via heartbeats, and unindexable paths are skipped with a notice instead of failing the whole snapshot (they are neither restored nor deleted on recall).
 
+## Tech Stack & Dependencies
+
+This plugin is a DSH bundle: the host half runs inside the DSH process (Node ESM) and the client half inside the browser session page — both ship from the same npm package, which has zero runtime dependencies of its own.
+
+- **Runtime**: Node.js ≥ 20 and git CLI; PowerShell 5.1/7 on Windows, bash on Linux/macOS (selected automatically by platform).
+- **Language & build**: TypeScript + ESM; `npm run build` produces `lib/` via esbuild (per-file host transpilation, single-file client bundle), and the artifacts are committed with the source.
+- **Tests & gates**: vitest (pure-logic unit tests, jsdom client component tests, official-API field probes) plus a `tsc --noEmit` type gate and an assembly-gate script — see "Contributing → Tests".
+- **Host dependencies** (peerDependencies, provided by the DSH installation — nothing extra to install): `@deepseek-ai/cordis` 4, `@deepseek-ai/dsh-*` (host-webserver / sandbox-policy / session / session-query / settings / shell), `@deepseek-ai/schemastery` 3.18; `react` 18 is an optional peer (injected by the host for the client).
+
 ## Known Limitations
 
 Boundaries accepted by design and edge cases not yet covered — worth checking before you rely on them.
@@ -76,7 +87,7 @@ Prerequisites:
 
 - git CLI: without it the recall button won't appear (a notice shows at the top of the page); DSH itself keeps running.
 - Shell: PowerShell 5.1 / 7 on Windows; bash on Linux/macOS.
-- DSH version: `0.1.2-alpha.1` through `0.2.1-rc.2`; later versions within a verified minor line are admitted automatically, while unverified new minor lines are blocked by the startup compatibility gate (window mechanics in the fold below).
+- DSH version: `0.1.2-alpha.1` through `0.2.1-rc.3`; later versions within a verified minor line are admitted automatically, while unverified new minor lines are blocked by the startup compatibility gate (window mechanics in the fold below).
 - **0.1.7-alpha.1 is a breaking release** (the shell execution and settings interfaces changed); the plugin ships both seams side by side — the same release works on every 0.1.2–0.1.6 line and on 0.1.7+, with unchanged behaviour on older DSH versions.
 - `0.1.1-rc.2` and earlier are not supported: their client runtime lacks the `sessions`/`workspaces`/`uiWorkspace` services, so the plugin UI silently fails to render.
 
@@ -145,8 +156,8 @@ All options can be edited visually in the "**Settings → Plugin Config → Reca
 | `gcSnaps` | 50 | Run `git gc` after this many snapshots accumulate (env `DSH_RECALL_GC_SNAPS` force-overrides) |
 | `gcHours` | 24 | Run gc when this many hours have passed since the last one (whichever trigger fires first; env `DSH_RECALL_GC_HOURS`) |
 | `maxFileBytes` | 8388608 (8MB) | Files larger than this are neither snapshotted nor touched by recalls |
-| `maxWorkspaceBytes` | 268435456 (256MB) | Total snapshot-eligible file size per workspace. Exceeding it **disables snapshots for that workspace** (no truncation — a truncated snapshot would make rollback delete the skipped files) and shows a notice on recent messages; raise the limit or add exclusions to recover automatically. 0 = unlimited |
-| `scanBudgetMs` | 10000 (10s) | Time budget for the pre-snapshot file scan. Exceeding it skips the snapshot with a notice (guards against pathological directories stalling startup). 0 = unlimited |
+| `maxWorkspaceBytes` | 268435456 (256MB) | Total snapshot-eligible file size per workspace, measured exactly as `git add` sees it (`.gitignore`, `.git/info/exclude` and the global excludesFile all apply). Exceeding it **disables snapshots for that workspace** (no truncation — a truncated snapshot would make rollback delete the skipped files) and shows a notice on recent messages; raise the limit or add exclusions to recover automatically. 0 = unlimited |
+| `scanBudgetMs` | 10000 (10s) | Time budget for measuring the snapshot-eligible total. Exceeding it skips the snapshot with a notice (guards against pathological directories stalling startup). 0 = unlimited |
 | `maxSnapshotsPerWorkspace` | 500 | Maximum snapshots kept per workspace; oldest pruned beyond the cap. 0 = unlimited |
 | `retentionDays` | 0 | Keep snapshots for this many days; older ones are deleted. 0 = disabled (works independently of the cap) |
 | `baseExcludes` | `.git`, `node_modules/`, `.dsh-recall-snapshots/`, `dsh-recall-snapshots/`, `target/`, `dist/`, `build/`, `out/`, `coverage/`, `.next/`, `.nuxt/`, `.output/`, `.cache/`, `.gradle/`, `*.exe`, `*.dll`, `*.pdb`, `*.so`, `*.dylib`, `*.msi`, `*.zip`, `*.7z`, `*.rar`, `*.tar`, `*.tar.gz`, `*.iso` | Base exclusion list (gitignore syntax, lower priority than exclude.txt); excluded large directories are skipped as whole subtrees during snapshot scans. Directory-form entries (e.g. `target/`) mean one more thing: **when a path segment of the workspace root itself matches, snapshots are disabled for that workspace** — patterns are relative to the root, so they can never exclude the root itself (i.e. a session opened inside a build-output directory), and such directories have no rollback value anyway; remove the entry to re-enable |
@@ -182,6 +193,20 @@ The plugin manages disk usage automatically — no manual housekeeping needed:
 
   This applies to all projects (when home is unwritable and a workspace falls back to in-project storage, it gets its own independent exclusion config, listed as a separate card in the settings tab). New exclusions only affect future snapshots; **when recalling to an earlier snapshot, files that weren't excluded at that time are still restored** (returning to the state as it was — that's exactly what recall means). To fully purge a directory that already made it into snapshots, manually delete the corresponding hash directory under `dsh-recall-snapshots/` in home.
 - **Tree-view snapshot manager**: open "**Settings → Plugin Config → Recall Plugin → Snapshot Manager**" for a three-level tree — workspace (folder name) → session (session title, recall chains grouped into version families) → snapshot (time + message content summary, hover for the full content). Search and "load more" are supported; workspace and session nodes expand/collapse; every level has a delete button on its right, with a confirmation before deletion — deleting a workspace clears all of its snapshots, deleting a session clears all of that session's snapshots, deleting a leaf removes just that single snapshot; a confirmed "Delete all" button sits at the top.
+
+## FAQ
+
+The most common questions and their troubleshooting paths; for the full set of design boundaries see "Known Limitations" above, and environment-class failures (git missing / disk full / permission denied / …) are explained in the settings card's "Recent errors".
+
+**No "↶ Recall" button next to a message?** Check in order of likelihood: (1) the DSH process wasn't restarted after installing — restart it and hard-refresh (Ctrl+Shift+R); (2) git CLI isn't on PATH — a notice shows at the top of the page; (3) the message predates the plugin — snapshots are only created when a message is sent; (4) snapshots are disabled for that workspace — it sits under a directory-form exclusion (e.g. opened inside `dist/`) or exceeded the `maxWorkspaceBytes` / `scanBudgetMs` guardrails, in which case recent messages carry a recovery notice (raise the limit or extend the exclusion list and it recovers automatically).
+
+**Some files weren't restored by a recall?** They weren't in the snapshot: larger than `maxFileBytes` (8MB by default), matched by the exclusion list, or inside a nested git repository / a win32 reparse point (see "Known Limitations"). The confirmation panel's file list before a recall is the exact rollback scope — trust it.
+
+**Snapshots eating too much disk?** Open "Settings → Plugin Config → Recall Plugin → Snapshot Manager" to see per-workspace usage, run "gc now", or delete by workspace / session / single snapshot; longer-term, lower `maxSnapshotsPerWorkspace`, set `retentionDays`, or add big directories to the exclusion list.
+
+**How do I delete all snapshot data for good?** After uninstalling the plugin, manually delete `dsh-recall-snapshots/` under home (`$DSH_HOME/dsh-recall-snapshots/`, or `~/.dsh/dsh-recall-snapshots/` when unset); for workspaces that fell back to in-project storage, also delete `.dsh-recall-snapshots/` inside the project.
+
+**Can the session's first message be recalled or edited?** Files yes, conversation no — fork needs an earlier turn boundary; "Edit and resend" on the first message is refused outright (the original message is still there, so resending would duplicate it).
 
 ## How It Works
 
@@ -292,9 +317,9 @@ All source lives in `src/`: the host (Node ESM TypeScript) in `src/host/`, the b
 
 ### Tests
 
-- `npm test`: pure-logic unit tests (vitest, 39 files / 505 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, the disk-format guard, the recall intent journal, recall terminal-event payload assembly, i18n dictionaries plus a missing-key scan, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
-- `npm run test:client`: client component tests (vitest + jsdom, 6 files / 96 cases, runs in CI) — the recall node main chain (preview→execute→fork→refill) and terminal-event reporting, snapshot-manager tree and delete flows, config/exclude card error paths, the logger switch matrix, and the zh/en rendering chains; assertions pin behaviour and structure only (className / aria / request payloads), never literal copy;
-- `npm run test:probe`: official-API field probes (2 files / 54 cases, requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` and the fork-cut anchors of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, the shell execution seam (`execute`/`ShellExecution.result`), the settings surface (`SettingsForms`/profile entry id/volatile gate) plus `loader/volatile-update` and the `Fiber.entry` shape, and goes red on violation;
+- `npm test`: pure-logic unit tests (vitest, 41 files / 524 cases, no DSH dependency, runs identically in CI and locally) — config parsing, snapshot parsers, rescue orchestration, error classification, the disk-format guard, the recall intent journal, recall terminal-event payload assembly, i18n dictionaries plus a missing-key scan, script-template same-name-export contract, shell execution dual-channel split and failure grading, settings bridge across both generations, artifact-root and snapshot-volume guardrails, recall-scope dispatch, client pure functions, published-package layout, snapshot index persistence, storage caps and retention, etc.;
+- `npm run test:client`: client component tests (vitest + jsdom, 9 files / 121 cases, runs in CI) — the recall node main chain (preview→execute→fork→refill) and terminal-event reporting, the editor-card submit chain and official-content projection, the version-family registry and pager, snapshot-manager tree and delete flows, config/exclude card error paths, the logger switch matrix, and the zh/en rendering chains; assertions pin behaviour and structure only (className / aria / request payloads), never literal copy;
+- `npm run test:probe`: official-API field probes (2 files / 58 cases, requires a local dsh installation; **must run after any dsh upgrade**) — pins fields like `renderMessageImages`/`node`/`cwd`, `atSeq`/`increaseTitle` and the fork-cut anchors of `sessions.fork`, `listSessions` record shape, `AgentRegistry`, the shell execution seam (`execute`/`ShellExecution.result`), the settings surface (`SettingsForms`/profile entry id/volatile gate), the composer write chain (`setDraft`/`addAttachments`/`submit`/`snapshot`/`createDrafts`) plus `loader/volatile-update` and the `Fiber.entry` shape, and goes red on violation;
 - `npm run verify:host`: assembly gate (requires a local dsh installation) — boots the plugin with a real cordis context in two passes (legacy settings stub and a modern-face-only stub), asserting inject declarations, endpoint registration, Config schema, teardown cleanliness and settings-face dispatch, catching assembly regressions before release;
 - `npm run typecheck`: full `tsc --noEmit` type check (includes the `tests/types` compile-time contract assertions; CI runs it before the unit suite);
 - `npm run build`: full host+client build (mandatory after any `src/` change); `npm run check:dsh`: dsh version inspection (pre-release); `npm run check:upgrade`: one-shot dsh-upgrade verification gate (chains check:dsh + test:probe + verify:host; mandatory after a dsh upgrade).
