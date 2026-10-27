@@ -633,4 +633,45 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
       expect(read(gateway, '/lib/client.js')).toMatch(/streamBaseUrl \?\? document\.baseURI/)
     })
   })
+
+  describe('输入区写入链（I34：回填 fillDraft / 编辑重发的全部官方入口）', () => {
+    // 插件把「文本 + 附件 + 可选发送」写进目标会话输入态，全部走官方通道：
+    // shell.actions.setDraft / addAttachments / submit、shell.snapshot.draft（发送
+    // 前校验草稿已落地）、conversation.createDrafts / releaseDraftAttachments。
+    // 这些入口此前只有运行时能力探测兜底、探针零覆盖——官方一旦重排（如 0.2.1-rc.3
+    // 把「已有草稿怎么处理」显式化为 whenDraftExists），没有任何红灯会亮。
+    const conv = 'dsh-client-ui-conversation'
+    const inputActions = '/lib/types/client/contract/input.d.ts'
+    const facade = '/lib/types/client/input/facade.d.ts'
+    const service = '/lib/types/client/service.d.ts'
+
+    probeIf(() => has(conv, inputActions))('InputActions 三件套在位（setDraft / addAttachments / submit）', () => {
+      const src = read(conv, inputActions)
+      const face = src.match(/export interface InputActions \{[\s\S]*?\n\}/)
+      expect(face).toBeTruthy()
+      // setDraft 必须是「整段替换」语义（插件回填依赖覆盖而非追加）
+      expect(face[0]).toMatch(/setDraft\(text: string\): void;/)
+      expect(face[0]).toMatch(/addAttachments\(ids: readonly DraftAttachmentId\[\]\): boolean;/)
+      expect(face[0]).toMatch(/submit\(\): void;/)
+    })
+
+    probeIf(() => has(conv, inputActions))('InputState.draft 可读（submit 前的草稿落地校验依据）', () => {
+      const src = read(conv, inputActions)
+      const state = src.match(/export interface InputState \{[\s\S]*?\n\}/)
+      expect(state).toBeTruthy()
+      expect(state[0]).toMatch(/readonly draft: string;/)
+    })
+
+    probeIf(() => has(conv, facade))('SessionInputShell 暴露 actions + snapshot（能力探测的两条读取面）', () => {
+      const src = read(conv, facade)
+      expect(src).toMatch(/readonly actions: InputActions;/)
+      expect(src).toMatch(/get snapshot\(\): InputState;/)
+    })
+
+    probeIf(() => has(conv, service))('草稿附件注册/释放面在位（createDrafts / releaseDraftAttachments）', () => {
+      const src = read(conv, service)
+      expect(src).toMatch(/createDrafts/)
+      expect(src).toMatch(/releaseDraftAttachments/)
+    })
+  })
 })

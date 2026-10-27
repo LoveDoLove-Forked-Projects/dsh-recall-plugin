@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   parseVersion, compareVersions, parseRange, parseRangeSet, satisfiesRange,
-  buildReport, parseMirrorVersion, parseContractVersion,
+  buildReport, parseMirrorVersion, parseContractVersion, newestVersion,
 } from '../../scripts/check-dsh-version.mjs'
 
 describe('parseVersion', () => {
@@ -359,5 +359,44 @@ describe('buildReport', () => {
     const r = buildReport({ local: '0.1.1-rc.2', mirror: '0.1.1-rc.2', contract: '0.1.1-rc.2', latest: '0.1.1-rc.2', peers: [] })
     expect(r.ok).toBe(true)
     expect(r.lines.join('\n')).toContain('与本地 dsh 一致')
+  })
+
+  it('dist-tags 分线：latest 落后 next 时注明判定依据（避免误读成「无新版本」）', () => {
+    // rc 线发在 next 上的常态：latest 停 rc.2、next 已 rc.3，基准取较新者
+    const r = buildReport({
+      local: '0.2.1-rc.3', mirror: '0.2.1-rc.3', contract: '0.2.1-rc.3',
+      latest: '0.2.1-rc.3', distTags: { latest: '0.2.1-rc.2', next: '0.2.1-rc.3' }, peers: [],
+    })
+    const text = r.lines.join('\n')
+    expect(text).toContain('✓ npm 最新 dsh: 0.2.1-rc.3')
+    expect(text).toContain('dist-tags: latest 0.2.1-rc.2 / next 0.2.1-rc.3，按较新者判定')
+    expect(r.ok).toBe(true)
+  })
+
+  it('dist-tags 两标签相同时不输出判定说明（无噪音）', () => {
+    const r = buildReport({
+      local: '0.2.1-rc.3', mirror: '0.2.1-rc.3', contract: '0.2.1-rc.3',
+      latest: '0.2.1-rc.3', distTags: { latest: '0.2.1-rc.3', next: '0.2.1-rc.3' }, peers: [],
+    })
+    expect(r.lines.join('\n')).not.toContain('dist-tags:')
+  })
+})
+
+describe('newestVersion（dist-tags 取较新者）', () => {
+  it('同 tuple 的 prerelease 逐级比较', () => {
+    expect(newestVersion('0.2.1-rc.2', '0.2.1-rc.3')).toBe('0.2.1-rc.3')
+    expect(newestVersion('0.2.1-rc.3', '0.2.1-rc.2')).toBe('0.2.1-rc.3')
+  })
+
+  it('正式版高于同序号 prerelease（latest 追平后不再被 next 压制）', () => {
+    expect(newestVersion('0.2.1', '0.2.1-rc.3')).toBe('0.2.1')
+    expect(newestVersion('0.2.1-rc.3', '0.2.1')).toBe('0.2.1')
+  })
+
+  it('一侧缺失/不可解析时让位给可解析的一侧', () => {
+    expect(newestVersion(null, '0.2.1-rc.3')).toBe('0.2.1-rc.3')
+    expect(newestVersion('0.2.1-rc.3', null)).toBe('0.2.1-rc.3')
+    expect(newestVersion('garbage', '0.2.1-rc.3')).toBe('0.2.1-rc.3')
+    expect(newestVersion(null, null)).toBeNull()
   })
 })

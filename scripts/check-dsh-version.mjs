@@ -15,6 +15,10 @@
  *   4. npm 最新 vs 本地已装——提示有新版可升（升级后镜像基准自然漂移，
  *      由第 1 层在下次运行捕获）。
  *
+ * 「npm 最新」取 dist-tags 的 latest 与 next 中较新者：官方 rc 线发在 next
+ * 上、latest 停在上一版是常态（0.2.1-rc.3 实测 latest=rc.2 / next=rc.3），
+ * 只读 latest 会把已发布的候选版误报成「无新版本」。
+ *
  * 一致时安静退出（exit 0，一行确认）；任一差异输出 ✓/⚠/✗ 行并 exit 1。
  * 纯函数全部导出供 vitest 单测（tests/unit/check-dsh-version.test.js），
  * 避免"巡检脚本自身逻辑无测试"的二次漂移。环境变量 DSH_CHECK_LOCAL /
@@ -297,6 +301,38 @@ export function fetchLatestDshVersion() {
   }
 }
 
+/**
+ * npm 上 dsh 的两个可执行 dist-tag。为何要一起读：rc 系列发在 `next` 上、
+ * `latest` 停在上一版是官方 prerelease 的常态（0.2.1-rc.3 实测 latest=rc.2 /
+ * next=rc.3），只看 `version` 会把「新版已发布」误报成「无新版本」。两标签
+ * 取较新者作为「已发布最新版」的 peer 覆盖基准。读不到返回 null（降级）。
+ */
+export function fetchDshDistTags() {
+  const out = runNpm(['view', '@deepseek-ai/dsh', 'dist-tags', '--json'], 15000)
+  if (!out) return null
+  try {
+    const parsed = JSON.parse(out)
+    if (!parsed || typeof parsed !== 'object') return null
+    const latest = typeof parsed.latest === 'string' && parsed.latest ? parsed.latest : null
+    const next = typeof parsed.next === 'string' && parsed.next ? parsed.next : null
+    return latest || next ? { latest, next } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 两个版本字符串里较新的一个（用于 dist-tags 取较新者）。无法解析的一侧
+ * 让位给可解析的一侧；两侧都不可解析时返回 a（保持 fail-open，不抛错）。
+ */
+export function newestVersion(a, b) {
+  const pa = typeof a === 'string' ? parseVersion(a) : null
+  const pb = typeof b === 'string' ? parseVersion(b) : null
+  if (!pa) return pb ? b : a || null
+  if (!pb) return a
+  return compareVersions(pa, pb) >= 0 ? a : b
+}
+
 /** 从 docs/reference/README.md 头部文本提取「归档 dsh 版本：x.y.z」；字段缺失
  * 返回 null。纯函数（单测直接钉）；readMirrorVersion 负责读文件后复用。
  * 为何读 README 而非建独立文件：重拉镜像本来就要更新 README 头（归档日期），
@@ -346,9 +382,11 @@ export function readContractVersion() {
 
 /**
  * 组装巡检报告。peers 元素：{name, range, installed}（installed 可为 null）。
+ * distTags 可选：{latest, next}，与 latest 不同时在「最新版」行注明判定依据
+ * （rc 线发在 next 上，不注明会让读者以为读的是 latest）。
  * 返回 {ok, lines, exitCode}——ok=false 时 exitCode=1（提醒可见/可接脚本）。
  */
-export function buildReport({ local, mirror, contract, latest, peers }) {
+export function buildReport({ local, mirror, contract, latest, distTags, peers }) {
   const lines = []
   let ok = true
   lines.push('[dsh-recall-plugin] dsh 版本巡检（npm run check:dsh）')
@@ -433,12 +471,15 @@ export function buildReport({ local, mirror, contract, latest, peers }) {
     const pvLatest = parseVersion(latest)
     const pvLocal = local ? parseVersion(local) : null
     const cmp = pvLatest && pvLocal ? compareVersions(pvLatest, pvLocal) : 0
+    const tagNote = distTags && distTags.latest && distTags.next && distTags.latest !== distTags.next
+      ? `（dist-tags: latest ${distTags.latest} / next ${distTags.next}，按较新者判定）`
+      : ''
     if (!pvLatest) {
       lines.push(`  ⚠ npm 返回的版本 ${latest} 无法解析，跳过新版本比对`)
     } else if (cmp > 0) {
-      lines.push(`  ⚠ npm 最新 dsh ${latest} > 本地 ${local}：升级后请重跑本脚本并重拉 docs/reference/ 镜像`)
+      lines.push(`  ⚠ npm 最新 dsh ${latest} > 本地 ${local}：升级后请重跑本脚本并重拉 docs/reference/ 镜像${tagNote}`)
     } else {
-      lines.push(`  ✓ npm 最新 dsh: ${latest}（无新版本）`)
+      lines.push(`  ✓ npm 最新 dsh: ${latest}（无新版本）${tagNote}`)
     }
   } else {
     lines.push('  ⚠ 无法获取 npm 最新 dsh（离线？）——peer 越界检查降级为仅本地实装比对')
@@ -462,9 +503,14 @@ export function main() {
   const local = process.env.DSH_CHECK_LOCAL || findDshVersion()
   const mirror = process.env.DSH_CHECK_MIRROR || readMirrorVersion()
   const contract = process.env.DSH_CHECK_CONTRACT || readContractVersion()
-  const latest = process.env.DSH_CHECK_LATEST || fetchLatestDshVersion()
+  // rc 线发在 next 上、latest 停在上一版属官方常态：两标签取较新者作基准，
+  // dist-tags 读不到时退回单版本探测（fail-open，提醒脚本不该因新 API 失败而哑火）
+  const distTags = process.env.DSH_CHECK_LATEST ? null : fetchDshDistTags()
+  const latest = process.env.DSH_CHECK_LATEST
+    || (distTags ? newestVersion(distTags.latest, distTags.next) : null)
+    || fetchLatestDshVersion()
   const peers = buildPeers()
-  const { lines, exitCode } = buildReport({ local, mirror, contract, latest, peers })
+  const { lines, exitCode } = buildReport({ local, mirror, contract, latest, distTags, peers })
   for (const line of lines) console.log(line)
   process.exitCode = exitCode
 }
