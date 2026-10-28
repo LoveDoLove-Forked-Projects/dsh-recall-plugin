@@ -166,16 +166,20 @@ describe('client 纯逻辑', () => {
 })
 
 describe('撤回回填的附件引用提取（I34）', () => {
-  it('attachmentRefsFromBlocks：image/file 两类块都提取，有 name 则保留', () => {
+  it('attachmentRefsFromBlocks：image/file 两类块都提取，有 name 则保留，原始引用随行', () => {
+    const image = { attachmentId: 'sha256:a', mediaType: 'image/png' }
+    const file = { attachmentId: 'sha256:b', name: '报告.pdf' }
     const refs = attachmentRefsFromBlocks([
       { type: 'text', text: 'hi' },
-      { type: 'image', attachment: { attachmentId: 'sha256:a', mediaType: 'image/png' } },
-      { type: 'file', attachment: { attachmentId: 'sha256:b', name: '报告.pdf' } },
+      { type: 'image', attachment: image },
+      { type: 'file', attachment: file },
     ])
-    // kind 带上块类型：编辑卡据此把图片渲染成缩略图
+    // kind 带上块类型：编辑卡据此把图片渲染成缩略图；
+    // attachment 原样保留：≥0.2.2-alpha.1 的 readAttachment 只认完整引用，
+    // 丢了它就只剩裸 id，旧版回退口径能读、新版读不出（B1）
     expect(refs).toEqual([
-      { attachmentId: 'sha256:a', kind: 'image' },
-      { attachmentId: 'sha256:b', kind: 'file', name: '报告.pdf' },
+      { attachmentId: 'sha256:a', kind: 'image', attachment: image },
+      { attachmentId: 'sha256:b', kind: 'file', name: '报告.pdf', attachment: file },
     ])
   })
 

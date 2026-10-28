@@ -342,7 +342,11 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
 
     probeIf(guard)('loader/volatile-update 在产物里存在且被 dispatch（按 fiber 过滤 + ref 已先行提交）', () => {
       const src = read(p, f)
-      expect(src).toMatch(/const refs = volatileEntries\(fiber\.config\);/)
+      // ref 来源随 cordis 4.0.6-alpha.1 统一配置访问改名：fiber.config →
+      // fiber.effectiveConfig（rawConfig 另存未解析输入）。两种拼写都接受——
+      // 插件依赖的是「ref 取自 fiber 已发布的配置」这条事实，不是字段名本身；
+      // 下方的 updateVolatile + emit + Context.filter 才是热更链路本体。
+      expect(src).toMatch(/const refs = volatileEntries\(fiber\.(?:config|effectiveConfig)\);/)
       expect(src).toMatch(/updateVolatile\(ref, source\);/)
       expect(src).toMatch(/fiber\.ctx\.emit\(self, "loader\/volatile-update", paths\);/)
       expect(src).toMatch(/self\[Context\.filter\] = \(owner\) => owner\.fiber === fiber;/)
@@ -670,8 +674,28 @@ describe('官方 API 字段探针（dsh 安装目录）', () => {
 
     probeIf(() => has(conv, service))('草稿附件注册/释放面在位（createDrafts / releaseDraftAttachments）', () => {
       const src = read(conv, service)
-      expect(src).toMatch(/createDrafts/)
+      // 0.2.2-alpha.2 起第三参 uploadImages 显式（普通会话进输入态即上传、子代理
+      // 续写传 false）；≤0.2.1 为两参。插件恒传 true、旧版忽略多出的实参，故两
+      // 种形态都算在位——钉的是「参数名与位置」，单钉一代会让另一端误红。
+      expect(src).toMatch(/createDrafts\(sessionId: SessionId, files: readonly File\[\](?:, uploadImages: boolean)?\)/)
       expect(src).toMatch(/releaseDraftAttachments/)
+    })
+  })
+
+  describe('附件回读链（B1：readAttachment 的入参两代）', () => {
+    // 撤回回填 / 编辑重发要从源会话读回被撤回消息的图片字节。官方在
+    // 0.2.2-alpha.1 改了这条链：≤0.2.1 收 attachmentId 字符串、由宿主回会话日志
+    // 反查完整引用；≥0.2.2-alpha.1 收完整引用对象、宿主只按 mediaType/bytes/尺寸
+    // 自证（裸 id 直接 INVALID_ATTACHMENT_REF）。插件按「完整引用 → 裸 id」探测
+    // 回退，两代都得能跑——所以这里钉单参形状与参数名，不钉具体是哪种取值。
+    const ctrl = 'dsh-api-session-controller'
+    const sessionTypes = '/lib/types/client/sessions/session.d.ts'
+
+    probeIf(() => has(ctrl, sessionTypes))('readAttachment 单参承载图片引用（attachment 对象 / attachmentId 字符串）', () => {
+      const src = read(ctrl, sessionTypes)
+      expect(src).toMatch(/readAttachment\((?:attachment: ImageAttachmentRef|attachmentId: string)\)/)
+      // 返回值形状两代一致：引用 + 解码字节（回填侧按 value.data 建 File）
+      expect(src).toMatch(/data: Uint8Array/)
     })
   })
 })

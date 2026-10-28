@@ -7,7 +7,7 @@
  * 时序校验，混在节点组件里会把 UI 状态机与 I/O 搅拌在一起。
  */
 
-import type { ClientContext, ConversationInputShell, ConversationService } from '../types/client-contract.js'
+import type { ClientContext, ConversationInputShell, ConversationService, DraftAttachmentDescriptor, ReadAttachmentResult, SessionAttachmentRef } from '../types/client-contract.js'
 import { recallNodeLog } from './log.js'
 
 // 被撤回消息里可回填为草稿附件的块引用：image / file 两类块都带 durable
@@ -17,6 +17,9 @@ export interface DraftAttachmentRef {
   name?: string
   // 块类型：编辑卡据此决定渲染缩略图（image）还是文件名 chip（file）
   kind?: 'image' | 'file'
+  // 消息块里的原始 durable 引用对象（ImageAttachmentRef 形状）。新版
+  // readAttachment 的入参；旧版忽略。丢了它就只能传裸 id，在 ≥0.2.2 上读不出来。
+  attachment?: unknown
 }
 
 // 缺省附件文件名：媒体类型 → 「attachment-N.<subtype>」（image/png → png）。
@@ -83,10 +86,14 @@ export function buildDraftFill(ctx: ClientContext): DraftFillApi {
               }
             }
             if (!attachStarted && attachmentFiles !== null) {
+              // 自动发送（编辑重发）时不让图片走「进输入态即后台上传」：官方 sendSession
+              // 会等上传回执，而刚 fork 的子会话上传可能迟迟不结算——实测草稿留在输入框、
+              // 消息不发也不报错。改传 false 让图片随 prompt 内联，发送一步到位；只有
+              // 「只回填不发送」的撤回场景才值得提前上传。
               attachStarted = startAttachDrafts(conversation, shell, targetSessionId, attachmentFiles, () => {
                 attachDone = true
                 submitIfReady()
-              })
+              }, opts === undefined || opts.submit !== true)
             }
           }
         }
@@ -135,7 +142,7 @@ export function buildDraftFill(ctx: ClientContext): DraftFillApi {
   // 该项，不再重试。
   // onDone：链路终结（成功、部分失败、服务面不可用）时回调一次——编辑重发要
   // 等附件真正进输入态才能按发送，见 fillDraft 的 attachDone
-  function startAttachDrafts(conversation: ConversationService, shell: ConversationInputShell, sessionId: string, files: Promise<File[]>, onDone?: () => void): boolean {
+  function startAttachDrafts(conversation: ConversationService, shell: ConversationInputShell, sessionId: string, files: Promise<File[]>, onDone?: () => void, eagerUpload = true): boolean {
     if (typeof conversation.createDrafts !== 'function') return false
     const actions = shell.actions
     let add: ((ids: string[]) => unknown) | null = null
@@ -148,8 +155,17 @@ export function buildDraftFill(ctx: ClientContext): DraftFillApi {
         try { list = await files } catch (e) { return } // 附件早读失败放弃附件回填（文本回填不受影响）
         if (!Array.isArray(list) || list.length === 0) return
         try {
-          const drafts = conversation.createDrafts ? conversation.createDrafts(sessionId, list) : []
-          const descriptors = Array.isArray(drafts) ? drafts : []
+          // 第三参 uploadImages（≥0.2.2-alpha.2）：true＝图片进输入态即后台上传、发送时
+          // 复用；false（或缺省）＝字节随 prompt 内联。旧版忽略多余实参。取哪个由调用
+          // 场景决定（见 fillDraft 的 eagerUpload）。三参形态若抛错（上传服务缺席等），
+          // 退回两参让图片改随 prompt 内联——附件宁可慢一点，也不能整批丢。
+          let drafts: unknown
+          try {
+            drafts = conversation.createDrafts ? conversation.createDrafts(sessionId, list, eagerUpload) : []
+          } catch (e) {
+            drafts = conversation.createDrafts ? conversation.createDrafts(sessionId, list) : []
+          }
+          const descriptors = Array.isArray(drafts) ? drafts as DraftAttachmentDescriptor[] : []
           const ids = descriptors.map((draft) => draft && draft.id).filter((id): id is string => typeof id === 'string' && id !== '')
           if (ids.length === 0) return
           const accepted = add(ids)
@@ -164,24 +180,54 @@ export function buildDraftFill(ctx: ClientContext): DraftFillApi {
     return true
   }
 
+  // readAttachment 的入参有两代，形状互斥且都不抛「用错了」的专用错：
+  // ≥0.2.2-alpha.1 收完整引用对象（宿主只按 mediaType/bytes/尺寸自证，裸 id 直接
+  // INVALID_ATTACHMENT_REF）；≤0.2.1 收 attachmentId 字符串（宿主回会话日志反查）。
+  // 故按「完整引用 → 裸 id」回退探测，并把命中的那代记在闭包里——同一次撤回里
+  // 多张图片不必重复撞错。两代返回形状一致（{attachment, data}），调用方无感。
+  let attachmentShape: 'ref' | 'id' | null = null
+  async function readAttachmentBytes(read: (attachment: unknown) => Promise<ReadAttachmentResult>, ref: DraftAttachmentRef): Promise<{ attachment?: SessionAttachmentRef; data: unknown } | null> {
+    const refArg = ref.attachment && typeof ref.attachment === 'object' ? ref.attachment : null
+    const idArg = typeof ref.attachmentId === 'string' && ref.attachmentId !== '' ? ref.attachmentId : null
+    const attempts: Array<{ shape: 'ref' | 'id'; arg: unknown }> = []
+    if (attachmentShape === 'id') {
+      if (idArg !== null) attempts.push({ shape: 'id', arg: idArg })
+      if (refArg !== null) attempts.push({ shape: 'ref', arg: refArg })
+    } else {
+      if (refArg !== null) attempts.push({ shape: 'ref', arg: refArg })
+      if (idArg !== null) attempts.push({ shape: 'id', arg: idArg })
+    }
+    for (const attempt of attempts) {
+      try {
+        const result = await read(attempt.arg)
+        if (result && result.ok === true && result.value && result.value.data !== undefined && result.value.data !== null) {
+          attachmentShape = attempt.shape
+          return { attachment: result.value.attachment, data: result.value.data }
+        }
+      } catch (e) { /* 该代口径不适用，试下一条 */ }
+    }
+    return null
+  }
+
   // 附件早读（前半程）：撤回执行一开始调用——此刻源会话仍在册（归档在 fork
   // 之后才发生）、附件引用可解析；fork + open 完成后再由 fillDraft 注册进子会话。
-  // readAttachment 的授权绑定在「消息所在会话」上（官方图片回显同款），故必须用
-  // 源会话 id。逐项 try/catch：单项失败跳过，不阻断其余附件。
+  // readAttachment 的凭据绑定在「消息所在会话」上（旧版按会话日志授权、新版按网关
+  // 权限范围），故必须用源会话 id。逐项 try/catch：单项失败跳过，不阻断其余附件。
   function preloadAttachmentFiles(sourceSessionId: string, refs: DraftAttachmentRef[]): Promise<File[]> {
     return (async () => {
       const sessions = ctx.sessions
       const binding = sessions && typeof sessions.binding === 'function' ? sessions.binding(sourceSessionId) : undefined
       const session = binding && binding.session
       if (!session || typeof session.readAttachment !== 'function') return []
+      const read = session.readAttachment.bind(session)
       const out: File[] = []
       for (const ref of refs) {
         try {
-          const result = await session.readAttachment(ref.attachmentId)
-          if (!result || result.ok !== true || !result.value || result.value.data === undefined || result.value.data === null) continue
-          const raw = result.value.data
+          const value = await readAttachmentBytes(read, ref)
+          if (!value) continue
+          const raw = value.data
           const bytes = raw instanceof Uint8Array ? raw : Uint8Array.from(raw as ArrayLike<number>)
-          const meta = result.value.attachment
+          const meta = value.attachment
           const mediaType = meta && typeof meta.mediaType === 'string' && meta.mediaType !== '' ? meta.mediaType : 'application/octet-stream'
           const name = ref.name || (meta && typeof meta.name === 'string' && meta.name !== '' ? meta.name : defaultAttachmentName(mediaType, out.length))
           // 拷贝出独立 ArrayBuffer 再建 File：Uint8Array<ArrayBufferLike> 不满足

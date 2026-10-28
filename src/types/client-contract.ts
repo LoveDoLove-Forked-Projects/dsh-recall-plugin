@@ -128,7 +128,10 @@ export type ReadAttachmentResult =
   | { ok: false; error?: { code?: string; message?: string } }
 
 export interface SessionObjectLayer {
-  readAttachment?(attachmentId: string): Promise<ReadAttachmentResult>
+  // 入参两代：≤0.2.1 收 attachmentId 字符串（宿主按会话日志反查完整引用）；
+  // ≥0.2.2-alpha.1 收完整引用对象（宿主按 mediaType/bytes/尺寸自证，不再反查）。
+  // 只声明 unknown，形状由 draft-fill 的探测回退决定。
+  readAttachment?(attachment: unknown): Promise<ReadAttachmentResult>
   // 官方队列变更动词。只用 remove：按 Host 下发的 item id（= 消息 id）删掉
   // fork seed 重放出来的残留排队项，相当于用户在 QueueDock 上点「删除排队
   // 消息」。入队项已被消费时返回 queue-item-not-found，调用侧逐项吞掉。
@@ -209,7 +212,8 @@ export interface ConversationService {
   // 把浏览器 File 注册为运行时草稿附件（图片=object URL 预览且随 prompt 发字节；
   // 其他文件立即开始后台上传），返回按输入顺序的描述符。官方 composer 的
   // addFiles 即 createDrafts → shell.addAttachments →（未接纳）releaseDraftAttachments。
-  createDrafts?(sessionId: string, files: File[]): DraftAttachmentDescriptor[]
+  // uploadImages（≥0.2.2-alpha.2 起）：图片是否进入即上传；旧版忽略该参。
+  createDrafts?(sessionId: string, files: File[], uploadImages?: boolean): DraftAttachmentDescriptor[]
   releaseDraftAttachments?(drafts: DraftAttachmentDescriptor[]): void
 }
 
