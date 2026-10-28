@@ -2,9 +2,9 @@
 
 > 用途：dsh 插件开发相关官方文档的本地副本，改代码前优先查这里，避免每次联网翻文档。
 >
-> 归档日期：2026-10-24，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.1-rc.3` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
+> 归档日期：2026-10-28，对应 [deepseek-harness](https://github.com/deepseek-ai/deepseek-harness) 仓库 `dsh-v0.2.2-alpha.2` tag `docs/` 目录（raw.githubusercontent 按 tag 拉取；直连可用，无需代理）。
 >
-> 归档 dsh 版本：0.2.1-rc.3（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
+> 归档 dsh 版本：0.2.2-alpha.2（`npm run check:dsh` 的漂移比对基准；重拉镜像后同步更新本字段，见下方「更新方式」）
 >
 > 在线站点：https://deepseek-harness.github.io/deepseek-harness/ ｜ 每份文件头部都带「来源」注释，可溯回官方原文。
 
@@ -126,3 +126,13 @@ iwr -UseBasicParsing 'https://raw.githubusercontent.com/deepseek-ai/deepseek-har
 > 2026-10-24 十次重拉（`dsh-v0.2.1-rc.2` → `dsh-v0.2.1-rc.3`）：**13 源再次全部逐字节相同**（归一化 CRLF 后比较，delta 均为 0 B）——连续第二轮零差异。
 > 与代码面证据一致：rc.3 只有 6 个 commit（Views/侧栏 More 菜单、新会话草稿修复、API Key 路由模型列表），改动全在 `packages/client/**` 与 `packages/llm/**`，未触及 `docs/`。
 > 本轮 Node fetch 直连一次成功，13/13 齐，无需代理或重试，**无文件覆盖**（仅更新头部两字段）。
+>
+> 2026-10-28 十一次重拉（`dsh-v0.2.1-rc.3` → `dsh-v0.2.2-alpha.2`，跨 rc.4 / alpha.1 / alpha.2 三版）：13 源中 **3 份有实质差异、10 份逐字节相同**。
+> 三处差异都印证 release notes 的「插件系统」条目，且**都不落在本插件消费面**（插件不注册工具、不写 `agent/request`、不用会话投影、不调 `agents.create`）：
+> ① `08-framework-events.md`（净 −18 B，一处）：事件示例列表删去 `agent/request`——该 hook 本版降级为「不改提供方/模型/推理强度」的控制参数 hook；
+> ② `09-architecture.md`（净 +41 B，五处）：AgentLoop 初始化顺序明确为「Session 完成 `session/created` → 工厂 setup → `agent/created`」；
+> 提示词组装段重写（组装前把 Session 模型选择快照进 `AssembleContext.modelSelection` / `agent/pre-step.modelSelection`，`agent/request` 标注为已弃用的控制参数 hook）；
+> 新增 `ctx.tools.execute()` 行；投影 seam 段改写（领域服务等待注册完成、内部持句柄、`AgentRegistry.turnBoundaryOf(session)`）；
+> **fork 配方改为 `ctx.agents.create({ sessionId, seed, inheritedEventCount, meta: { isSeeded: true } })`**——不再写 `parentSession` / `seedLength`（对应本版「普通会话分支独立运行、不再被误识别为子智能体」）；
+> ③ `13-cookbook-extension.md`（净 −18 B，一处）：钩子系统的 `agent/request` 同步骤移除。
+> 本轮 Node fetch 直连一次成功，13/13 齐，无需代理或重试。

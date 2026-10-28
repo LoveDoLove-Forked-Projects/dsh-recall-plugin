@@ -7,7 +7,7 @@
 ![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)
 ![Build](https://img.shields.io/badge/pure%20JS-green)
 
-[![DSH](https://img.shields.io/badge/DSH-0.2.1--rc.3-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.3)
+[![DSH](https://img.shields.io/badge/DSH-0.2.2--alpha.2-blue)](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-alpha.2)
 ![DSH](https://img.shields.io/badge/DSH-Desktop-blue)
 
 Under any message you've sent, click "↶ Recall" — **your workspace files and the conversation history roll back to just before that message was sent**.
@@ -87,7 +87,7 @@ Prerequisites:
 
 - git CLI: without it the recall button won't appear (a notice shows at the top of the page); DSH itself keeps running.
 - Shell: PowerShell 5.1 / 7 on Windows; bash on Linux/macOS.
-- DSH version: `0.1.2-alpha.1` through `0.2.1-rc.3`; later versions within a verified minor line are admitted automatically, while unverified new minor lines are blocked by the startup compatibility gate (window mechanics in the fold below).
+- DSH version: `0.1.2-alpha.1` through `0.2.2-alpha.2`; later versions within a verified minor line are admitted automatically, while unverified new minor lines are blocked by the startup compatibility gate (window mechanics in the fold below).
 - **0.1.7-alpha.1 is a breaking release** (the shell execution and settings interfaces changed); the plugin ships both seams side by side — the same release works on every 0.1.2–0.1.6 line and on 0.1.7+, with unchanged behaviour on older DSH versions.
 - `0.1.1-rc.2` and earlier are not supported: their client runtime lacks the `sessions`/`workspaces`/`uiWorkspace` services, so the plugin UI silently fails to render.
 
@@ -97,10 +97,10 @@ Prerequisites:
 peerDependencies open a window per minor line, consistent with the `dsh.compatibility.dshReleases` declaration:
 
 ```
->=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8 || >=0.2.0-rc.1 <0.2.1 || >=0.2.1-alpha.1 <0.3.0
+>=0.1.2-alpha.1 <0.1.3 || >=0.1.3-alpha.1 <0.1.4 || >=0.1.5-alpha.1 <0.1.6 || >=0.1.6-alpha.1 <0.1.7 || >=0.1.7-alpha.1 <0.1.8 || >=0.2.0-rc.1 <0.2.1 || >=0.2.1-alpha.1 <0.3.0 || >=0.2.2-alpha.1 <0.3.0
 ```
 
-Each line is anchored at its first verified version with an upper bound at the next minor (the 0.2.1 window's upper bound is widened to `<0.3.0`, admitting every 0.2 release), so later prereleases/releases within a verified line are admitted without touching the peer declaration. Both the 0.2.0 and 0.2.1 lines need their own tuple: npm's prerelease gate only admits a prerelease from a comparator with the same tuple, so the existing `<0.1.8` segment cannot admit `0.2.0-rc.1`, nor `<0.2.1` admit `0.2.1-alpha.1` (prereleases of later tuples such as 0.2.2 obey the same gate and need their own segment once verified).
+Each line is anchored at its first verified version with an upper bound at the next minor (the 0.2.1 and 0.2.2 windows widen their upper bound to `<0.3.0`, admitting every 0.2 release), so later prereleases/releases within a verified line are admitted without touching the peer declaration. The 0.2.0, 0.2.1 and 0.2.2 lines each need their own tuple: npm's prerelease gate only admits a prerelease from a comparator with the same tuple, so the existing `<0.1.8` segment cannot admit `0.2.0-rc.1`, `<0.2.1` cannot admit `0.2.1-alpha.1`, and `>=0.2.1-alpha.1 <0.3.0` cannot admit `0.2.2-alpha.2` (first verified 0.2.2 release, 2026-10-28).
 
 </details>
 

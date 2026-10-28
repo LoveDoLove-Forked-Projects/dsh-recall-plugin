@@ -7,6 +7,15 @@
 >
 > 出处标注为 2026-09-01 核验（alpha.3）；每次 dsh 升级后按「复查动作」更新本节「核验日期」。
 >
+> **0.2.2-alpha.2 核验（2026-10-28）——一处真实破坏（已修），消费面其余零变更**：
+> **版本链路**：`0.2.1-rc.3`(10-24) → `0.2.2-alpha.2`(10-28)，中间跨 `rc.4` / `0.2.2-alpha.1`（rc.4 只发 npm 未落 dist-tag，本机未装）。
+> **核验方式**：release notes + **两棵实装树逐文件 SHA256**（旧实装目录改名作基线、新装对比；包集合 **305 → 329**，新增 24 / 移除 `dsh-client-ui-deepseek-model-label-1017`）+ 消费点逐行 diff + 门禁实跑 + web 宿主冒烟。
+> **一处破坏（B1）**：`dsh-api-session-controller` 的 `readAttachment` 由「收 `attachmentId` 字符串 + 宿主回会话日志反查授权」改为「收完整 `ImageAttachmentRef` + 宿主 `attachments.readImage(request.attachment)` 自证」，`dsh-attachment-local.readImageFile` 用 `mediaType`/`bytes`/`width`/`height` 校验（裸 id 直接 `INVALID_ATTACHMENT_REF`）。插件 `src/client/draft-fill.ts` 原传裸 id → 撤回回填与编辑重发的图片被逐项 `try/catch` **静默丢弃**。**修复**：`DraftAttachmentRef.attachment` 保留块内原始引用；读取按「完整引用 → 裸 id」探测回退并把命中代缓存在闭包（旧版仍走 id 口径），返回形状两代一致故调用方无感。单测见 `tests/client/draft-fill.test.ts`（对象口径 / 字符串口径 / 命中代缓存 / 双失败降级 / 仅裸 id 旧形状），探针见 `tests/probe/api-surface.test.js`「附件回读链（B1）」。
+> **其余演进（不破坏）**：`createDrafts` 增第三参 `uploadImages`（插件恒传 `true`，旧版忽略）；`sessions.fork` 停写 `parentSession`、普通分支由 `origin` 判定（插件只读 `origin`、血缘自存，语义更正）；cordis 配置访问统一（`fiber.config` → `fiber.effectiveConfig`、`resolveConfig` 收口，volatile 提交链逐字未变）；输入提交增 `sending` 相位且宿主确认后才清草稿（对编辑重发正向）。
+> **活体回归（同日晚，真实 Chromium + `agent-browser`）**：「发带图消息 → 撤回 → 子会话图片回填 → 手动重发 → 编辑重发」全链跑通，并揪出**第二处只在该版本出现的坑（已修）**——`createDrafts(..., uploadImages: true)` 的即时上传遇上自动发送时，官方 `sendSession` 会等上传回执；刚 fork 的子会话上传未结算 → 草稿留在输入框、消息不发、控制台无错（同场景纯文本编辑重发一次成功）。修复：按场景分流第三参——撤回回填（只填不发）`true`，编辑重发（自动发送）`false`（字节随 prompt 内联）。jsdom 单测覆盖不到这类真实上传链路，故记入此处。
+> **零漂移（消费面）**：`dsh-shell`、`dsh-session-query`、`dsh-client-ui-slots`、`dsh-workspace`（仅 locale）、`dsh-client-connection`（仅 d.ts 注释）、`dsh-session` 事件集 62 种；`conversation.chat.node` / `assistant-actions`、`updateQueue`、`openSession`/`archiveSession`/`unarchiveSession`、`modelDirectories.select(单对象)`、设置两面契约均未变；新增 `conversation.chat.text-interaction` / `conversation.chat.user.before` 两个纯加法槽（插件未注册）。
+> **实装与门禁（同日）**：`npm install -g @deepseek-ai/dsh@0.2.2-alpha.2`（Windows 上仍报旧目录回收告警，实装成功）；`typecheck` OK、单测 **529**（`attachmentRefsFromBlocks` 形状用例随之更新）、client **129**（新增 8）、probe **58/58**（loader 探针按 `fiber.effectiveConfig` 改名同步、新增 B1 一条）、`verify:host` 全过、`check:dsh` 六 peer 全满足（新增 `>=0.2.2-alpha.1 <0.3.0` 段）；web 宿主冒烟页面 200、`POST /api/recall/init` 200。记录归口 [upgrade-assessments/dsh-0.2.2-alpha.2.md](./upgrade-assessments/dsh-0.2.2-alpha.2.md)。
+>
 > **0.2.1-rc.3 核验（2026-10-24）——零破坏版本（已实装）：纯加法一轮，消费面逐字节零变更、peer 窗口无需追加、无需发版**：
 > **版本链路**：`0.2.1-rc.2`(10-17) → `rc.3`(10-23)，中间无其他版本（首次相邻两版直评）；release notes 仅 3 条（2 improvements + 1 chore），无 Breaking / 无迁移说明。
 > **核验方式**：release notes + compare API（`ahead_by=6`、300 files）+ **两棵实装树逐文件 SHA256**（rc.2 目录改名作基线、rc.3 新装；包集合 **304 → 305**，排除 `package.json`/README/yaml 后 **20 包 `lib`/`dist` 漂移**）+ 关键包逐行 diff + 门禁实跑 + 镜像十次重拉。
