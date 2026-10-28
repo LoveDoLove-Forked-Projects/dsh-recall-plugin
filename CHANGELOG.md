@@ -4,6 +4,27 @@
 
 ## [Unreleased]
 
+## [2.5.2] - 2026-10-28
+
+### 修复
+
+- **编辑重发带图片时「草稿填了却不发」（活体回归发现，仅 0.2.2-alpha.2 触发）**：`createDrafts` 第三参传 `true` 会让图片进输入态即后台上传，而官方 `sendSession` 会**等上传回执**才发 prompt——刚 fork 的子会话上传迟迟不结算时，草稿留在输入框、消息不发、控制台无错（真机复现两次；同场景纯文本编辑重发一次成功）。改为按场景分流：撤回回填（只填不发）仍传 `true` 保留即时上传；编辑重发（自动发送）传 `false`，图片字节随 prompt 内联，发送一步到位。
+
+### 兼容
+
+- **dsh 0.2.2-alpha.2（一处破坏，已修）**：官方把 `readAttachment` 的入参从 `attachmentId` 字符串换成完整 `ImageAttachmentRef`，宿主不再回会话日志反查授权，裸 id 直接 `INVALID_ATTACHMENT_REF`。插件原先传裸 id → **撤回回填与编辑重发的图片会被逐项 `try/catch` 静默丢弃**。现按「完整引用 → 裸 id」探测回退并把命中代缓存在闭包，两代同时可用（0.1.x / 0.2.0 / 0.2.1 行为不变）。另补 `createDrafts` 第三参 `uploadImages=true`（旧版忽略），恢复「图片进输入态即上传」的官方语义；三参形态抛错时自动退回两参（图片改随 prompt 内联），不让整批附件丢失。
+- **`sessions.fork` 停写 `parentSession`**：普通分支改由 header `origin` 判定，插件只读 `origin` 且血缘自存 `lineage.json`，无需改码；fork 子会话不再有被当作子代理的残余风险。
+- **cordis 配置访问统一**：loader 的 ref 来源 `fiber.config` → `fiber.effectiveConfig`，volatile 提交与 `loader/volatile-update` 派发链未变，设置面热更不受影响。
+
+### 变更
+
+- **`test:probe` 58 条**：新增「附件回读链（B1）」钉住 `readAttachment` 单参形状与 `{ attachment, data }` 返回；`createDrafts` 探针并入第三参（新旧两形态都放行）；loader 探针按 `fiber.effectiveConfig` 同步改名并注明两种拼写。
+- **client 单测 121 → 129**：新增 `tests/client/draft-fill.test.ts`（对象口径 / 字符串口径 / 命中代缓存 / 双失败降级 / 仅裸 id 的旧调用方形状 / 回填第三参 true / 自动发送第三参 false / 三参抛错退回两参）；`attachmentRefsFromBlocks` 的形状断言并入既有 unit 用例（原始引用随行）。
+
+### 文档
+
+- 台账同步 dsh 0.2.2-alpha.2：`dshReleases` 补 `0.2.2-alpha.2`、六条 `@deepseek-ai/dsh-*` peer 追加 `>=0.2.2-alpha.1 <0.3.0`（cordis `>=4.0.6-alpha.1 <4.0.7`、schemastery `>=3.18.6-alpha.1 <3.18.7`）、`docs/reference/` 第十一次重拉（13 源中 3 份有差异，均不落插件消费面）、`docs/dsh-contract.md` 对应版本与新增 §1.2「输入区写入链与附件回读」+ 沿革⑫、`docs/compat-audit.md` 新核验段、新增 [upgrade-assessments/dsh-0.2.2-alpha.2.md](docs/upgrade-assessments/dsh-0.2.2-alpha.2.md)、README 双语徽章与版本范围。
+
 ## [2.5.1] - 2026-10-27
 
 ### 兼容
