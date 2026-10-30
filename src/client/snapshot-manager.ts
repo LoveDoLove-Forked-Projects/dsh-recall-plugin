@@ -341,6 +341,10 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           React.createElement('span', { className: 'dsh-recall-tree-toggle-placeholder' }),
           React.createElement('span', { className: 'dsh-recall-tree-label' },
             React.createElement('span', { className: 'dsh-recall-tree-title' }, label),
+            // issue #31：仅消息条目没有文件树，标出来——否则用户会以为这条能回退文件
+            it.files === false
+              ? React.createElement('span', { className: 'dsh-recall-tree-tag', key: 'message-only' }, t('tree.messageOnly'))
+              : null,
             // 删除紧贴本条消息摘要（而非行尾）：按行扫读时动作落在「看的那一行」，
             // 不必横跳到右侧同列按钮再回读行号
             React.createElement(DeleteButton, {

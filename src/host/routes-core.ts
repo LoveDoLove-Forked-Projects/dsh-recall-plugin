@@ -104,6 +104,8 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       const artifactSeg = sroot ? buildArtifactRootSegment(sroot, cfg.baseExcludes, rt.isWin) : null
       return {
         has: Boolean(snap), time: snap ? snap.time : null, id, ...feedback,
+        // issue #31：按钮照常出现，但界面要知道这条没有文件树（隐藏范围单选）
+        files: snap ? snap.files !== false : undefined,
         // A4：段名与中文 notice 并存下发（client 优先段名本地取词，见 init 同处注释）
         notice: artifactSeg ? buildRootNotice(artifactSeg) : undefined,
         artifactSeg: artifactSeg || undefined
@@ -127,24 +129,28 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       // 透传回 execute——Host 与安全快照指纹比对即可判定「预览后文件是否
       // 变化」，省掉 execute 侧整条重复 diff。旧版 Client 不认识该字段，
       // 无值时 execute 退回 previewTotal 校验（向后兼容）。
-      return { ok: true, changes: result.changes, total: result.total, truncated: result.truncated, treeId: result.treeId || null, time: snap2 ? snap2.time : null, root: snap2 ? snap2.root : null, cutSeq }
+      return { ok: true, changes: result.changes, total: result.total, truncated: result.truncated, treeId: result.treeId || null, time: snap2 ? snap2.time : null, root: snap2 ? snap2.root : null, cutSeq, files: snap2 ? snap2.files !== false : undefined }
     },
 
     'execute': async (args: ExecuteArgs): Promise<ExecuteResponse> => {
       const id = args && args.messageId ? String(args.messageId) : ''
       const sessionId = args && args.sessionId ? String(args.sessionId) : null
       // scope 解析：缺省/非法值一律回落 both——老 Client 不发、直调 API 乱发都
-      // 落回现状链路，Host/Client 同包发布无需能力协商。session-only 走独立
-      // 短路径：不进串行队列（队列是为 git 锁互斥而设，本路径零 git 写操作，
-      // 入队只添延迟）、跳过 STALE 校验/安全快照/rollbackFor/rescue 全链——
-      // 无文件覆盖即无不可逆操作，无需救援锚点。保留 NO_SNAPSHOT（快照存在性
-      // 仍是消息归属的判定依据，且防御直调 API）与 agentBusy 拦截（fork +
-      // 归档会把运行中的 agent 留在被归档的原会话里继续写日志）；检查在队列外
-      // 进行：无文件变更，P0-1「检查后紧接执行、窗口为零」的动机不成立，检查
-      // 退化为护栏而非不变量。
-      const scope: RecallScope = args && args.scope === 'session-only' ? 'session-only' : 'both'
+      // 落回现状链路；issue #31 的仅消息条目（files:false）另强制 session-only，
+      // 因为放行 both 会去打安全快照并 rollback 一个不存在的 tag，必然失败。
+      // session-only 走独立短路径：不进串行队列（队列是为 git 锁互斥而设，
+      // 本路径零 git 写操作，入队只添延迟）、跳过 STALE 校验/安全快照/
+      // rollbackFor/rescue 全链——无文件覆盖即无不可逆操作，无需救援锚点。
+      // 保留 NO_SNAPSHOT（快照存在性仍是消息归属的判定依据，且防御直调 API）
+      // 与 agentBusy 拦截（fork + 归档会把运行中的 agent 留在被归档的原会话里
+      // 继续写日志）；检查在队列外进行：无文件变更，P0-1「检查后紧接执行、
+      // 窗口为零」的动机不成立，检查退化为护栏而非不变量。
+      const entry = state.snapshots.get(id)
+      const scope: RecallScope = (args && args.scope === 'session-only') || (entry !== undefined && entry.files === false)
+        ? 'session-only'
+        : 'both'
       if (scope === 'session-only') {
-        const snap = state.snapshots.get(id)
+        const snap = entry
         if (!snap) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该消息没有可用的项目快照' }
         if (agentBusy(sessionId, snap.root)) return { ok: false, code: E.RECALL_AGENT_BUSY, message: 'Agent 正在运行中，请先停止后再撤回' }
         const cutSeq = await snaps.resolveCutSeq(sessionId, id)

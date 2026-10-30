@@ -64,6 +64,8 @@ export interface SnapshotInfoResponse {
   // A4：client 优先按 artifactSeg 本地取词，notice 保留一个版本周期（同上）
   notice?: string
   artifactSeg?: string
+  // issue #31：false = 该消息只登记了对话回退（messageOnly），默认 true
+  files?: boolean
 }
 
 // ---- preview ----
@@ -85,6 +87,9 @@ export interface PreviewOk {
   time: number | null
   root: string | null
   cutSeq: number | null
+  // issue #31：false = 本条没有文件树，changes 恒为空且 execute 会强制
+  // session-only；client 据此隐藏范围单选（老 Host 无该字段按 true）
+  files?: boolean
 }
 export type PreviewResponse = PreviewOk | ErrBody
 
@@ -214,6 +219,8 @@ export interface ManageListItem {
   sessionId: string | null
   sessionTitle: string | null
   messageText?: string
+  // issue #31：false = 该条只有对话回退，管理树标「仅消息」
+  files?: boolean
 }
 
 export interface ManageArgs {

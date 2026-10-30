@@ -357,3 +357,18 @@
 - **观察**：`recall-intent.json` 在 execute 后仍存在但为 **0 字节**——intent journal 的 `clear()` 是「写空串」而非删文件（设计如此，非残留）
 - **收尾**：3099 已停（无残留监听）、临时 store `e9ff8bed…` 与 `D:\tmp\dsh-p30-smoke`、`p30-patch.yml`/日志/临时脚本全部删除；profile 未做持久改动（headless 仅 `--patch` overlay）
 - **未覆盖**：同一进程内两个工作区**同时拍快照**的并发编排（需 UI 双会话驱动）；跨 root 并行语义目前由 `tests/unit/queues.test.js`（含慢任务用例）与本次并发 preview 间接覆盖
+
+## 2026-10-31 issue #31「只回退消息」模式（清单第十一节 M1〜M5）实弹
+
+- **环境**：Windows 10 ｜ dsh 0.2.2-alpha.2 ｜ web profile `link:D:\workspace\dsh-plugin\dsh-recall-plugin`（工作区 `lib/` 产物，2.6.0 + 本次改动）｜ `dsh web --no-open --port 3101` ｜ 新会话 cwd 跟随最近工作区 `D:\tmp\recall-h0`（不随宿主启动目录，与既有记录一致）｜ agent-browser 0.27.0 + 真实 Chromium
+- **结果**：M1〜M6 全部通过。**未发现新缺陷**
+- **链路证据**：
+  - **M1 开关与首条消息**：`config-set {messageOnly:true}` → `config-get` 回读 `values.messageOnly=true`（热更即时，无需重启）。新会话 `session-5cb11074…` 首条消息 `6b5c72d0…` 落盘为 `{"id":"6b5c72d0…","time":1793377657283,"root":"D:\\tmp\\recall-h0","sessionId":"session-5cb11074…","files":false}`（同 store 上一条旧条目无 `files` 字段）；`git tag -l 'snap-6b5c72d0*'` 空、tags 保持 68、`count-objects` in-pack 123 / size-pack 17 与开启前一致（**零对象写入**）；`snapshot-info` → `{has:true,files:false}`；`preview` → `{changes:[],total:0,treeId:null,cutSeq:null,files:false}`
+  - **M1 界面**：面板 `.dsh-recall-scope` 与 `input[name=dsh-recall-scope]` 均为 0；文案「这条消息只有对话回退：不会改动项目文件，对话回退到该消息之前。」+「该消息没有文件快照，且是会话第一条消息，之前没有可回退的对话。」；按钮「取消 / 确认撤回对话」，提交 `disabled=true`
+  - **M2 第二条消息**：`3e9bc273…` 同样 `files:false`、tags 仍 68、对象库不变；面板无单选且提交可用。执行后面板关闭、`lineage.json` 新增 `{"childId":"session-72784829…","parentId":"session-5cb11074…","time":1793377788800}`；子会话 `[data-chat-anchor-key]` 仅含「P31 冒烟消息一」+回答（「消息二」已被截掉）、版本翻页器 `‹2/2›`；输入框回填「P31 冒烟消息二」；工作区 `p31-marker.txt` 仍在（execute 未 reset，文件零改动）
+  - **M3 恢复完整快照**：`config-set {messageOnly:false}` 后新消息 `fd769da2…`（子会话 `session-72784829…`）→ tags 68→69、`snap-fd769da2…` 存在且 `ls-tree` 5 个文件、索引条目无 `files` 字段
+  - **M4 旧快照兼容**：旧条目 `64375e24…` preview → `{changes:[{rel:"p31-marker.txt",kind:"added"}],total:1,cutSeq:39,files:true}`（有文件树，可完整回退）
+  - **M5 管理列表**：`manage list` 中 `3e9bc273`/`6b5c72d0` 带 `files:false`，`fd769da2`/`64375e24` 无 `files` 属性（冷读契约的 `hasOwnProperty` 判据不受影响）
+  - **M6 重启读回**：停宿主后以新进程（端口 3102）重启 → `init` 正常；`snapshot-info` 对 `6b5c72d0`/`3e9bc273` 仍回 `{has:true,files:false}`，`preview` 回 `{changes:[],total:0,cutSeq:25,files:false}`；浏览器打开 P31 会话后撤回按钮在位，面板文案「这条消息只有对话回退…」、`.dsh-recall-scope` 0 个——`loadIndex` 的 files 回填在真实重启链路上生效
+- **发现（工具/流程，非插件缺陷）**：① `agent-browser click @ref` 点撤回按钮两次均无反应（面板未打开），改 `eval` 里 `button.click()` 后正常——ref 点击疑似落在消息行命中区，后续冒烟优先 DOM click；② 输入框是 contenteditable，`fill textarea` 报 not found，用 `fill "@e49"`（textbox ref）可行；③ 关闭开关后发第三条时输入框残留草稿被 Enter 带出（实际重发了「消息二」），不影响「完整快照恢复」结论，但说明冒烟时须先清空草稿
+- **收尾**：3101 已停（端口释放、进程 53884 终止）、`agent-browser close --all`、`D:\tmp\dsh-p31-smoke` 与 `D:\tmp\recall-h0\p31-marker.txt` 已删；测试会话「P31冒烟测试消息一」保留在 `D:\tmp\recall-h0` 供复验；**profile 无持久改动**——`config-set` 写入的 `messageOnly: false` 覆盖行已从 `~/.dsh/profiles/web/cordis.patch.yml` 精确删除（LF 无 BOM，逐行删 1 行），其余配置原样

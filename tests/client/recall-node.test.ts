@@ -178,6 +178,43 @@ describe('撤回节点：preview 与确认面板', () => {
   })
 })
 
+// issue #31：仅消息条目没有文件树——范围单选没有可选项，execute 必须降级
+describe('撤回节点：仅消息条目（files:false）', () => {
+  const PREVIEW_MESSAGE_ONLY = {
+    ok: true,
+    changes: [],
+    total: 0,
+    truncated: false,
+    treeId: null,
+    time: 1700000000000,
+    cutSeq: 7,
+    files: false,
+  }
+
+  it('不出范围单选，提交仍强制 session-only', async () => {
+    const { container, fetchStub } = await mount({ routes: { preview: PREVIEW_MESSAGE_ONLY } })
+    await click(actionButtons(container)[1])
+    await flush()
+
+    expect(q(container, '.dsh-recall-scope')).toBeNull()
+    await click(q(container, '.dsh-recall-btn-danger'))
+    await flush()
+
+    const calls = fetchStub.callsOf('execute')
+    expect(calls.length).toBe(1)
+    expect(first(calls).args.scope).toBe('session-only')
+  })
+
+  it('首条消息（cutSeq:null）且无文件树 → 提交禁用，避免空转', async () => {
+    const { container } = await mount({ routes: { preview: Object.assign({}, PREVIEW_MESSAGE_ONLY, { cutSeq: null }) } })
+    await click(actionButtons(container)[1])
+    await flush()
+
+    const submit = q(container, '.dsh-recall-btn-danger') as HTMLButtonElement
+    expect(submit.disabled).toBe(true)
+  })
+})
+
 describe('撤回节点：execute 执行链', () => {
   async function openConfirm(mountResult: Awaited<ReturnType<typeof mount>>): Promise<void> {
     await click(actionButtons(mountResult.container)[1])

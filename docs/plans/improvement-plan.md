@@ -1,6 +1,6 @@
 # dsh-recall-plugin 改进计划（总索引）
 
-> 状态：进行中 ｜ 更新：2026-09-29
+> 状态：进行中 ｜ 更新：2026-10-31
 > 本文档是计划族的导航索引与单一事实源：子计划从这里拆出并回链，任务细节一律住在子计划里，这里只维护清单、状态与全局顺序。
 > 调研背景与路线决策依据：[research-competitors.md](./research-competitors.md)（第一/二轮，2026-08-26/28）、[research-competitors-2026-09.md](./research-competitors-2026-09.md)（第四轮六维度评估，2026-09-09，增量输入 [plan-competitor-ux.md](./pending/plan-competitor-ux.md)：P1 模型随行建议新增 U7、plan 会话绑定随 U5）。
 > 发版版本号在发版时确定，计划文档内不预先指定（规范见 [../README.md](../README.md)）。
@@ -33,6 +33,7 @@
 | [per-root 队列、单次快照时限与 web 新会话 cwd](./completed/plan-queue-and-budget.md) | 全局串行队列改按工作区隔离（同 root 串行、跨 root 并行）；新增 `snapshotBudgetMs`（默认 3 分钟）替代硬编码 600 秒；核查并记录 web 新会话 cwd 归属官方客户端 | 已完成（2026-10-30：queues 6 例 + 配置 1 例，545 例 + 129 例 + verify:host 全绿，50ms 超时实弹通过） |
 | [POSIX dump 脚本行边界缺陷（issue #30）](./completed/plan-stores-dump-posix.md) | 空仓缺 `index.json` 时 `set -e` 让整条 dump 退出 1（linux/darwin 上快照管理/批量删除/gc-all 全停）；内容无尾换行使段尾标记粘连、解析恒为 `entries=null`；`excludeDumpScript` 同族污染；测试由字符串断言升级为真跑 bash | 已完成（2026-10-30：typecheck + 551 例 + 129 例 + verify:host 全绿；回归测试在修复前后 6/6 反差验证） |
 | [dump 失败可见化与空仓回收（issue #30 遗留项）](./completed/plan-dump-visible-and-empty-reclaim.md) | dump 失败不再静默成空列表（`DUMP_FAILED` + 最近错误 + 卡片错误条与重试）；dump 增发 `STATE` 段，从未拍过快照的空壳可被「立即 gc」回收，隔离现场/旧脚本/外来目录一律保留 | 已完成（2026-10-30：563 例 + 130 例 client + probe 58 例 + verify:host 全绿，pwsh 模板四形态手测通过） |
+| [只回退消息模式（issue #31）](./completed/plan-message-only-mode.md) | 新配置 `messageOnly`：每条消息只登记撤回记录（`index.json` 条目 `files: false`），跳过文件快照；preview 空清单、execute 强制 session-only、管理树标「仅消息」；按条生效，旧快照仍可完整回退文件 | 已完成（2026-10-31：573 例单测 + 132 例 client + probe 58 例 + verify:host 全绿，build 通过） |
 
 ## 全局实施顺序
 

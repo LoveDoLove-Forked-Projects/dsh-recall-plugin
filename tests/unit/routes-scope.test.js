@@ -128,3 +128,36 @@ describe('execute scope：session-only 短路径与回落', () => {
     expect(calls.rollback).toBe(1)
   })
 })
+
+// issue #31：仅消息条目（files:false）没有文件树，也必然没有 tag
+describe('仅消息条目（issue #31）', () => {
+  it('execute：传 both 也强制 session-only，零 git 调用', async () => {
+    const { deps, calls } = makeDeps()
+    deps.state.snapshots.set(ID, { root: ROOT, time: 1, sessionId: 's1', files: false })
+    const routes = createRoutesCore(deps)
+
+    const res = await routes.execute({ messageId: ID, scope: 'both' })
+
+    expect(res.ok).toBe(true)
+    expect(res.count).toBe(0)
+    expect(calls.enqueue).toBe(0)   // 未进 git 队列
+    expect(calls.runShell).toBe(0)  // 无安全快照
+    expect(calls.rollback).toBe(0)  // 无 rollback（无 tag 可回退）
+  })
+
+  it('preview / snapshot-info 下发 files:false 供界面隐藏范围单选', async () => {
+    const { deps } = makeDeps()
+    deps.state.snapshots.set(ID, { root: ROOT, time: 1, sessionId: 's1', files: false })
+    deps.snaps.feedbackFor = async () => ({})
+    deps.rt.resolveRoot = async () => ROOT
+    const routes = createRoutesCore(deps)
+
+    const info = await routes['snapshot-info']({ messageId: ID, sessionId: 's1' })
+    expect(info.has).toBe(true)
+    expect(info.files).toBe(false)
+
+    const preview = await routes.preview({ messageId: ID, sessionId: 's1' })
+    expect(preview.ok).toBe(true)
+    expect(preview.files).toBe(false)
+  })
+})

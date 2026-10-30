@@ -49,6 +49,8 @@ export function buildConfigForm(
     baseExcludes: string
     refillDraft: boolean
     snapshotEnabled: boolean
+    // issue #31：只回退消息（不写文件快照）
+    messageOnly: boolean
     archiveOriginal: boolean
     editSubmitsImmediately: boolean
     retentionDays: string
@@ -87,6 +89,8 @@ export function buildConfigForm(
             baseExcludes: Array.isArray(v.baseExcludes) ? v.baseExcludes.join('\n') : '',
             refillDraft: v.refillDraft !== false,
             snapshotEnabled: v.snapshotEnabled !== false,
+            // issue #31：老 Host 无该字段 → 按默认 false（现状）处理
+            messageOnly: v.messageOnly === true,
             archiveOriginal: v.archiveOriginal !== false,
             // issue #26：老 Host 的 values 无该字段时按默认 true（与 util 同口径）
             editSubmitsImmediately: v.editSubmitsImmediately !== false,
@@ -117,7 +121,7 @@ export function buildConfigForm(
     function save(): void {
       if (state.busy || !draft || !baseline) return
       const patch: Record<string, string | boolean> = {}
-      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'snapshotBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'editSubmitsImmediately', 'retentionDays', 'locale']) {
+      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'snapshotBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'messageOnly', 'archiveOriginal', 'editSubmitsImmediately', 'retentionDays', 'locale']) {
         // 按值判空再纳补丁（A6）：draft 是宽松载荷加载来的全量草稿，索引读取
         // 在类型层可能 undefined；未定义的键与基线无从比较，直接跳过（等价于
         // 原实现里「undefined !== 基线值」的隐式行为，只是不再依赖隐式）。
@@ -170,6 +174,7 @@ export function buildConfigForm(
       }
       if (patch.refillDraft !== undefined) clean.refillDraft = Boolean(patch.refillDraft)
       if (patch.snapshotEnabled !== undefined) clean.snapshotEnabled = Boolean(patch.snapshotEnabled)
+      if (patch.messageOnly !== undefined) clean.messageOnly = Boolean(patch.messageOnly)
       if (patch.archiveOriginal !== undefined) clean.archiveOriginal = Boolean(patch.archiveOriginal)
       if (patch.editSubmitsImmediately !== undefined) clean.editSubmitsImmediately = Boolean(patch.editSubmitsImmediately)
       if (patch.retentionDays !== undefined) {
@@ -325,6 +330,8 @@ export function buildConfigForm(
       // 不重复加标题。
       React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.snapshot')),
       boolRow('snapshotEnabled', t('config.snapshotEnabled.label'), t('config.snapshotEnabled.hint')),
+      // issue #31：只回退消息——紧挨总开关，语义上是「快照写什么」的下一层
+      boolRow('messageOnly', t('config.messageOnly.label'), t('config.messageOnly.hint')),
       boolRow('refillDraft', t('config.refillDraft.label'), t('config.refillDraft.hint')),
       boolRow('archiveOriginal', t('config.archiveOriginal.label'), t('config.archiveOriginal.hint')),
       boolRow('editSubmitsImmediately', t('config.editSubmitsImmediately.label'), t('config.editSubmitsImmediately.hint')),

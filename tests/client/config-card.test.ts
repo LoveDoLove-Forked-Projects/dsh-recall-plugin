@@ -23,6 +23,8 @@ const CONFIG_VALUES = {
   baseExcludes: ['node_modules/'],
   refillDraft: true,
   snapshotEnabled: true,
+  // issue #31：只回退消息（默认关）
+  messageOnly: false,
   archiveOriginal: true,
   retentionDays: 0,
 }
@@ -66,16 +68,19 @@ describe('config-card 读取与渲染', () => {
     expect((qid(container, 'dsh-recall-cfg-maxFileBytes') as HTMLInputElement).value).toBe('8')
     expect((qid(container, 'dsh-recall-cfg-maxWorkspaceBytes') as HTMLInputElement).value).toBe('256')
     expect((qid(container, 'dsh-recall-cfg-scanBudgetMs') as HTMLInputElement).value).toBe('10')
-    expect(qa(container, '.dsh-recall-cfg-switch').length).toBe(4)
+    expect(qa(container, '.dsh-recall-cfg-switch').length).toBe(5)
     expect(qa(container, '.dsh-recall-cfg-row').length).toBeGreaterThanOrEqual(10)
   })
 
   it('布尔字段经 role=switch 呈现，aria-checked 反映当前值', async () => {
     const { container } = await mount()
-    for (const sw of qa(container, '.dsh-recall-cfg-switch')) expect(sw.getAttribute('aria-checked')).toBe('true')
+    // 渲染顺序：snapshotEnabled / messageOnly / refillDraft / archiveOriginal /
+    // editSubmitsImmediately——messageOnly 默认关（issue #31），其余默认开
+    expect(qa(container, '.dsh-recall-cfg-switch').map((sw) => sw.getAttribute('aria-checked')))
+      .toEqual(['true', 'false', 'true', 'true', 'true'])
 
     const off = await mount({ 'config-get': { ok: true, values: Object.assign({}, CONFIG_VALUES, { refillDraft: false }), envLocks: {}, writable: true } })
-    expect(at(qa(off.container, '.dsh-recall-cfg-switch'), 1).getAttribute('aria-checked')).toBe('false')
+    expect(at(qa(off.container, '.dsh-recall-cfg-switch'), 2).getAttribute('aria-checked')).toBe('false')
   })
 
   it('读取失败（ok:false）→ 表单不渲染，host 载荷原文可见', async () => {
@@ -118,7 +123,8 @@ describe('config-card 保存链路', () => {
 
   it('开关翻转同样进入补丁（布尔字段）', async () => {
     const { container, fetchStub } = await mount({ 'config-set': { ok: true } })
-    await click(qa(container, '.dsh-recall-cfg-switch')[1])
+    // refillDraft 是第 3 个开关（前两个：snapshotEnabled / messageOnly）
+    await click(qa(container, '.dsh-recall-cfg-switch')[2])
     await flush()
     await click(q(container, '.dsh-recall-btn-primary'))
     await flush()

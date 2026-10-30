@@ -250,6 +250,8 @@ export const CSS = [
   '.dsh-recall-tree-label{flex:1;min-width:0;display:flex;gap:8px;align-items:baseline;font-size:12px;line-height:1.5;overflow:hidden}',
   '.dsh-recall-tree-name{flex:none;font-weight:600;color:var(--dsw-alias-label-secondary)}',
   '.dsh-recall-tree-title{min-width:0;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}',
+  // issue #31：仅消息条目的静态标记——与 ex-chip 同丸形，但非按钮、无 hover
+  '.dsh-recall-tree-tag{flex:none;border-radius:999px;corner-shape:round;padding:0 8px;font-size:11px;line-height:1.6;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-module-platform);white-space:nowrap}',
   // tabular-nums：树 meta 列（「3 会话 / 28 快照」「v2/3」）多行纵向扫描时
   // 数字等宽，个位对齐不跳动
   '.dsh-recall-tree-meta{flex:none;font-size:12px;line-height:1.5;color:var(--dsw-alias-label-tertiary);white-space:nowrap;font-variant-numeric:tabular-nums}',

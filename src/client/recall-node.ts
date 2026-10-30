@@ -4,7 +4,8 @@
  * 从原 lib/client.js 抽出：kind 单表、变更摘要、确认面板、用户消息重绘
  * （新面整条内容走官方 conversation.chat.user.content Factory；旧面与兜底
  * 路径自绘文本、图片经官方 renderMessageImages 闭包、文件卡片与 JSON 块）、
- * 撤回执行链（preview→execute→fork→回填）。KIND_INFO/summaryText 模块级导出供单测。
+ * 撤回执行链（preview→execute→fork→回填）。kind 单表（KIND_INFO/summaryText）拆在
+ * diff-kinds.ts，此处 re-export 保住既有 import 路径。
  *
  * A4：全部可见文案经 util.t 取词（词典层见 locales/）；模块级纯函数保留
  * 「不收词表则按 zh 渲染」的缺省（zhTranslate），单测与降级路径不因缺 util
@@ -26,8 +27,6 @@ import type { ModelPane } from './model-menu.js'
 import { buildDraftFill, defaultAttachmentName } from './draft-fill.js'
 import { activeSession, recordVersion } from './version-tree.js'
 import type { DraftAttachmentRef } from './draft-fill.js'
-import { zhTranslate } from './locales/index.js'
-import type { Translate } from './locales/index.js'
 import type { ClientContext, ClientSessionsService, ClientWorkspacesService, ClientUiWorkspaceService, ChatNodeProps, ConversationInputShell, ConversationService } from '../types/client-contract.js'
 import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange, RecallScope } from '../types/api.js'
 
@@ -35,111 +34,23 @@ import type { SnapshotInfoResponse, PreviewResponse, ExecuteResponse, DiffChange
 // 既有 import 路径（tests/unit/client-pure.test.js 直测它）
 export { defaultAttachmentName }
 
-// 用户消息内容块（text/image/JSON 等）：只读已知字段，其余透传 unknown
-export interface ChatBlock {
-  type?: string
-  text?: string
-  attachment?: unknown
-  [key: string]: unknown
-}
+// 块解析与文件卡片度量拆在 message-blocks.ts（自包含纯逻辑，与撤回状态机无关）；
+// re-export 保住既有 import 路径（client-pure 单测从本文件导入）
+import { attachmentRefsFromBlocks, fileCardInfo, projectMessageBlocks } from './message-blocks.js'
+import type { ChatBlock } from './message-blocks.js'
+export { attachmentRefsFromBlocks, fileCardInfo } from './message-blocks.js'
+export type { ChatBlock, FileCardInfo } from './message-blocks.js'
 
-// 纯函数（模块级导出供单测）：从内容块提取附件引用。只认带非空 attachmentId 的
-// image/file 块；缺 name 的由回填侧按 mediaType 派生文件名。
-export function attachmentRefsFromBlocks(blocks: ChatBlock[]): DraftAttachmentRef[] {
-  const refs: DraftAttachmentRef[] = []
-  for (const block of blocks) {
-    if (!block || (block.type !== 'image' && block.type !== 'file')) continue
-    const ref = block.attachment as { attachmentId?: unknown; name?: unknown } | null | undefined
-    if (!ref || typeof ref.attachmentId !== 'string' || ref.attachmentId === '') continue
-    // 原始引用对象一并带上：≥0.2.2-alpha.1 的 readAttachment 只认完整引用
-    // （裸 id 会被判 INVALID_ATTACHMENT_REF），旧版忽略该字段
-    const entry: DraftAttachmentRef = { attachmentId: ref.attachmentId, kind: block.type, attachment: block.attachment }
-    if (typeof ref.name === 'string' && ref.name !== '') entry.name = ref.name
-    refs.push(entry)
-  }
-  return refs
-}
+// kind 单表与摘要拆在 diff-kinds.ts（自包含纯映射，与状态机无关）；re-export
+// 保住既有 import 路径——client-pure 单测与 locales 注释都指向本文件
+import { KIND_INFO, isChangeKind, summaryText } from './diff-kinds.js'
+import type { ChangeKind, ChangeCounts } from './diff-kinds.js'
+export { KIND_INFO, isChangeKind, summaryText } from './diff-kinds.js'
+export type { ChangeKind, ChangeCounts } from './diff-kinds.js'
 
-// 文件卡片的展示信息（官方 UserStyleBubble 对 file 块渲染成「图标 + 文件名 +
-// 扩展名/大小」卡片；插件的自定义渲染器必须自己复刻，否则 file 块会落到
-// JSON 兜底里变成一坨原文）。
-export interface FileCardInfo {
-  name: string
-  ext: string
-  size: string
-}
-
-// 扩展名徽标文本：取最后一个点之后的部分，大写并截断到 4 字符（PDF/JSON/DOCX）；
-// 无扩展名或点名结尾回退 'FILE'。
-function fileExtOf(name: string): string {
-  const dot = name.lastIndexOf('.')
-  const raw = dot > 0 && dot < name.length - 1 ? name.slice(dot + 1) : ''
-  const ext = raw.replace(/[^a-z0-9]/gi, '').toUpperCase()
-  return ext ? ext.slice(0, 4) : 'FILE'
-}
-
-// 附件体积文本：官方卡片写「6.7KB」这种紧凑形态（无空格、KB 起一位小数），
-// 与设置页磁盘占用的 sizeText（MB 起、带空格）是两种语境，不复用。
-function fileCardSizeText(bytes: unknown): string {
-  const n = typeof bytes === 'number' && Number.isFinite(bytes) && bytes >= 0 ? bytes : NaN
-  if (Number.isNaN(n)) return ''
-  if (n < 1024) return String(Math.round(n)) + 'B'
-  if (n < 1048576) return (n / 1024).toFixed(1) + 'KB'
-  if (n < 1073741824) return (n / 1048576).toFixed(1) + 'MB'
-  return (n / 1073741824).toFixed(1) + 'GB'
-}
-
-// 纯函数（模块级导出供单测）：file 块 → 文件卡片信息。只认 type === 'file'；
-// 引用形状异常（缺 attachment）时给兜底名，绝不返回 null —— file 块一旦漏回
-// JSON 兜底就是「整块原文」的可见回归，宁可渲染一张信息不全的卡片。
-// t 缺省 zh 词表（同 summaryText）：兜底名也要可译，但不能逼调用点必传
-export function fileCardInfo(block: ChatBlock | null | undefined, t: Translate = zhTranslate): FileCardInfo | null {
-  if (!block || block.type !== 'file') return null
-  const ref = block.attachment as { name?: unknown; bytes?: unknown } | null | undefined
-  const name = ref && typeof ref === 'object' && typeof ref.name === 'string' && ref.name !== '' ? ref.name : t('file.unnamed')
-  return { name, ext: fileExtOf(name), size: fileCardSizeText(ref && typeof ref === 'object' ? ref.bytes : undefined) }
-}
-
-// kind 语义单表承载（词键/徽章类名/汇总顺序）：新增 kind 时只改这一处。
-// A4 起 label 换成 labelKey——文案归词典（kind.*），单表继续管「语义 → 词键
-// + 类名」映射，渲染期再 t(labelKey)
-export type ChangeKind = 'modified' | 'restored' | 'added'
-export const KIND_INFO: Record<ChangeKind, { labelKey: string; cls: string }> = {
-  modified: { labelKey: 'kind.modified', cls: 'modified' },
-  restored: { labelKey: 'kind.restored', cls: 'restored' },
-  added: { labelKey: 'kind.added', cls: 'added' }
-}
-
-export interface ChangeCounts {
-  modified: number
-  restored: number
-  added: number
-}
-
-// kind 白名单判定（A6）：计数只认 KIND_INFO 登记的三个 kind——payload 是 host
-// 下发的宽松形状，未知/缺失 kind 原样跳过（不进任何计数桶）。判据派生自
-// KIND_INFO 而非硬编码字面量，保住「新增 kind 只改这一处」的单表纪律。
-export function isChangeKind(kind: unknown): kind is ChangeKind {
-  return typeof kind === 'string' && Object.prototype.hasOwnProperty.call(KIND_INFO, kind)
-}
-
-export function summaryText(counts: ChangeCounts, t: Translate = zhTranslate): string {
-  const parts: string[] = []
-  for (const kind of Object.keys(KIND_INFO) as ChangeKind[]) {
-    if (counts[kind] > 0) parts.push(t(KIND_INFO[kind].labelKey) + ' ' + counts[kind])
-  }
-  return parts.join(' · ')
-}
-
-// 撤回面板的状态机：idle（默认，仅按钮）→ loading（预览中）→ error →
-// confirm（变更清单 + 确认）→ executing（回退中）→ done（结果）
-export type RecallStage =
-  | { stage: 'idle' }
-  | { stage: 'loading' }
-  | { stage: 'error'; message: string }
-  | { stage: 'confirm'; changes: DiffChange[]; total: number; truncated: boolean; treeId: string | null; time: number | null; cutSeq: number | null }
-  | { stage: 'executing'; changes: DiffChange[] }
-  | { stage: 'done'; count: number; chatReverted: boolean; chatError: string }
+// 面板状态机拆在 recall-stage.ts（纯类型，issue #31 的 files/scope 分叉在那里）
+import type { RecallStage } from './recall-stage.js'
+export type { RecallStage } from './recall-stage.js'
 
 export interface RecallNodeApi {
   UserRecallNode: (props: ChatNodeProps) => unknown
@@ -222,9 +133,12 @@ export function buildRecallNode(
       })
       // cutSeq 为 null 表示该消息是会话第一条用户消息：文件可回退但对话无从回退
       const canRevertChat = typeof recall.cutSeq === 'number'
-      // session-only 仅在对话可回退时可达（radio 组只在 canRevertChat 时渲染，
-      // 首条消息的面板与现状完全一致）
-      const sessionOnly = canRevertChat && scope === 'session-only'
+      // issue #31：仅消息条目没有文件树——范围单选不再有意义，文案与提交
+      // 按钮一律走 session-only 分支（与 Host 侧的强制降级保持一致）
+      const noFiles = recall.files === false
+      const sessionOnly = noFiles || (canRevertChat && scope === 'session-only')
+      // 既无文件树、又是首条消息：没有任何可撤回的内容，提交必须禁用
+      const noEffect = noFiles && !canRevertChat
       if (recall.truncated) {
         rows.push(React.createElement('div', { className: 'dsh-recall-panel-note', key: 'truncated' },
           t(sessionOnly ? 'recall.truncated.chat' : 'recall.truncated.files', { shown: changes.length, total })
@@ -244,9 +158,9 @@ export function buildRecallNode(
         React.createElement('div', { className: 'dsh-recall-panel-title' }, t('recall.confirm.title')),
         sessionOnly
           ? // session-only：零文件改动即无不可逆操作缺口——安全快照预告随之隐藏
-            //（不打安全快照），主说明换成模式语义
+            //（不打安全快照），主说明换成模式语义；仅消息条目另给专属说明
             React.createElement('div', { className: 'dsh-recall-panel-note' },
-              t('recall.confirm.sessionOnly')
+              t(noFiles ? 'recall.confirm.messageOnly' : 'recall.confirm.sessionOnly')
             )
           : React.createElement('div', { className: 'dsh-recall-panel-note' },
               rollbackLead + filesLead
@@ -262,9 +176,10 @@ export function buildRecallNode(
             )
           : null,
         changes.length > 0 ? React.createElement('div', { className: 'dsh-recall-list' }, ...rows) : null,
-        canRevertChat
+        canRevertChat && !noFiles
           ? // 模式二选一（原生 radio，键盘方向键可达）：临场选择不设全局配置项；
-            // 默认 both 与现状一致，面板每次打开都复位到默认起点
+            // 默认 both 与现状一致，面板每次打开都复位到默认起点。仅消息条目
+            // 没有可选项（没有文件树），整组隐藏
             React.createElement('div', { className: 'dsh-recall-scope', role: 'radiogroup', 'aria-label': t('recall.scope.aria') },
               React.createElement('label', { className: 'dsh-recall-scope-item' },
                 React.createElement('input', { type: 'radio', name: 'dsh-recall-scope', checked: scope === 'both', onChange: () => onScopeChange('both') }),
@@ -276,22 +191,31 @@ export function buildRecallNode(
               )
             )
           : null,
+        noEffect
+          ? // 仅消息 + 首条消息：文件无快照、对话无更早切点，提交只会空转
+            React.createElement('div', { className: 'dsh-recall-panel-note', key: 'no-effect' }, t('recall.confirm.noEffect'))
+          : null,
         React.createElement('div', { className: 'dsh-recall-panel-actions' },
           React.createElement('button', { type: 'button', className: 'dsh-recall-btn', onClick: closePanel }, t('common.cancel')),
-          React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-danger', onClick: executeRecall }, t(sessionOnly ? 'recall.confirm.submit.sessionOnly' : 'recall.confirm.submit.both'))
+          React.createElement('button', { type: 'button', className: 'dsh-recall-btn dsh-recall-btn-danger', disabled: noEffect, onClick: executeRecall }, t(sessionOnly ? 'recall.confirm.submit.sessionOnly' : 'recall.confirm.submit.both'))
         )
       )
     }
     if (recall.stage === 'executing') {
+      // 执行阶段的模式文案按实际下发的 scope 取（仅消息条目被强制 session-only）
+      const active = recall.scope || scope
       return React.createElement('div', { className: 'dsh-recall-panel' },
-        React.createElement('div', { className: 'dsh-recall-panel-title' }, t(scope === 'session-only' ? 'recall.executing.sessionOnly' : 'recall.executing.both'))
+        React.createElement('div', { className: 'dsh-recall-panel-title' }, t(active === 'session-only' ? 'recall.executing.sessionOnly' : 'recall.executing.both'))
       )
     }
     if (recall.stage === 'done') {
+      // 结果文案按实际执行的模式渲染：仅消息条目被 Host 强制成 session-only，
+      // 组件态 scope 仍是 both，用它会误报「文件与对话已回退」
+      const active = recall.scope || scope
       return React.createElement('div', { className: 'dsh-recall-panel' },
         React.createElement('div', { className: 'dsh-recall-panel-title' }, t('recall.done.title')),
         React.createElement('div', { className: 'dsh-recall-panel-note' },
-          scope === 'session-only'
+          active === 'session-only'
             ? // session-only 文案矩阵：文件侧零改动是确定事实，失败时也只描述对话侧
               (recall.chatReverted
                 ? t('recall.done.sessionOnly.ok')
@@ -364,17 +288,9 @@ export function buildRecallNode(
     // node.id 是会话事件匹配时写入的真实消息 ID；node.key 是位置键，不能用于快照查询
     const messageId = node ? String(node.id || node.key || '') : ''
     const blocks: ChatBlock[] = Array.isArray(data.content) ? data.content as ChatBlock[] : []
-    const text = blocks.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text).join('')
-    // 以下三个块视图供自绘降级路径使用（旧面主路径 / 新面工厂兜底）；新面主
-    // 路径由 content Factory 直接消费 blocks，投影见 user-content.ts
-    // 官方契约：images 传 image 块数组（{attachment}），官方内部取
-    // image.attachment.attachmentId —— 不是裸 attachment 对象
-    const imageBlocks: Array<{ attachment: unknown }> = blocks.filter((b) => b && b.type === 'image' && b.attachment).map((b) => ({ attachment: b.attachment }))
-    // file 块（文档/表格等非图片附件）：官方渲染成文件卡片（图标 + 文件名 +
-    // 扩展名/大小）——自绘路径必须复刻，否则它落进下方 rest 的 JSON 兜底，
-    // 消息里只剩一坨原文（可见回归）
-    const fileBlocks: ChatBlock[] = blocks.filter((b) => b && b.type === 'file')
-    const rest: ChatBlock[] = blocks.filter((b) => !b || !(b.type === 'text' && typeof b.text === 'string') && !(b.type === 'image' && b.attachment) && b.type !== 'file')
+    // 以下四个块视图供自绘降级路径使用（旧面主路径 / 新面工厂兜底）；投影口径
+    // 与注释见 message-blocks.ts（新面主路径由 content Factory 直接消费 blocks）
+    const { text, images: imageBlocks, files: fileBlocks, rest } = projectMessageBlocks(blocks)
     // 回填用附件引用（image/file 块）：撤回后连同文本一起回填到输入框
     const attachmentRefs = attachmentRefsFromBlocks(blocks)
     // 版本翻页器所在的 assistant-actions 槽只收 messageId，拿不到 sessionId：
@@ -775,7 +691,9 @@ export function buildRecallNode(
           truncated: Boolean(res.truncated),
           treeId: res.treeId || null,
           time: res.time || null,
-          cutSeq: typeof res.cutSeq === 'number' ? res.cutSeq : null
+          cutSeq: typeof res.cutSeq === 'number' ? res.cutSeq : null,
+          // issue #31：仅消息条目没有文件树（老 Host 无该字段 → 按 true）
+          files: res.files !== false
         })
       }).catch((error) => {
         // 端点异常落错误态（面板显示可重试）
@@ -794,7 +712,10 @@ export function buildRecallNode(
       // 事件对象（React 合成事件），真值检查会把事件当 scope 透传给 Host
       const activeScope: RecallScope = overrides && overrides.scope === 'session-only'
         ? 'session-only'
-        : overrides && overrides.scope === 'both' ? 'both' : scope
+        : overrides && overrides.scope === 'both' ? 'both'
+          // issue #31：仅消息条目没有文件树，Host 会强制降级成 session-only；
+          // 这里按同一口径下发，executing/done 文案才不会误报文件已回退
+          : (recall.stage === 'confirm' && recall.files === false ? 'session-only' : scope)
       const previewCut = overrides && overrides.cutSeq !== undefined
         ? overrides.cutSeq
         : (recall.stage === 'confirm' && typeof recall.cutSeq === 'number' ? recall.cutSeq : null)
@@ -834,7 +755,7 @@ export function buildRecallNode(
       const attachmentFiles = baseFiles !== null && inlineFiles !== null
         ? Promise.all([baseFiles, inlineFiles]).then(([base, extra]) => base.concat(extra))
         : (baseFiles !== null ? baseFiles : inlineFiles)
-      setStage({ stage: 'executing', changes })
+      setStage({ stage: 'executing', changes, scope: activeScope })
       // scope 透传：Host 端 session-only 走零 git 短路径；previewTreeId/
       // previewTotal 照常携带（Host 按 scope 忽略 STALE 校验）。cutSeq 为 null
       // 时 scope 恒为 both（radio 未渲染，无 session-only 可选）
@@ -861,7 +782,8 @@ export function buildRecallNode(
                 truncated: Boolean(res2.truncated),
                 treeId: res2.treeId || null,
                 time: res2.time || null,
-                cutSeq: typeof res2.cutSeq === 'number' ? res2.cutSeq : null
+                cutSeq: typeof res2.cutSeq === 'number' ? res2.cutSeq : null,
+                files: res2.files !== false
               })
             }).catch((error) => {
               // 重拉失败落错误态（与首次 preview 同显式面）
@@ -976,7 +898,7 @@ export function buildRecallNode(
           }
           // 注：快照 tag 在 Host 侧有意保留（幂等回退），刷新页面后该消息的
           // 撤回按钮会重新出现——这是「可再次回退到同一点」的特性而非 bug。
-          setRecall({ stage: 'done', count: typeof res.count === 'number' ? res.count : changes.length, chatReverted, chatError })
+          setRecall({ stage: 'done', count: typeof res.count === 'number' ? res.count : changes.length, chatReverted, chatError, scope: activeScope })
         }
         // 终态上报（issue #19）：撤回链完整走完才发 complete（fork 失败路径
         // 已发过 failed(fork)，按 chatError 收口防双发矛盾终态——complete 与

@@ -1,6 +1,6 @@
 # 冒烟测试待办清单
 
-> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：**第一〜九节均已执行通过**（一〜七节 2026-08-29、第八节 2026-09-18、第九节 rewind 加固批次 2026-09-30；执行记录见 [smoke-checklist-records.md](./smoke-checklist-records.md)）
+> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：**第一〜十一节均已执行通过**（一〜七节 2026-08-29、第八节 2026-09-18、第九节 rewind 加固批次 2026-09-30、第十节编辑重发 2026-10-23、第十一节只回退消息 2026-10-31；执行记录见 [smoke-checklist-records.md](./smoke-checklist-records.md)）
 > 范围：必须在真实 DSH web 环境实弹验证的项。单测（212 项）、`verify:host`、`check:dsh` 已覆盖的逻辑正确性与装配正确性不在此重复；本清单 = AGENTS.md 常规回归路径 + 各已实施计划（`completed/`）验收标准中「需活体验证」的项。
 > 环境准备：Windows 侧确认 `~/.dsh/profiles/web/package.json` 的 `dsh-recall-plugin` 依赖处于 **link 模式**（改代码联调，工作区 `lib/` 即已装代码，改完重启 dsh-web 生效）；npm 模式下跑的是 registry 旧版，验证新版前须 `pnpm update dsh-recall-plugin` 或切 link 模式。**WSL 侧前置准备见第五节**（POSIX 分支实弹，阻塞环境诊断批次随 minor 发版）。
 > 全部通过后：本文件与 `smoke-checklist-records.md` 一起移入 `completed/`，并按 docs/README.md 生命周期约定同步总索引链接。
@@ -116,6 +116,17 @@
 - [x] **E-5 首条消息拒绝**：会话首条用户消息提交编辑 → 错误面板明确拒绝（`edit.noCut`），不 fork、不回填、不发送 △ 由 `tests/client/edit-flow.test.ts`（cutSeq null → 零 execute、零 setDraft）覆盖；本轮实机在新会话首条消息上顺带命中（文案「该消息是本会话中第一条用户消息…无法编辑重发」+ 重试按钮）
 - [x] **E-6 气泡原位编辑**：点 ✎ → 编辑框顶替气泡本体（气泡消失、编辑框出现在同一位置且宽度贴合原气泡），动作行仍在原位，说明文案降为一行小字 ✅ 短消息实测编辑框 220px（= 原气泡宽），textarea 预填逐字一致；取消/发送后气泡恢复
 - [x] **E-7 版本翻页器 `‹ X/N ›`**：一次编辑重发后最后一轮回答操作区出现 `‹2/2›`；点 ‹ → 切到第 1 版（标题回退、翻页器变 `‹1/2›`、侧栏只剩该版本）；点 › → 切回第 2 版 ✅ 归档交换与视口锚定均正常，历史回合不显示翻页器（空容器 `:empty` 隐藏）
+
+## 十一、只回退消息模式（Windows 侧必测，发版前置；issue #31）
+
+> 2026-10-31 实施：单测 573 例 + client 132 例 + probe 58 例 + `verify:host` 全绿，本节是真实 DSH 链路的活体验收（**M1〜M5 已于同日实弹通过**，执行记录见 smoke-checklist-records 的 2026-10-31 节）。
+
+- [x] **M1 开关与首条消息（只登记）**：`config-set messageOnly=true` 后发一条消息 → `index.json` 条目带 `files: false`、无 `snap-<消息ID>` tag、对象库不增长；面板无范围单选、文案「这条消息只有对话回退」、首条消息提交禁用 ✅ 条目 `{"files":false}`（上一条旧条目无该字段）、tags 保持 68、`count-objects` in-pack 123/size-pack 17 未变；面板 `.dsh-recall-scope` 0 个、提交 `disabled=true`；`snapshot-info` → `files:false`，`preview` → `changes:[] total:0 treeId:null cutSeq:null`
+- [x] **M2 普通消息撤回（强制 session-only）**：第二条消息同样只登记；面板无单选、提交可用 → 执行后 fork 成功、子会话截断在该消息之前、文件零改动、输入框回填原文 ✅ `lineage.json` 新增 `{childId session-72784829…, parentId session-5cb11074…}`；子会话只剩「消息一」+回答、版本翻页器 `‹2/2›`；工作区 marker 文件仍在（execute 未 reset）；输入框回填「P31 冒烟消息二」
+- [x] **M3 恢复完整快照**：关闭开关后新消息恢复完整快照——出现 `snap-<消息ID>` tag（tree 非空）、条目无 `files` 字段 ✅ tags 68→69、`snap-fd769da2…` 树含 5 个文件、条目 `{"id":"fd769da2…"}` 无 files 字段
+- [x] **M4 旧快照兼容**：开启前拍的旧条目仍可完整回退文件（preview 出清单、无 files:false 语义） ✅ 旧条目 `64375e24…` preview → `changes:[{rel:"p31-marker.txt",kind:"added"}] total:1 cutSeq:39 files:true`
+- [x] **M5 管理列表标记**：快照管理接口对两类条目分别透传（仅消息带 `files:false`，完整快照不带字段） ✅ `manage list`：`3e9bc273`/`6b5c72d0` 带 `files:false`，`fd769da2`/`64375e24` 无该字段（客户端「仅消息」chip 由组件测试与 `tree.messageOnly` 词条覆盖）
+- [x] **M6 重启后记录仍在**：重启 DSH → 仅消息条目的撤回按钮仍出现、面板仍按仅消息渲染 ✅ 重启（新进程 3102）后 `init` 正常，`snapshot-info` 对 `6b5c72d0`/`3e9bc273` 均回 `files:false`，`preview` 回 `changes:[] cutSeq:25 files:false`；浏览器打开会话后撤回按钮在位，面板文案「这条消息只有对话回退…」、`.dsh-recall-scope` 0 个——`loadIndex` 的 files 回填在真实重启链路上生效
 
 ---
 

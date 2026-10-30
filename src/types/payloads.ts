@@ -28,6 +28,9 @@ export interface IndexEntry {
   root: string
   sessionId: string
   feedback?: SnapshotFeedback
+  // issue #31：false = 仅消息记录（无文件树、无 tag）。只在 false 时落盘，
+  // 缺省视为 true——旧索引、旧版本插件读新索引都走这条默认
+  files?: boolean
 }
 
 // lineage.json 条目（snapshots.js recordLineage 写入侧，F1 fork 撤回链）

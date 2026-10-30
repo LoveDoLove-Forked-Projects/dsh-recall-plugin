@@ -57,6 +57,10 @@ export const Config = Schema.object({
   baseExcludes: withVolatile(Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）')),
   refillDraft: withVolatile(Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框')),
   snapshotEnabled: withVolatile(Schema.boolean().default(true).description('启用消息快照（关闭后不再新建，已有快照仍可撤回）')),
+  // issue #31：超大工作区（gitignore 过滤后仍上 GB）每条消息写一次全量对象
+  // 成本过高。开启后仍登记撤回记录（按钮与对话回退照常），但跳过文件快照；
+  // 按条落 files:false，老条目仍可完整回退文件
+  messageOnly: withVolatile(Schema.boolean().default(false).description('只回退消息：每条消息只登记撤回记录，不写文件快照（适合超大工作区）')),
   archiveOriginal: withVolatile(Schema.boolean().default(true).description('撤回后归档原会话（关闭后原会话保留在列表中）')),
   // issue #26：编辑提交后自动发出改后的文本。关闭则退化为「只回填输入框」，
   // 给「只想改稿、不立刻发」的用户留一条与撤回回填一致的出口
@@ -203,6 +207,7 @@ export const DEFAULTS: ResolvedConfig = {
   baseExcludes: BASE_EXCLUDES,
   refillDraft: true,
   snapshotEnabled: true,
+  messageOnly: false,
   archiveOriginal: true,
   editSubmitsImmediately: true,
   retentionDays: 0,
@@ -246,6 +251,10 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
   // 已有快照的撤回链路不受影响——关闭只停增量，不销毁存量。
   const snapshotEnabled = typeof cfg.snapshotEnabled === 'boolean' ? cfg.snapshotEnabled : true
 
+  // issue #31：只登记消息撤回记录，不写文件快照。与 snapshotEnabled 叠加：
+  // 前者关＝连记录都不建，本项只决定「登记时写不写文件树」
+  const messageOnly = cfg.messageOnly === true
+
   // 撤回后是否归档原会话：关闭时原会话保留在侧栏（fork 新会话仍打开），
   // 供用户对照回退前后上下文；默认开（归档只是隐藏、可恢复）。
   const archiveOriginal = typeof cfg.archiveOriginal === 'boolean' ? cfg.archiveOriginal : true
@@ -266,5 +275,5 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
   // 值（响亮失败），这里只兜 env 覆盖与旧配置文档缺字段两条路径
   const locale: LocalePref = cfg.locale === 'zh' || cfg.locale === 'en' ? cfg.locale : 'auto'
 
-  return { gcSnaps, gcHours, maxFileBytes, maxWorkspaceBytes, scanBudgetMs, snapshotBudgetMs, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, editSubmitsImmediately, retentionDays, locale }
+  return { gcSnaps, gcHours, maxFileBytes, maxWorkspaceBytes, scanBudgetMs, snapshotBudgetMs, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, messageOnly, archiveOriginal, editSubmitsImmediately, retentionDays, locale }
 }

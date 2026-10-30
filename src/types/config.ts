@@ -24,6 +24,9 @@ export interface ResolvedConfig {
   baseExcludes: string[]
   refillDraft: boolean
   snapshotEnabled: boolean
+  // issue #31：只登记撤回记录、不写文件快照。按条目落 files:false，
+  // 因此关闭开关后老条目仍是「仅消息」，不会被误恢复文件树
+  messageOnly: boolean
   archiveOriginal: boolean
   // issue #26：编辑提交后自动发出改后的文本（关闭则只回填输入框）
   editSubmitsImmediately: boolean

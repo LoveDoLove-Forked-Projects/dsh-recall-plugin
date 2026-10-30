@@ -10,7 +10,7 @@
 import * as E from './errors.js'
 import { buildFeedbackError } from './diagnostics.js'
 import { buildArtifactRootSegment } from './exclude-patterns.js'
-import type { Runtime, StoreInfo } from '../types/state.js'
+import type { Runtime, StoreInfo, SnapshotInfo } from '../types/state.js'
 import type { SnapshotFeedback, LineageEntry, IndexEntry } from '../types/payloads.js'
 import type { HostContext, SessionEvent, SessionQueryEngine } from '../types/dsh-contract.js'
 import type { ResolvedConfig } from '../types/config.js'
@@ -532,6 +532,9 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       .filter(([, s]) => s.root === root)
       .map(([id, s]) => {
         const rec: IndexEntry = { id, time: s.time, root: s.root, sessionId: s.sessionId }
+        // issue #31：只在「仅消息」时落字段——旧索引与有文件树的条目都不写，
+        // 缺省即 true，读侧零迁移
+        if (s.files === false) rec.files = false
         const fb = state.snapFeedback.get(id)
         if (fb && (fb.failed || (Array.isArray(fb.skipped) && fb.skipped.length))) rec.feedback = fb
         return rec
@@ -603,11 +606,14 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       // 整体不判死；root/time 的宽松兼容保留（root 以参数为准、time 缺省回退
       // now）——那是旧索引双向兼容策略，不属「损坏」。
       if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id) { invalid++; continue }
-      state.snapshots.set(entry.id, {
+      const info: SnapshotInfo = {
         root,
         time: typeof entry.time === 'number' ? entry.time : Date.now(),
         sessionId: entry.sessionId || sessionId || ''
-      })
+      }
+      // issue #31：旧索引没有该字段 → 视为有文件树（缺省 true）
+      if (entry.files === false) info.files = false
+      state.snapshots.set(entry.id, info)
       // feedback 回填（P1-2）：重启后仍能解释「这条消息为什么没有/缺了
       // 快照」。复用 setFeedback 落内存（保持 FIFO 上限），只回填「需要
       // 解释」的记录；旧版索引无 feedback 字段时天然跳过。kind（M1 环境错误
@@ -770,9 +776,39 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     }
   }
 
+  // issue #31：只登记撤回记录，不碰文件树。两处短路刻意绕开：
+  // - snapFailures / snapLimits 描述的是「文件快照失败 / 超限」，开启本模式
+  //   正是为了绕开它们，不应再阻断消息登记；
+  // - buildArtifactRootSegment 早退（issue #18）的理由是产物根快照成本高且
+  //   没有回退价值，而仅消息登记零成本，dist/target 里撤回对话仍有价值。
+  // guardStoreFormat 保留（索引写入同受磁盘格式守卫约束）。ensureGit 仍跑一次
+  // （gitReady 命中的话零进程）——store 布局完整才能复用 gc/枚举/清理全链；
+  // 失败走与完整快照相同的反馈通道，不登记（避免同会话按钮时有时无）。
+  async function captureMessageOnly(root: string, sessionId: string, messageId: string, time?: number): Promise<void> {
+    let store: StoreInfo | null = await rt.resolveStore(root)
+    store = (await rt.tryUpgradeToHome(root))!
+    if (!(await guardStoreFormat(store))) return
+    const g = await rt.ensureGit(root, store)
+    if (!g.ok) {
+      setFeedback(messageId, { failed: true, ...buildFeedbackError(g.error || '未知原因') })
+      return
+    }
+    await loadIndex(root, sessionId)
+    state.snapshots.set(String(messageId), { root, time: time || Date.now(), sessionId, files: false })
+    await saveIndex(root, sessionId)
+    // 与完整快照成功同款：清掉该消息的旧反馈（失败后重试成功要能自愈）
+    setFeedback(messageId, { skipped: [] })
+  }
+
   async function captureSnapshot(sessionId: string, messageId: string, time?: number): Promise<void> {
     const root = await rt.resolveRoot(sessionId)
     if (!root) return
+    // issue #31：只回退消息在熔断/限流短路之前分流——那两个标记是文件快照
+    // 的失败态，不该阻断消息登记（用户开这个模式正是为了绕开它们）
+    if (config.messageOnly) {
+      await captureMessageOnly(root, sessionId, messageId, time)
+      return
+    }
     // 熔断检查要在任何解析/建仓动作之前：冷却期内连 resolveStore 都
     // 不必跑，把失败重试的开销也一并止住
     const fused = snapFailures.get(root)
@@ -922,6 +958,8 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   async function diffFor(messageId: string): Promise<DiffResult | null> {
     const snap = state.snapshots.get(String(messageId))
     if (!snap) return null
+    // issue #31：仅消息条目没有 tag，跑 diffScript 只会失败——直接空清单
+    if (snap.files === false) return { changes: [], total: 0, truncated: false, treeId: null }
     const store = state.stores.get(snap.root)
     if (!store) return null
     // 8MB 上限：按平均每条 60 字节估算可容纳十余万条，正常项目远够；

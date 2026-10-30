@@ -25,6 +25,9 @@ export interface SnapshotInfo {
   root: string
   time: number
   sessionId: string
+  // issue #31：false = 该条只登记了对话回退，没有文件树。缺省视为 true
+  //（旧索引条目与旧内存条目都走这条默认），故只在 false 时赋值
+  files?: boolean
 }
 
 // recordError 环形缓冲条目：kind 直存 classifyEnvError 返回值，未命中即 null

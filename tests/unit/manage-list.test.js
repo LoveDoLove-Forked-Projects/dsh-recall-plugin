@@ -56,6 +56,24 @@ describe('F-G1 manage list 过滤 pre-rollback 条目', () => {
   })
 })
 
+// issue #31：仅消息条目的 files 标记要透传到管理树（否则用户以为能回退文件）
+describe('manage list files 透传（issue #31）', () => {
+  it('磁盘与内存两源都透传 files:false；有文件树的条目不写该字段', async () => {
+    const memory = new Map()
+    memory.set('only', { root: 'D:/ws', time: 2, sessionId: 's1', files: false })
+    memory.set('full', { root: 'D:/ws', time: 3, sessionId: 's1' })
+    const routes = createRoutesManage(fakeDumps([
+      { id: 'only', time: 2, sessionId: 's1', files: false },
+      { id: 'full', time: 3, sessionId: 's1' },
+    ], memory))
+
+    const res = await routes.manage({ op: 'list' })
+
+    expect(res.items.find((i) => i.id === 'only').files).toBe(false)
+    expect(res.items.find((i) => i.id === 'full').files).toBeUndefined()
+  })
+})
+
 // client fetchMessages 以 hasOwnProperty('messageText') 决定是否请求
 // messages 端点冷读——Host 侧任何路径把 null 写进该属性（1.5.0 b8d39cb
 // push 补全分支的回归），冷会话快照就永远只显示消息 ID。

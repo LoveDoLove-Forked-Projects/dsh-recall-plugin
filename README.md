@@ -161,6 +161,7 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 | `baseExcludes` | `.git`、`node_modules/`、`.dsh-recall-snapshots/`、`dsh-recall-snapshots/`、`target/`、`dist/`、`build/`、`out/`、`coverage/`、`.next/`、`.nuxt/`、`.output/`、`.cache/`、`.gradle/`、`*.exe`、`*.dll`、`*.pdb`、`*.so`、`*.dylib`、`*.msi`、`*.zip`、`*.7z`、`*.rar`、`*.tar`、`*.tar.gz`、`*.iso` | 基础排除表（gitignore 语法，优先级低于 exclude.txt）；被排除的大目录整棵子树不进快照扫描。其中「目录形态」项（如 `target/`）另有一层含义：**工作区根自身的路径段命中时，该工作区不启用快照**——在构建产物目录里开会话时排除表本来就管不到它自己（模式是相对该 root 的），这类目录也没有回退价值；删掉对应项即恢复 |
 | `refillDraft` | true | 撤回后把被撤回的消息（文本与附件）回填到输入框 |
 | `snapshotEnabled` | true | 快照总开关（关闭只冻结新建，已有快照仍可撤回） |
+| `messageOnly` | false | 只回退消息：每条用户消息仍登记撤回记录（按钮与对话回退照常），但不写文件快照——适合 gitignore 过滤后仍上 GB 的超大工作区。按消息生效：开启前的旧快照仍可完整回退文件；这类条目在快照管理里标「仅消息」，删除后不可从 tag 恢复 |
 | `archiveOriginal` | true | 撤回后归档原会话（关闭后原会话保留在会话列表中） |
 | `editSubmitsImmediately` | true | 「编辑并重发」提交后自动发出改后的消息；关闭则只回填输入框，由你按回车发送 |
 | `locale` | auto | 界面语言：`auto` 跟随系统（`navigator.language` 以 `zh` 开头用中文，否则英文）、`zh` / `en` 显式锁定。见下方「界面语言」 |

@@ -79,7 +79,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
     // 去重只用 id（消息 ID 全局唯一）：带 root 进 key 会让同一快照因
     // 「磁盘来源 root 缺失 / 内存来源 root 齐全」出现两条重复行
     const byId = new Map<string, ManageListItem>()
-    function push(id: string, time: number | null, root: string | null, sessionId: string | null | undefined): void {
+    function push(id: string, time: number | null, root: string | null, sessionId: string | null | undefined, files?: boolean): void {
       if (!id || typeof id !== 'string') return
       // F-G1 防御性展示过滤：修复前 rebuildOrphans 曾把 safety tag
       // （pre-rollback-<ts>）strip 前缀后写进 index.json——存量污染条目
@@ -99,6 +99,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         // 消息文本只放已确认值：live 命中字符串则带，否则不设字段。
         const liveText = liveMessageTextFast(sessionId || '', id)
         if (liveText) rec.messageText = liveText
+        // issue #31：仅消息条目在树上标「仅消息」（缺省＝有文件树，与读侧同口径）
+        if (files === false) rec.files = false
         byId.set(id, rec)
         allItems.push(rec)
         return
@@ -110,6 +112,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       // 误判「已查过」而跳过 messages 冷读——冷会话快照永远只显示消息 ID
       if (!old.messageText && id) { const t = liveMessageTextFast(sessionId, id); if (t) old.messageText = t }
       if (!old.time && time) old.time = time
+      // 两来源不一致时取 false：没有文件树是更保守的展示（隐藏文件回退单选）
+      if (files === false) old.files = false
     }
     for (const [dir, info] of dump) {
       const baseRoot = info.root || hints.get(dir) || null
@@ -118,12 +122,12 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         // root 优先取 root.txt（info.root，resolveStore 写下的权威映射）：index.json
         // 条目里的 e.root 曾出现丢失反斜杠的坏数据（哈希↔root 错位，删除落到空
         // store），root.txt 是每次 resolveStore 都重写的规范源，兜底才用条目值
-        push(e.id, e.time, baseRoot || (typeof e.root === 'string' && e.root) || null, e.sessionId)
+        push(e.id, e.time, baseRoot || (typeof e.root === 'string' && e.root) || null, e.sessionId, e.files)
       }
     }
     // 内存兜底（刚拍未落盘的保险，正常已被磁盘 dump 覆盖）
     for (const [id, s] of state.snapshots.entries()) {
-      push(id, s.time, s.root, s.sessionId)
+      push(id, s.time, s.root, s.sessionId, s.files)
     }
     allItems.sort((a, b) => (b.time || 0) - (a.time || 0))
     return allItems
@@ -384,6 +388,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           baseExcludes: cfg.baseExcludes.slice(),
           refillDraft: cfg.refillDraft,
           snapshotEnabled: cfg.snapshotEnabled,
+          // issue #31：只回退消息（不写文件快照）
+          messageOnly: cfg.messageOnly,
           archiveOriginal: cfg.archiveOriginal,
           editSubmitsImmediately: cfg.editSubmitsImmediately,
           retentionDays: cfg.retentionDays,
@@ -430,6 +436,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       }
       if (patch.refillDraft !== undefined) clean.refillDraft = Boolean(patch.refillDraft)
       if (patch.snapshotEnabled !== undefined) clean.snapshotEnabled = Boolean(patch.snapshotEnabled)
+      // issue #31：只回退消息开关（布尔清洗与其它开关同层）
+      if (patch.messageOnly !== undefined) clean.messageOnly = Boolean(patch.messageOnly)
       if (patch.archiveOriginal !== undefined) clean.archiveOriginal = Boolean(patch.archiveOriginal)
       if (patch.editSubmitsImmediately !== undefined) clean.editSubmitsImmediately = Boolean(patch.editSubmitsImmediately)
       if (patch.retentionDays !== undefined) {
