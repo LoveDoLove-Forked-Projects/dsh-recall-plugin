@@ -220,7 +220,7 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 > 细节（依赖的官方行为 / 出处 / 探针·单测 / 失效症状 / 复查动作）全部住在
 > [docs/compat-audit.md](docs/compat-audit.md) 的「子系统 × 不变量 × 探针」矩阵
-> （I1-I43），这里只留一行一条索引；dsh 升级后的定点复查流程见上文「漂移控制」。
+> （I1-I45），这里只留一行一条索引；dsh 升级后的定点复查流程见上文「漂移控制」。
 
 * I1 chat.node keyed slot：负值 priority + 冲突递减重试；key 覆盖 `['user','steering']`。
 
@@ -309,3 +309,4 @@ CI（GitHub Actions）：`npm ci --legacy-peer-deps` + 类型门禁（typecheck�
 
 * I43 插件兼容性门禁（0.2.1-alpha.4 起）：`engines.dsh` 存在则只查它并**短路** peerDependencies，否则逐条查 `@deepseek-ai/dsh[-*]` peer 范围（`dsh-app-boot` `unmetRequirements`）——本插件**不声明 `engines.dsh`**（多段逐线窗口无法用单段等价表达、声明即短路 peer 判定且放宽未验证版本），维持 peer 路径。
 * I44 web 新会话 cwd 跟随「当前会话所属工作区 → 最近活跃工作区」，与宿主进程启动目录无关（2026-10-30 实测：在 A 目录 `dsh web`，消息落到上次用的 B 工作区）：切工作区后再发消息；插件无正当入口替用户选工作区（官方无配置项/钩子，见 docs/compat-audit.md I44）。
+* I45 定界输出的 shell 脚本必须让**内容自带行尾**、**可选文件读取收成成功**（issue #30，2026-10-30 实弹）：`parseStoresDump`/`parseExcludeDump` 按整行匹配段尾标记，而 `writeTextViaShell`（POSIX = `cat > file`）落盘无尾换行 ⇒ `cat` 后紧跟 `echo XEND` 会把标记粘到内容行尾、解析层收不到段尾（每个仓都成 `entries=null`）；`set -e` 下裸 `cat` 缺文件还会让整条脚本退出 1（空仓必现，linux/darwin 上快照管理/批量删除/gc-all 全停）。两处一律「`cat … 2>/dev/null || true` + 内容后 `printf "\n"`」；pwsh 侧 `Write-Output` 自带行尾且用 `Test-Path` 分支，不需要同款处理。回归靠 `tests/unit/stores-dump-script.test.js`（真 bash 执行，不再只断言脚本文本）。

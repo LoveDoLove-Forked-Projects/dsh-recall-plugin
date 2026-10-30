@@ -1656,6 +1656,25 @@
   核验记录：0.2.2-alpha.2（2026-10-30，安装目录逐文件读取 + `D:\tmp\recall-h0` 实测）。
 
 
+### I45 定界输出的 shell 脚本：内容段必须自带行尾、可选文件读取必须收成成功（issue #30，2026-10-30 实弹）
+
+- **依赖的既有行为**：`parseStoresDump` / `parseExcludeDump` 用**整行等值**（`line === 'INDEXEND'` / `'EXCLEND'`）识别段尾；
+  shell 面按**进程退出码**判成败（I14/I41），`set -e` 会在任一条命令非零时终止整条脚本。
+- **环境事实（POSIX）**：`cat` 不补行尾。插件自身的写入路径 `writeTextViaShell` 在 POSIX 就是 `cat > file`，
+  落盘的 `index.json` / `lineage.json` / `exclude.txt` 都**没有尾换行**；因此「`cat` 内容 → `echo 段尾标记`」的写法
+  会把标记粘在内容行尾（`[{...}]INDEXEND`），整行匹配失效 ⇒ 每个 store 都解析成 `entries = null`（表现为树空、
+  批量删除与 gc 无效，而退出码正常）。另外裸 `cat` 读缺失文件退出 1，`set -e` 下让**整条 dump** 在第一个空仓处终止。
+  win32 侧无此问题：`Write-Output` / `Get-Content` 自带行尾，且缺席读取走 `Test-Path` 分支（I41）。
+- **插件对策**：`storesDumpScript` 的段内改为 `cat "$d/index.json" 2>/dev/null || true` + 内容后 `printf "\n"`；
+  `excludeDumpScript` 的 `base64 … | tr -d '\n'` 后同样补换行（payload 字节数为 3 的倍数、base64 无 `=` padding 时，
+  粘在尾部的标记会被一起解码成垃圾字节，回显到设置页再保存即污染 `exclude.txt`）。
+- **失效症状**：`recall stores dump failed: Error: exit 1`（detail 为空），设置页「快照管理」空树、批量/全部删除与
+  「立即 gc」全部无效；**按 issue 的临时处置补齐 `index.json`/`lineage.json` 后退出码恢复，树仍然是空的**（第 2 条的隐患）。
+- **复查动作**：改动任何「内容 + 段尾标记」的脚本后，跑 `npx vitest run tests/unit/stores-dump-script.test.js`
+  （真 bash 执行生成脚本并校验解析结果，CI 的 ubuntu 必跑）；新增定界输出一律按「内容 / 显式换行 / 标记」三段式写。
+  细节与实测矩阵见 [plans/completed/plan-stores-dump-posix.md](plans/completed/plan-stores-dump-posix.md)。
+
+
 ## 与 E1 verify-host 的对应关系
 
 装配层条目（I10 inject 门禁、端点注册、Config schema、卸载清零）由

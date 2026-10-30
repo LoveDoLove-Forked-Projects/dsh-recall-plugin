@@ -9,8 +9,15 @@
 - **任务队列按工作区隔离**：快照/preview/回退/删除/gc 原先共用一条全局串行链，一个工作区的慢快照会把**所有会话**的撤回按钮一起堵住。现在同一工作区仍然串行（都在写同一个 git index），不同工作区并行；跨工作区的批量删除与全局 gc 用「等这些工作区的链尾全部落地」保证互斥。win32 下路径大小写归一，避免同一仓库拿到两把锁。
 - **单次快照时限可配置（`snapshotBudgetMs`，默认 3 分钟）**：整条快照脚本（扫描 + `add` + 写索引/打 tag）的兜底超时从硬编码 600 秒改为配置项，设置卡片按秒展示；`0` 表示不限制。
 
+### 修复
+
+- **Linux/macOS 上快照管理、批量删除/全部删除与「立即 gc」全部不可用**（[issue #30](https://github.com/limbo947/dsh-recall-plugin/issues/30)，POSIX dump 脚本的两个缺陷）：① 建仓后还没拍过快照的**空仓**没有 `index.json`/`lineage.json`，裸 `cat` 在 `set -e` 下让整条 dump 退出 1，磁盘上的仓一个都枚举不到；② 这两个文件落盘时没有尾换行，`cat` 后紧跟的段尾标记被粘到内容行尾，解析器按整行匹配永远收不到段尾——**即使文件齐全，每个仓也被解析成「无索引」**（报告者的临时处置只修了 ①，树依然是空的）。现在两处改为「缺席放行 + 内容后补一个换行」，逐仓隔离语义不变，存量数据无需迁移。
+- **设置页 exclude 编辑器可能回显垃圾字节**（同一类行边界缺陷）：`exclude.txt` 字节数为 3 的倍数时 base64 没有 `=` padding，粘在尾部的段尾标记会被一起解码；回显后再保存即污染文件。
+- **dump 脚本的测试从「字符串断言」升级为「真跑一遍」**：新增 [tests/unit/stores-dump-script.test.js](tests/unit/stores-dump-script.test.js)，在 bash 里执行生成的脚本并校验解析结果（CI 的 ubuntu 必然执行，win32 认 Git Bash）。此前只断言脚本文本与解析器行为，这两个只在执行期暴露的缺陷因此全绿漏过。
+
 ### 文档
 
+- 新增 [plan-stores-dump-posix.md](docs/plans/completed/plan-stores-dump-posix.md)：issue #30 的双缺陷分析、实测矩阵与防回归设计；含「不采纳 warmup 落 `index.json = []`」「不采纳脚本保持 fail-fast」的依据，以及两条遗留（dump 失败对用户不可见、空仓无法回收）。
 - 新增 [plan-queue-and-budget.md](docs/plans/completed/plan-queue-and-budget.md)：含 web 新会话 cwd 的官方归属核查（`startSession` 取 `workspaceId ?? 当前 ?? 最近`、全链不传 cwd、无配置项/钩子可改写）——该项为官方行为，插件不改代码，只在 README 使用注意与 AGENTS 已知坑里写明。
 
 ## [2.5.3] - 2026-10-30
