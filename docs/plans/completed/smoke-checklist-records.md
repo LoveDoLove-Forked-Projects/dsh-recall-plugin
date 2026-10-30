@@ -341,3 +341,19 @@
 - **时间线**：① 第一条（13:58:39）正常快照，tags 67、心跳 `36760 1793339919`；② 破坏 `git/.git/index` 后第二条（13:59:26）日志 `recall snapshot scan failed … rc=128 … index file smaller than expected`，tags 仍 67、心跳刷新为 `1793339966`（脚本跑了、add 没跑）；③ 第三条（TTL 内）**心跳未变**（仍 `36760 1793339966`、mtime 13:59:26）、tags 仍 67、日志无新行 → sticky 短路生效，脚本零调用；④ 还原 `index` 并等到 TTL 到期（14:09:48）后第四条自动重试成功，tags 68、心跳刷新为 `1793340588`
 - **界面侧**：第一条消息旁有「撤回」按钮，第二/三条无按钮（无快照）——与 sticky 语义一致
 - **收尾**：agent-browser 已 close、3098 已停（仅剩 TIME_WAIT）、`D:\tmp\dsh-p29-sticky` 与快照文本已删；`D:\tmp\recall-h0` 的测试会话「Sticky 冒烟测试确认」保留（4 条消息、2 个快照）供复验，被破坏的 `index` 已从备份还原
+
+## 2026-10-30 issue #30 与 2.6.0 批次（POSIX dump 修复 + per-root 队列）活体验收
+
+- **环境**：Windows 10 ｜ dsh 0.2.2-alpha.2 ｜ 插件 2.6.0（工作区 `lib/` 产物，headless 与 web profile 均 junction 到本仓库）｜ 冒烟工作区 `D:\tmp\dsh-p30-smoke`（`src/app.txt`、`中文 说明.txt`）｜ headless 走 `--patch D:\tmp\p30-patch.yml`（permission 预设 + insert 本地插件——headless profile 的 bundles 不含本插件，不 overlay 则不加载）
+- **链路一（POSIX dump 真实数据对照，Git Bash 5.2.37）**：对 `~/.dsh/dsh-recall-snapshots` 下 11 个真实 store 分别跑修复前/后的 `storesDumpScript` 再喂解析器——**修复后** exit=0、11/11 的解析条数与磁盘一致（样例 store：index 40 条 + lineage 31 条全读回）；**修复前** exit=1、只有 1 个 store 出现在输出且 `entries=null`、9 个根本没输出。D1（空仓让整条退出）与 D2（段尾标记粘连致 entries 恒 null）在真实数据上双向钉死
+- **链路二（headless 真实消息 → 快照）**：`dsh headless --patch … "…"`（模型凭据缺失报 `MISSING_CREDENTIAL`，消息先落盘并触发快照）→ 新建 store `e9ff8bed…`（`root.txt` 指向冒烟工作区）、tag `snap-b383a3fe-…`、`index.json` 一条（root/sessionId/time 正确）、`heartbeat` 已写；树内容只有 `src/app.txt` 与 `中文 说明.txt`。同工作区第二条消息后 tags=2、index 2 条——同 root 反复快照无死锁
+- **链路三（web 宿主 `/api/recall/*`，本地 link 2.6.0）**：`dsh web --no-open --port 3099` → `GET /?token=…` 换 cookie →
+  - `manage list`：ok、2.5s、55 条 / 6 个工作区（dump → parse 全链在 win32 侧无回归）
+  - `init`：57ms → 63ms/2ms（第二次命中去重后的根就绪链）
+  - **跨 root 并发 preview**：两个不同工作区同时请求，均 ok（1 条 / 0 条变更），墙钟 2.9s——`enqueueFor(root)` 没有把两个工作区串成一条
+  - `preview`（冒烟工作区）：1 条 `modified src/app.txt`、`treeId c9957672…`
+  - `execute(scope=both)`：ok、count=1、9.2s，`src/app.txt` 由 v2 还原为 v1；`cutSeq=null`（跨宿主既有降级语义，只回退文件不 fork）
+  - `manage gc`（走 `enqueueMany` 跨工作区联锁）：ok、`gc=true`、29.3s 收敛，未死锁
+- **观察**：`recall-intent.json` 在 execute 后仍存在但为 **0 字节**——intent journal 的 `clear()` 是「写空串」而非删文件（设计如此，非残留）
+- **收尾**：3099 已停（无残留监听）、临时 store `e9ff8bed…` 与 `D:\tmp\dsh-p30-smoke`、`p30-patch.yml`/日志/临时脚本全部删除；profile 未做持久改动（headless 仅 `--patch` overlay）
+- **未覆盖**：同一进程内两个工作区**同时拍快照**的并发编排（需 UI 双会话驱动）；跨 root 并行语义目前由 `tests/unit/queues.test.js`（含慢任务用例）与本次并发 preview 间接覆盖

@@ -1,6 +1,6 @@
 # POSIX dump 脚本的两处行边界缺陷（issue #30）
 
-> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：**已完成（2026-10-30；门禁 typecheck + 551 例 + 129 例 + verify:host 全绿，回归测试在新旧代码上 6/6 反差验证）**
+> 上游文档：[improvement-plan.md](../improvement-plan.md) ｜ 状态：**已完成（2026-10-30；门禁 typecheck + 551 例 + 129 例 + probe 58 例 + verify:host 全绿，回归测试在新旧代码上 6/6 反差验证；活体冒烟三条链路通过，见第 5 节）**
 > 背景：[issue #30](https://github.com/limbo947/dsh-recall-plugin/issues/30)（Linux + dsh 0.2.1-rc.5 + 插件 2.5.2/2.5.3）报告「空快照仓缺 `index.json` 时 dump 脚本退出 1，快照管理/批量删除/gc-all 全不可用」。
 
 ## 1 问题：报告只诊断了一半
@@ -54,7 +54,16 @@ issue 给的是 `set -e` + 裸 `cat` 的组合，这条成立（记作 D1），�
 
 `npm run typecheck` 零错误；`npm test` **44 文件 551 例全绿**（新增本文件 6 例）；`npm run test:client` 129 例；`npm run build` 产物与提交内容一致；`npm run verify:host` 通过。
 
-## 5 遗留（不在本轮）
+## 5 活体冒烟（2026-10-30，2.6.0 批次）
+
+记录全文见 [smoke-checklist-records.md](smoke-checklist-records.md) 同日批次，要点：
+
+- **POSIX dump 真实数据**：对 `~/.dsh/dsh-recall-snapshots` 的 11 个真实 store 跑修复前后模板——修复后 exit=0、11/11 解析条数与磁盘一致；修复前 exit=1、仅 1 个 store 有输出且 `entries=null`、9 个没输出。
+- **headless 真实消息**：新 store + `snap-*` tag + `index.json` 一条 + 心跳正常，树内文件正确；同工作区第二条消息后 tags=2、索引 2 条（无死锁）。
+- **web 宿主 API**：`manage list` 55 条 / 6 工作区（dump→parse 无回归）；跨 root 并发 preview 双双成功；`preview → execute(both)` 把改动的 `src/app.txt` 还原；`manage gc` 走 `enqueueMany` 29.3s 收敛未死锁。
+- **未覆盖**：同进程内两个工作区同时拍快照的并发编排（需 UI 双会话驱动），该语义目前由 `queues.test.js` 与并发 preview 间接覆盖。
+
+## 6 遗留（不在本轮）
 
 - **dump 失败对用户不可见**：`dumpStores` 失败只 `console.error`，`manage list` 仍返 `ok:true` + 空数组，界面只见空树、无任何提示——下次同类故障用户依然只能靠翻日志发现。做成错误码 + toast 需要动端点返回契约与 client，另开。
 - **从未拍过快照的空仓无法被回收**：这类 store 的 `entries` 为 `null`，永远不满足 `reapEmptyStores` 的回收条件，会一直挂在磁盘（报告者 7 个）。要回收得让 dump 区分「文件缺失」与「文件损坏」，属契约扩展，另开。
