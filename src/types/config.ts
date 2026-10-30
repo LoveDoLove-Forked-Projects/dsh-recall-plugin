@@ -17,6 +17,9 @@ export interface ResolvedConfig {
   //（两者均为 0 时表示不限制）
   maxWorkspaceBytes: number
   scanBudgetMs: number
+  // issue #29：单次快照脚本（扫描 + add + 写索引/打 tag）的总时限，兜底
+  // scanBudgetMs 管不到的写入阶段；0 表示不限制
+  snapshotBudgetMs: number
   maxSnapshotsPerWorkspace: number
   baseExcludes: string[]
   refillDraft: boolean

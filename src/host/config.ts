@@ -50,6 +50,9 @@ export const Config = Schema.object({
   // 截断快照回退时，未纳入的文件会命中回退脚本的「当前有、目标无」删除侧。
   maxWorkspaceBytes: withVolatile(Schema.number().default(268435456).description('单工作区可纳入快照的文件总量上限，口径与 git add 一致（含 .gitignore），超过即停用该工作区快照；0 表示不限制')),
   scanBudgetMs: withVolatile(Schema.number().default(10000).description('快照前统计纳入总量的时间预算，超时即停用本次快照；0 表示不限制')),
+  // issue #29：scanBudgetMs 只约束「统计阶段」，真正的耗时与写盘在 add。
+  // 这条是整条快照脚本的兜底时限——慢盘或病态工作区上它才是把队列拖住的一段。
+  snapshotBudgetMs: withVolatile(Schema.number().default(180000).description('单次快照的总时限（毫秒，含扫描与写入），超时即中止本次快照并记录；0 表示不限制')),
   maxSnapshotsPerWorkspace: withVolatile(Schema.number().default(500).description('每个工作区保留的最大快照数，超限删除最旧的')),
   baseExcludes: withVolatile(Schema.array(Schema.string()).default(BASE_EXCLUDES).description('基础排除表（gitignore 语法，优先级低于 exclude.txt）')),
   refillDraft: withVolatile(Schema.boolean().default(true).description('撤回后把被撤回的消息（文本与附件）回填到输入框')),
@@ -195,6 +198,7 @@ export const DEFAULTS: ResolvedConfig = {
   maxFileBytes: 8388608,
   maxWorkspaceBytes: 268435456,
   scanBudgetMs: 10000,
+  snapshotBudgetMs: 180000,
   maxSnapshotsPerWorkspace: 500,
   baseExcludes: BASE_EXCLUDES,
   refillDraft: true,
@@ -222,6 +226,8 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
   // 安全机制，误输入负数不该把护栏关掉（显式关闭只认 0）。
   const maxWorkspaceBytes = pickNumber(cfg.maxWorkspaceBytes, 268435456, 0)
   const scanBudgetMs = pickNumber(cfg.scanBudgetMs, 10000, 0)
+  // issue #29：整条快照的兜底时限；0 = 不限制（消费侧映射为 24h）
+  const snapshotBudgetMs = pickNumber(cfg.snapshotBudgetMs, 180000, 0)
   // 每工作区快照上限：0 或负值语义 = 不限制（给想全保留的用户出口）；
   // 非数值回退默认 500。默认 500 ≈ 重度使用一周量级，太小会静默丢历史
   // 撤回点，太大失去防膨胀意义。
@@ -260,5 +266,5 @@ export function createConfig(raw: RawConfig): ResolvedConfig {
   // 值（响亮失败），这里只兜 env 覆盖与旧配置文档缺字段两条路径
   const locale: LocalePref = cfg.locale === 'zh' || cfg.locale === 'en' ? cfg.locale : 'auto'
 
-  return { gcSnaps, gcHours, maxFileBytes, maxWorkspaceBytes, scanBudgetMs, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, editSubmitsImmediately, retentionDays, locale }
+  return { gcSnaps, gcHours, maxFileBytes, maxWorkspaceBytes, scanBudgetMs, snapshotBudgetMs, maxSnapshotsPerWorkspace, baseExcludes, refillDraft, snapshotEnabled, archiveOriginal, editSubmitsImmediately, retentionDays, locale }
 }

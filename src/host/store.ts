@@ -301,7 +301,6 @@ export function createRuntime(ctx: HostContext, config: ResolvedConfig, deps?: {
     roots: new Map(),
     stores: new Map(),
     snapshots: new Map(),
-    queue: Promise.resolve(),
     indexLoaded: new Set(),
     // PF-5 索引终态三/四档标记（rebuildOrphans 守卫的数据源）：
     // - indexHealthy：磁盘索引解析成功且在场（loadIndex 正常载入分支）——

@@ -73,7 +73,7 @@ function fakeRt(state, snapshotOut) {
   }
 }
 
-const CFG = { baseExcludes: [], maxWorkspaceBytes: 268435456, scanBudgetMs: 10000 }
+const CFG = { baseExcludes: [], maxWorkspaceBytes: 268435456, scanBudgetMs: 10000, snapshotBudgetMs: 180000 }
 
 describe('captureSnapshot：扫描失败（issue #29）', () => {
   it('不写快照条目，反馈 kind=scanFail，stderr 进最近错误', async () => {

@@ -56,7 +56,11 @@ function makeDeps(opts = {}) {
     state,
     cfg: { baseExcludes: [] },
     supported: true,
-    enqueue: (task) => {
+    enqueueFor: (_root, task) => {
+      calls.enqueue++
+      return task()
+    },
+    enqueueMany: (_roots, task) => {
       calls.enqueue++
       return task()
     },

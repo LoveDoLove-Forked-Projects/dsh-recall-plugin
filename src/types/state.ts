@@ -47,7 +47,6 @@ export interface SharedState {
   roots: Map<string, string>
   stores: Map<string, StoreInfo>
   snapshots: Map<string, SnapshotInfo>
-  queue: Promise<void>
   indexLoaded: Set<string>
   indexHealthy: Set<string>
   indexTruncated: Set<string>

@@ -811,7 +811,10 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     // issue #29：失败耗时是「昂贵失败」的判定依据（见 EXPENSIVE_FAIL_MS）
     const captureStartedAt = Date.now()
     try {
-      const out = await rt.runShell(S.snapshotScript(root, store, state.gitExe || '', messageId, BASE()), { timeoutMs: 600000, stdoutMaxBytes: 65536 })
+      // 整条快照脚本的兜底时限（0 = 不限制；runShell 的 timeoutMs 是必达的
+      // kill 计时器，「不限」只能用一个足够大的数表达）
+      const budget = config.snapshotBudgetMs > 0 ? config.snapshotBudgetMs : 86400000
+      const out = await rt.runShell(S.snapshotScript(root, store, state.gitExe || '', messageId, BASE()), { timeoutMs: budget, stdoutMaxBytes: 65536 })
       // issue #24：前置扫描判定超限——本次不建快照，并按停用语义走反馈
       //（不是失败：不 prune、不进熔断），后续快照由上方短路跳过
       const limit = parseSnapshotLimit(out)

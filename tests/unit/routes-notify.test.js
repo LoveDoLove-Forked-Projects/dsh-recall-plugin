@@ -27,7 +27,7 @@ function makeDeps(opts = {}) {
     },
     snaps: {}, state: { snapshots: new Map(), stores: new Map(), errors: [] },
     cfg: { baseExcludes: [] }, supported: true,
-    enqueue: (task) => task(), agentBusy: () => false,
+    enqueueFor: (_root, task) => task(), enqueueMany: (_roots, task) => task(), agentBusy: () => false,
     rescueRollback: async () => ({ ok: false, code: E.RECALL_ROLLBACK_FAILED, message: 'x' }),
     E,
     // emitEvent 桩：opts.emitThrow 时同步抛（模拟下游广播层故障）

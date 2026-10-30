@@ -28,7 +28,9 @@ export interface RoutesManageDeps {
   state: SharedState
   cfg: ResolvedConfig
   supported: boolean
-  enqueue<T>(task: () => Promise<T>): Promise<T>
+  // 按工作区隔离的任务队列（queues.ts）：同 root 串行、跨 root 并行
+  enqueueFor<T>(root: string | null | undefined, task: () => Promise<T>): Promise<T>
+  enqueueMany<T>(roots: Array<string | null | undefined>, task: () => Promise<T>): Promise<T>
   runLimited<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<void>
   listExcludeFiles(): Promise<Map<string, { store: StoreInfo; roots: string[] }>>
   dumpStores(): Promise<Map<string, StoreDumpInfo>>
@@ -48,7 +50,7 @@ export interface RoutesManageDeps {
 
 export function createRoutesManage(deps: RoutesManageDeps) {
   const {
-    ctx, rt, snaps, maint, state, cfg, supported, enqueue, runLimited,
+    ctx, rt, snaps, maint, state, cfg, supported, enqueueFor, enqueueMany, runLimited,
     listExcludeFiles, dumpStores, locateSnapshotOnDisk, collectAllSnapshotRecords,
     listCache, excludeCache, usageCache, sessionInfo, titleFromEvents, messageTextFromEvents,
     applyResolvedConfig, readSettings, DEFAULTS, E,
@@ -165,7 +167,9 @@ export function createRoutesManage(deps: RoutesManageDeps) {
       else byRoot.set(rec.root, [rec.id])
     }
     let deleted = 0
-    await enqueue(async () => {
+    // 批量删除跨多个 root：等这些 root 的链尾全部落地再动手——与同仓库的
+    // 快照/回退互斥，但不阻塞无关工作区
+    await enqueueMany(Array.from(byRoot.keys()), async () => {
       for (const [root, rootIds] of byRoot) {
         let store: StoreInfo | null = state.stores.get(root) || null
         if (!store) {
@@ -208,7 +212,9 @@ export function createRoutesManage(deps: RoutesManageDeps) {
   // index 可能因旧版/崩溃/手动修复而为空或过期，不能因为索引里没有条目就
   // 漏删真实快照。磁盘枚举到的 store 即使 root.txt 丢失也直接按目录操作。
   async function deleteAllSnapshots() {
-    return enqueue(async () => {
+    // 锁住当前已知的全部 root（磁盘新增但内存没有的 store 也不会有并发任务：
+    // 任何快照/回退都必须先 resolveStore 把它放进 state.stores）
+    return enqueueMany(Array.from(state.stores.keys()), async () => {
       const stores = new Map<string, { store: StoreInfo; root: string | null; entries?: unknown[] }>()
       for (const [root, store] of state.stores.entries()) {
         if (store && store.dir) stores.set(store.dir, { store, root })
@@ -365,6 +371,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           maxFileBytes: cfg.maxFileBytes,
           maxWorkspaceBytes: cfg.maxWorkspaceBytes,
           scanBudgetMs: cfg.scanBudgetMs,
+          // issue #29：单次快照总时限（设置卡片的「单次快照时限」）
+          snapshotBudgetMs: cfg.snapshotBudgetMs,
           maxSnapshotsPerWorkspace: cfg.maxSnapshotsPerWorkspace,
           baseExcludes: cfg.baseExcludes.slice(),
           refillDraft: cfg.refillDraft,
@@ -643,7 +651,7 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         // 才会尝试）或 locateSnapshotOnDisk（同时给出 root: string）——两条路径
         // store 非 null 时 snapRoot 必非 null
         const finalRoot = snapRoot!
-        await enqueue(async () => {
+        await enqueueFor(finalRoot, async () => {
           if (state.gitExe) {
             await rt.runShell(rt.scripts.purgeTagsScript(finalStore, state.gitExe, ['snap-' + id]), { timeoutMs: 120000, stdoutMaxBytes: 4096 })
           }
@@ -677,8 +685,8 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         // 带会话上下文：只 gc 该会话的工作区；无上下文（设置卡片）：全部已知
         // store 逐个 gc。两者都排进串行队列，与快照互斥。
         const done = sessionId
-          ? await enqueue(() => maint.runGc(sessionId, true))
-          : await enqueue(() => maint.runGcAll())
+          ? await enqueueFor(await rt.resolveRoot(sessionId), () => maint.runGc(sessionId, true))
+          : await enqueueMany(Array.from(state.stores.keys()), () => maint.runGcAll())
         // gc 后占用显著下降：立即失效占用缓存，设置页 refresh 必须看到新值
         usageCache.payload = null
         return { ok: true, gc: Boolean(done) }

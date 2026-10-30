@@ -26,6 +26,7 @@ import { createRoutesCore } from './routes-core.js'
 import { createRoutesManage } from './routes-manage.js'
 import { createIntentJournal } from './intent-journal.js'
 import { createEnsureRootReady } from './root-ready.js'
+import { createQueues } from './queues.js'
 import * as dshSettings from '@deepseek-ai/dsh-settings'
 import * as E from './errors.js'
 import type { HostContext, SessionQueryEngine } from '../types/dsh-contract.js'
@@ -133,14 +134,10 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     return { ok: false, code: E.RECALL_ERROR, message: text }
   }
 
-  // 队列入队即占住后续快照，队列失败不堵队（catch 就地消化）。
-  // state.queue 是链尾哨兵，解析值从不被消费——catch 的 void 结果断言回
-  // Promise<void> 仅为满足类型（运行语义不变：下一条任务只依赖排队关系）。
-  function enqueue<T>(task: () => Promise<T>): Promise<T> {
-    const run = state.queue.then(task)
-    state.queue = run.catch(() => {}) as Promise<void> // 就地消化失败（不堵队，理由见上方注释）
-    return run
-  }
+  // 任务队列按工作区隔离（queue.ts 实现，动机见其文件头）：同一 root 串行
+  // ——add/preview/回滚/删除都在写同一个 git index；不同 root 并行——一个慢
+  // 快照不再堵住其他会话的撤回按钮。跨 root 的批量操作走 enqueueMany。
+  const queues = createQueues(process.platform === 'win32')
 
   // 通用并发限制器：冷会话标题/消息文本补齐会 readSession 整日志解压，
   // 全量 Promise.all 会同时压垮磁盘/CPU，限制同时最多 concurrency 个任务。
@@ -374,7 +371,8 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // 无跨域命名冲突）。
   const deps = {
     ctx, rt, snaps, maint, state, cfg, supported,
-    enqueue, agentBusy, runLimited, ensureRootReady, errBody,
+    enqueueFor: queues.enqueueFor, enqueueMany: queues.enqueueMany,
+    agentBusy, runLimited, ensureRootReady, errBody,
     listExcludeFiles, dumpStores, locateSnapshotOnDisk, collectAllSnapshotRecords,
     listCache, excludeCache, usageCache, sessionInfo, titleFromEvents, messageTextFromEvents,
     // readSettings 传活绑定而非当前引用（A1）：dsh-settings 服务晚挂载时
@@ -431,8 +429,9 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // 快照事件与启动预热仅在受支持平台注册（见上方 supported 短路说明）
   if (!supported) return
 
-  // 每条用户消息触发快照（子代理会话跳过）；快照完成后串行接一次维护
-  // （定期 gc / 会话清理）——排在同一条队列里，与快照天然互斥，无 git 锁竞态
+  // 每条用户消息触发快照（子代理会话跳过）；快照完成后接一次维护
+  // （定期 gc / 会话清理）——两者排进**该会话工作区**的队列，与同仓库的
+  // 其他写操作互斥，但不再挡住别的会话（issue #29 的队列堵塞项）。
   ctx.on('session/event', (session, event) => {
     if (!event || event.type !== 'user/message') return
     const data = event.data
@@ -442,14 +441,19 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     if (session && session.header && session.header.origin === 'subagent') return
     const messageId = data.id
     const time = event.time
-    state.queue = state.queue
+    // root 解析有缓存（首次才跑 shell）；解析失败时 key 退化为全局链——
+    // 宁可串行，也不能让同一个仓库并发出两把写锁。
+    void (async () => {
+      const root = await rt.resolveRoot(session.id)
       // 快照总开关：cfg 按调用时读取，设置页热更即时生效。关闭时只冻结新建，
       // maybeMaintain 照常跑——已停增的存储仍需被 gc/清理治理。
-      .then(() => (cfg.snapshotEnabled ? snaps.captureSnapshot(session.id, messageId, time) : null))
-      .then(() => maint.maybeMaintain(session.id))
+      await queues.enqueueFor(root, async () => {
+        if (cfg.snapshotEnabled) await snaps.captureSnapshot(session.id, messageId, time)
+      })
+      await queues.enqueueFor(root, () => maint.maybeMaintain(session.id))
       // PF-6：不清 items 只标 stale——列表先按旧数据应答、后台补新（见 listCache 注释）
-      .then(() => { listCache.stale = true })
-      .catch((error) => rt.recordError('recall snapshot error: ' + String(error))) // 事件触发不阻塞宿主，失败只进错误缓冲
+      listCache.stale = true
+    })().catch((error) => rt.recordError('recall snapshot error: ' + String(error))) // 事件触发不阻塞宿主，失败只进错误缓冲
   })
 
   // 启动预热：所有已存在工作区解析存储、重建索引与孤儿快照，并清理旧版

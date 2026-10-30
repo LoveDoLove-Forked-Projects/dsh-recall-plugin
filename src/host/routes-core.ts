@@ -35,7 +35,9 @@ export interface RoutesCoreDeps {
   state: SharedState
   cfg: ResolvedConfig
   supported: boolean
-  enqueue<T>(task: () => Promise<T>): Promise<T>
+  // 按工作区隔离的任务队列（queues.ts）：同 root 串行、跨 root 并行
+  enqueueFor<T>(root: string | null | undefined, task: () => Promise<T>): Promise<T>
+  enqueueMany<T>(roots: Array<string | null | undefined>, task: () => Promise<T>): Promise<T>
   // issue #24：根就绪链（resolveStore/ensureGit/loadIndex/rebuild/recover）
   // 与启动预热共享，in-flight 去重——每个恢复的会话各跑一遍会叠出数十条
   // pwsh 并发。返回解析出的 store 供 init 计算降级 notice。
@@ -51,7 +53,7 @@ export interface RoutesCoreDeps {
 export function createRoutesCore(deps: RoutesCoreDeps) {
   // ctx 不解构（A4）：本域所有服务访问都已由 rt/snaps 封装，直接摸 ctx 会
   // 绕过工厂分层——留空位只会诱导未来代码破坏依赖注入约定
-  const { rt, snaps, state, cfg, supported, enqueue, agentBusy, rescueRollback, intentJournal, ensureRootReady, emitEvent, E } = deps
+  const { rt, snaps, state, cfg, supported, enqueueFor, agentBusy, rescueRollback, intentJournal, ensureRootReady, emitEvent, E } = deps
 
   return {
     'init': async (args: InitArgs): Promise<InitResponse> => {
@@ -116,7 +118,8 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
       // 场景），快照存在时叠加跨会话同工作区检查。
       const snap = state.snapshots.get(id)
       if (agentBusy(sessionId, snap ? snap.root : null)) return { ok: false, code: E.RECALL_AGENT_BUSY, message: 'Agent 正在运行中，请先停止后再撤回' }
-      const result = await enqueue(() => snaps.diffFor(id))
+      // 只锁该快照所属工作区：别的项目的预览/快照不该排在同一个队列后面
+      const result = await enqueueFor(snap ? snap.root : null, () => snaps.diffFor(id))
       if (result === null) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该消息没有可用的项目快照' }
       const snap2 = state.snapshots.get(id)
       const cutSeq = await snaps.resolveCutSeq(sessionId, id)
@@ -151,7 +154,10 @@ export function createRoutesCore(deps: RoutesCoreDeps) {
         // count 语义 = 回退文件数：session-only 恒为 0（done 面板本就不展示 count）
         return { ok: true, count: 0, cutSeq, staleQueueItemIds }
       }
-      const result = await enqueue(async (): Promise<{ ok: true; count: number } | ErrBody> => {
+      // 队列 key 取快照所属工作区（入队前先查一次，仅用于选锁；真正的判定
+      // 仍在队列内——入队期间快照可能被删除，那时照样返回 NO_SNAPSHOT）
+      const initialSnap = state.snapshots.get(id)
+      const result = await enqueueFor(initialSnap ? initialSnap.root : null, async (): Promise<{ ok: true; count: number } | ErrBody> => {
         const snap = state.snapshots.get(id)
         if (!snap) return { ok: false, code: E.RECALL_NO_SNAPSHOT, message: '该消息没有可用的项目快照' }
         const store = state.stores.get(snap.root)

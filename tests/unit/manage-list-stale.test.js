@@ -34,7 +34,8 @@ function makeDeps(opts = {}) {
       indexLoaded: new Set(),
       gitExe: 'git',
     },
-    enqueue: (task) => task(),
+    enqueueFor: (_root, task) => task(),
+    enqueueMany: (_roots, task) => task(),
     usageCache,
     rt: {
       runShell: async (cmd) => {

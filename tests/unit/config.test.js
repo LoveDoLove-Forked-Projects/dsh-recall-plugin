@@ -49,6 +49,7 @@ describe('createConfig', () => {
       maxFileBytes: 8388608,
       maxWorkspaceBytes: 268435456,
       scanBudgetMs: 10000,
+      snapshotBudgetMs: 180000,
       maxSnapshotsPerWorkspace: 500,
       baseExcludes: expect.arrayContaining([
         '.git', 'node_modules/', '.dsh-recall-snapshots/', 'dsh-recall-snapshots/',
@@ -103,6 +104,16 @@ describe('createConfig', () => {
     expect(createConfig({ scanBudgetMs: -5 }).scanBudgetMs).toBe(10000)
     expect(createConfig({ scanBudgetMs: 'abc' }).scanBudgetMs).toBe(10000)
     expect(createConfig({}).scanBudgetMs).toBe(10000)
+  })
+
+  // issue #29：整条快照脚本的兜底时限。0 = 不限制（消费侧映射为 24h），
+  // 负数与非数值按非法回退默认——误输入不该把兜底关掉。
+  it('snapshotBudgetMs：正常值生效，0 = 不限制，非法回退 180000', () => {
+    expect(createConfig({ snapshotBudgetMs: 60000 }).snapshotBudgetMs).toBe(60000)
+    expect(createConfig({ snapshotBudgetMs: 0 }).snapshotBudgetMs).toBe(0)
+    expect(createConfig({ snapshotBudgetMs: -1 }).snapshotBudgetMs).toBe(180000)
+    expect(createConfig({ snapshotBudgetMs: 'abc' }).snapshotBudgetMs).toBe(180000)
+    expect(createConfig({}).snapshotBudgetMs).toBe(180000)
   })
 
   it('maxSnapshotsPerWorkspace：正常值生效，0/负值 = 不限制，非法回退 500', () => {
@@ -171,6 +182,7 @@ describe('createConfig', () => {
       maxFileBytes: fresh.maxFileBytes,
       maxWorkspaceBytes: fresh.maxWorkspaceBytes,
       scanBudgetMs: fresh.scanBudgetMs,
+      snapshotBudgetMs: fresh.snapshotBudgetMs,
       maxSnapshotsPerWorkspace: fresh.maxSnapshotsPerWorkspace,
       baseExcludes: fresh.baseExcludes,
       refillDraft: fresh.refillDraft,

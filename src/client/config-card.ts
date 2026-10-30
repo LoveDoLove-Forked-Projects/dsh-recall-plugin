@@ -44,6 +44,7 @@ export function buildConfigForm(
     maxFileBytes: string
     maxWorkspaceBytes: string
     scanBudgetMs: string
+    snapshotBudgetMs: string
     maxSnapshotsPerWorkspace: string
     baseExcludes: string
     refillDraft: boolean
@@ -80,6 +81,8 @@ export function buildConfigForm(
             maxWorkspaceBytes: bytesToMb(v.maxWorkspaceBytes),
             // 扫描预算持久化为毫秒、展示为秒（整数）；0 表示不限制，原样显示 0
             scanBudgetMs: String(v.scanBudgetMs == null ? '' : Math.round(Number(v.scanBudgetMs) / 1000)),
+            // issue #29：单次快照总时限，同样按秒展示
+            snapshotBudgetMs: String(v.snapshotBudgetMs == null ? '' : Math.round(Number(v.snapshotBudgetMs) / 1000)),
             maxSnapshotsPerWorkspace: String(v.maxSnapshotsPerWorkspace == null ? '' : v.maxSnapshotsPerWorkspace),
             baseExcludes: Array.isArray(v.baseExcludes) ? v.baseExcludes.join('\n') : '',
             refillDraft: v.refillDraft !== false,
@@ -114,7 +117,7 @@ export function buildConfigForm(
     function save(): void {
       if (state.busy || !draft || !baseline) return
       const patch: Record<string, string | boolean> = {}
-      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'editSubmitsImmediately', 'retentionDays', 'locale']) {
+      for (const key of ['gcSnaps', 'gcHours', 'maxFileBytes', 'maxWorkspaceBytes', 'scanBudgetMs', 'snapshotBudgetMs', 'maxSnapshotsPerWorkspace', 'baseExcludes', 'refillDraft', 'snapshotEnabled', 'archiveOriginal', 'editSubmitsImmediately', 'retentionDays', 'locale']) {
         // 按值判空再纳补丁（A6）：draft 是宽松载荷加载来的全量草稿，索引读取
         // 在类型层可能 undefined；未定义的键与基线无从比较，直接跳过（等价于
         // 原实现里「undefined !== 基线值」的隐式行为，只是不再依赖隐式）。
@@ -153,6 +156,12 @@ export function buildConfigForm(
         const s = Number(patch.scanBudgetMs)
         if (!Number.isFinite(s) || s < 0) { setState({ busy: false, message: t('config.err.scanBudgetMs'), error: true }); return }
         clean.scanBudgetMs = Math.round(s * 1000)
+      }
+      if (patch.snapshotBudgetMs !== undefined) {
+        // issue #29：展示秒、持久化毫秒；0 = 不限制
+        const s = Number(patch.snapshotBudgetMs)
+        if (!Number.isFinite(s) || s < 0) { setState({ busy: false, message: t('config.err.snapshotBudgetMs'), error: true }); return }
+        clean.snapshotBudgetMs = Math.round(s * 1000)
       }
       if (patch.maxSnapshotsPerWorkspace !== undefined) {
         const n = parseInt(String(patch.maxSnapshotsPerWorkspace), 10)
@@ -328,6 +337,8 @@ export function buildConfigForm(
       // issue #24 护栏：单文件上限之外的两道闸（总量 + 扫描耗时），0 = 不限制
       numRow('maxWorkspaceBytes', t('config.maxWorkspaceBytes.label'), t('config.maxWorkspaceBytes.hint'), { suffixKey: 'config.maxWorkspaceBytes.suffix', min: 0, step: 16 }),
       numRow('scanBudgetMs', t('config.scanBudgetMs.label'), t('config.scanBudgetMs.hint'), { suffixKey: 'config.scanBudgetMs.suffix', min: 0, step: 1 }),
+      // issue #29：扫描阶段之外还有 add/写索引——单次快照的总时限兜底
+      numRow('snapshotBudgetMs', t('config.snapshotBudgetMs.label'), t('config.snapshotBudgetMs.hint'), { suffixKey: 'config.snapshotBudgetMs.suffix', min: 0, step: 30 }),
       numRow('maxSnapshotsPerWorkspace', t('config.maxSnapshotsPerWorkspace.label'), t('config.maxSnapshotsPerWorkspace.hint'), { suffixKey: 'config.maxSnapshotsPerWorkspace.suffix', min: 0, step: 1 }),
       numRow('retentionDays', t('config.retentionDays.label'), t('config.retentionDays.hint'), { suffixKey: 'config.retentionDays.suffix', min: 0, step: 1 }),
       React.createElement('div', { className: 'dsh-recall-cfg-group' }, t('config.group.ui')),

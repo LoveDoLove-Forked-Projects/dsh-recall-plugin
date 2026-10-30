@@ -30,6 +30,7 @@
 | [质量加固专项（A1–A8）](./completed/plan-quality-hardening.md) | 2026-09-29 同类插件专项六维度对比驱动：client UI 测试体系、intent journal 崩溃恢复（吸收 competitor-ux U4）、磁盘格式版本守卫、i18n 双语层、client logger、`noUncheckedIndexedAccess`、format.md（提前 P2-2 FORMAT 半）、catch 理由注释纪律 | 已实施并验收（2026-09-30：A1–A8 全落地过门禁 + 活体冒烟第九节 R-1〜R-6 全过；实弹掘出并修复 4 个真实缺陷（含 win32 格式守卫永久锁死），见该文档「活体冒烟」节与 smoke-checklist-records 同日批次） |
 | [引用 chip 回填：撤回后 @文件/目录引用结构化还原](./pending/plan-refill-references.md) | dsh 0.2.1-alpha.1 结构化草稿（`DraftSnapshot` + `setDraft(DraftInput)`）驱动：把被撤回消息里的 `@path` 引用重建为可点击 chip 回填输入框（仅 file/folder；探测失败或旧版本全降级纯文本）；含配置开关、mention 扫描器与矩阵单测 | 待实施（能力面评估见 [upgrade-assessments/dsh-0.2.1-alpha.1.md](../upgrade-assessments/dsh-0.2.1-alpha.1.md) §三观察项①） |
 | [快照护栏 fail-closed 与大文件前置剔除（issue #29）](./completed/plan-snapshot-guard-failclosed.md) | 预算扫描 `ls-files` 失败不再静默放行（改成跳过 + 可观测 + 10 分钟 sticky）；> `maxFileBytes` 的文件用 exclude-only pathspec 挡在 `add` 之前；分钟级失败跳过免费重试直接退避 | 已完成（2026-10-30：M1+M2+M3 全部落地；typecheck / 538 例单测 / verify:host 全绿，双平台实弹 7 项 + DSH 活体冒烟 4 项全过，冒烟记录见 smoke-checklist-records 同日批次） |
+| [per-root 队列、单次快照时限与 web 新会话 cwd](./completed/plan-queue-and-budget.md) | 全局串行队列改按工作区隔离（同 root 串行、跨 root 并行）；新增 `snapshotBudgetMs`（默认 3 分钟）替代硬编码 600 秒；核查并记录 web 新会话 cwd 归属官方客户端 | 已完成（2026-10-30：queues 6 例 + 配置 1 例，545 例 + 129 例 + verify:host 全绿，50ms 超时实弹通过） |
 
 ## 全局实施顺序
 

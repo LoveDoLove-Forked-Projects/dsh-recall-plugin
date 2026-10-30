@@ -1639,6 +1639,23 @@
   `dsh-app-boot` 逐行 diff 与官方镜像 `05-publish.md` 互证）。
 
 
+### I44 web 新会话 cwd 跟随当前/最近工作区，与宿主启动目录无关（2026-10-30 活体实测）
+
+- **依赖的官方行为**：客户端 `startSession(workspaceId?)` 的取值链是 `workspaceId ?? 当前会话所属工作区 ?? 最近活跃工作区`，
+  全链**不传 `cwd`**（`dsh-client-ui-workspace/lib/client.js:1491-1500`；`recentWorkspace` 按各 workspace 内会话最大
+  `updatedAt` 选取）；宿主侧 `cwd = workspace?.path ?? request.cwd ?? process.cwd()`
+  （`dsh-api-session-controller/lib/index.js:666-673`），web 流程恒走第一条。无配置项或 waterfall 钩子可改写
+  （`SessionController.Config` 只有 `nativeOpen` / `listWorkSliceMs`）。
+- **插件对策**：不介入。`ctx.uiWorkspace.startSession(workspaceId)` / `ctx.workspaces.create({path})` 是命令式能力、
+  不是策略钩子，插件替用户选工作区属越权；只在 README 使用注意与 AGENTS 已知坑写明「先切工作区再发消息」
+  （快照按会话 cwd 建）。
+- **失效症状**：在 A 目录启动 `dsh web` 后发消息，快照落到上次使用的 B 工作区（store 哈希与 `root.txt` 对不上 A）——
+  不是插件取错 cwd，而是该会话本身归属 B。
+- **复查动作**：dsh 升级后核对 `dsh-client-ui-workspace` 的 `startSession` 决策链与 `dsh-api-session-controller` 的 cwd
+  兜底是否新增 override 配置；若官方真出「默认工作区」配置，再评估插件侧是否需要在设置卡片里透出。
+  核验记录：0.2.2-alpha.2（2026-10-30，安装目录逐文件读取 + `D:\tmp\recall-h0` 实测）。
+
+
 ## 与 E1 verify-host 的对应关系
 
 装配层条目（I10 inject 门禁、端点注册、Config schema、卸载清零）由

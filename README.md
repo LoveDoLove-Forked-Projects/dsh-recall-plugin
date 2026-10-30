@@ -155,6 +155,7 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 | `maxFileBytes` | 8388608（8MB） | 超过该大小的文件不进快照、不被回退触碰；在 `git add` 之前就按清单剔除，不写对象（旧 git 退回「先加后剔」） |
 | `maxWorkspaceBytes` | 268435456（256MB） | 单工作区可纳入快照的文件总量上限，口径与 `git add` 一致（`.gitignore`、`.git/info/exclude`、全局 excludesFile 都算数）。超过时**停用该工作区快照**（不截断——截断快照回退时会误删未纳入的文件），并在最近消息上提示；调大该值或补充排除表后自动恢复；0 = 不限制 |
 | `scanBudgetMs` | 10000（10 秒） | 快照前统计纳入总量的时间预算。超过时停用本次快照并提示（防病态大目录拖死启动）；0 = 不限制 |
+| `snapshotBudgetMs` | 180000（3 分钟） | 单次快照从扫描到写入的总时限，超时即中止本次快照并记入「最近错误」；0 = 不限制 |
 | `maxSnapshotsPerWorkspace` | 500 | 每个工作区保留的最大快照数，超限自动删除最旧的；0 = 不限制 |
 | `retentionDays` | 0 | 按天数保留快照，超期自动删除；0 = 不启用（与条数上限各自独立生效） |
 | `baseExcludes` | `.git`、`node_modules/`、`.dsh-recall-snapshots/`、`dsh-recall-snapshots/`、`target/`、`dist/`、`build/`、`out/`、`coverage/`、`.next/`、`.nuxt/`、`.output/`、`.cache/`、`.gradle/`、`*.exe`、`*.dll`、`*.pdb`、`*.so`、`*.dylib`、`*.msi`、`*.zip`、`*.7z`、`*.rar`、`*.tar`、`*.tar.gz`、`*.iso` | 基础排除表（gitignore 语法，优先级低于 exclude.txt）；被排除的大目录整棵子树不进快照扫描。其中「目录形态」项（如 `target/`）另有一层含义：**工作区根自身的路径段命中时，该工作区不启用快照**——在构建产物目录里开会话时排除表本来就管不到它自己（模式是相对该 root 的），这类目录也没有回退价值；删掉对应项即恢复 |
