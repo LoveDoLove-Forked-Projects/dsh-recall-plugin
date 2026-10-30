@@ -2,7 +2,11 @@
 
 本文件格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循语义化版本。
 
-## [Unreleased]
+## [2.6.1] - 2026-10-31
+
+### 新增
+
+- **「只回退消息」模式（`messageOnly`，默认关闭，issue #31）**：开启后每条用户消息仍登记撤回记录（撤回按钮与对话回退照常），但不再执行文件快照——大仓（gitignore 过滤后仍上千文件 / 上 GB）不必为每条消息写一次全量对象。按消息生效：`index.json` 只给这类条目记 `files: false`，开启前拍的旧快照仍可完整回退文件；确认面板对这类消息隐藏「回退文件与对话」单选，快照管理树标「仅消息」。代价是这类记录没有 tag，索引损坏被隔离后撤回按钮无法从 tag 重建。
 
 ### 修复
 
@@ -12,6 +16,7 @@
 ### 文档
 
 - 新增 [plan-dump-visible-and-empty-reclaim.md](docs/plans/completed/plan-dump-visible-and-empty-reclaim.md)：两条遗留的问题、判据表与测试清单；AGENTS 已知坑补 I46，compat-audit 补 I46 详情。
+- 新增 [plan-message-only-mode.md](docs/plans/completed/plan-message-only-mode.md)：只回退消息的问题、判据、边界与实施记录；smoke checklist 第十一节与 records 同日批次（M1〜M6 实弹）。
 
 ## [2.6.0] - 2026-10-30
 
