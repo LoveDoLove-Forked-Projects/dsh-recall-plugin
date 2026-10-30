@@ -57,6 +57,7 @@ const CODE_NAMES = [
   'RECALL_UNKNOWN_OP',
   'RECALL_FORMAT_BLOCKED',
   'RECALL_UNKNOWN_ENDPOINT',
+  'RECALL_DUMP_FAILED',
   'RECALL_INDEX_CORRUPT',
 ]
 
@@ -80,7 +81,7 @@ describe('H3 错误码单一事实源', () => {
     }
   })
 
-  it('code 字符串值与收敛前逐字一致（18 个全量值钉，线上契约不回归）', () => {
+  it('code 字符串值与收敛前逐字一致（19 个全量值钉，线上契约不回归）', () => {
     expect(E.RECALL_STALE).toBe('STALE')
     expect(E.RECALL_NO_SNAPSHOT).toBe('NO_SNAPSHOT')
     expect(E.RECALL_NO_STORE).toBe('NO_STORE')
@@ -98,6 +99,7 @@ describe('H3 错误码单一事实源', () => {
     expect(E.RECALL_PARTIAL_DELETE).toBe('PARTIAL_DELETE')
     expect(E.RECALL_UNKNOWN_OP).toBe('UNKNOWN_OP')
     expect(E.RECALL_UNKNOWN_ENDPOINT).toBe('UNKNOWN_ENDPOINT')
+    expect(E.RECALL_DUMP_FAILED).toBe('DUMP_FAILED')
     expect(E.RECALL_INDEX_CORRUPT).toBe('INDEX_CORRUPT')
   })
 

@@ -137,3 +137,26 @@ describe.skipIf(!BASH)('excludeDumpScript（POSIX 真执行 · issue #30 同族�
     expect(map.get(files[1])).toBe('node_modules/\n')
   })
 })
+
+// issue #30 遗留项：空仓回收靠 STATE 段判定。四形态必须由脚本自己分（只有它
+// 能看文件系统），其中 absent 只认「有 store 布局但没 index」，不是我们的目录
+// 一律 foreign——回收逻辑据此拒删。
+describe.skipIf(!BASH)('storesDumpScript STATE 段（POSIX 真执行）', () => {
+  it('present / absent / quarantined / foreign 四种形态各就各位', () => {
+    const container = fs.mkdtempSync(path.join(os.tmpdir(), 'recall-dump-'))
+    makeStore(container, 'present', { index: '[]' })
+    makeStore(container, 'absent')                       // 只有 git/，从没拍过快照
+    makeStore(container, 'quarantined')                  // 只有隔离现场，没有 index.json
+    put(path.join(container, 'quarantined', 'index.json.corrupt-1700000000000'), '{broken')
+    fs.mkdirSync(path.join(container, 'foreign'), { recursive: true })  // 别人的目录
+
+    const res = runScript(storesDumpScript(container.replace(/\\/g, '/'), []))
+    expect(res.status).toBe(0)
+    const map = parseStoresDump(res.stdout)
+    expect(infoFor(map, 'present').indexState).toBe('present')
+    expect(infoFor(map, 'absent').indexState).toBe('absent')
+    expect(infoFor(map, 'absent').entries).toBe(null)
+    expect(infoFor(map, 'quarantined').indexState).toBe('quarantined')
+    expect(infoFor(map, 'foreign').indexState).toBe('foreign')
+  })
+})

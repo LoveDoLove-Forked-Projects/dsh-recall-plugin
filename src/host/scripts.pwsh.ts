@@ -1055,6 +1055,7 @@ export function listSubdirsScript(dir: string): string {
 // 根因。PF-4 起段内再带 lineage.json（manage lineage 原本对每个 root 串行
 // 一条进程，并入后零新增）。输出定界格式（JS 侧 parseStoresDump 状态机解析）：
 //   ==DIR <目录>
+//   STATE <present|absent|quarantined|foreign>（空仓回收判据，issue #30 遗留）
 //   ROOT <工作区路径或空>
 //   INDEXBEGIN / index.json 原文 / INDEXEND
 //   LINEAGEBEGIN / lineage.json 原文 / LINEAGEEND
@@ -1075,6 +1076,14 @@ export function storesDumpScript(container: string, extraDirs: string[]): string
     '  if (-not $d) { continue }',
     '  if (-not (Test-Path -LiteralPath $d -PathType Container)) { continue }',
     '  Write-Output ("==DIR " + $d)',
+    // STATE 供空仓回收判定（present/absent/quarantined/foreign）：判据留在脚本侧
+    // 是因为只有这里能看文件系统——absent 是「从没拍过快照的真仓」，foreign 是
+    // 别人的目录，两者必须分开（否则会删掉不是我们的东西）。
+    "  $ix = Join-Path $d 'index.json'",
+    "  if (Test-Path -LiteralPath $ix -PathType Leaf) { Write-Output 'STATE present' }",
+    "  elseif (@(Get-ChildItem -LiteralPath $d -Filter 'index.json.corrupt-*' -ErrorAction SilentlyContinue).Count -gt 0) { Write-Output 'STATE quarantined' }",
+    "  elseif ((Test-Path -LiteralPath (Join-Path $d 'git') -PathType Container) -or (Test-Path -LiteralPath (Join-Path $d 'root.txt') -PathType Leaf)) { Write-Output 'STATE absent' }",
+    "  else { Write-Output 'STATE foreign' }",
     "  $rt = Join-Path $d 'root.txt'",
     "  if (Test-Path -LiteralPath $rt -PathType Leaf) {",
     "    $rv = (Get-Content -LiteralPath $rt -Raw -Encoding UTF8 -ErrorAction SilentlyContinue)",
@@ -1086,7 +1095,6 @@ export function storesDumpScript(container: string, extraDirs: string[]): string
     "    Write-Output 'ROOT '",
     '  }',
     "  Write-Output 'INDEXBEGIN'",
-    "  $ix = Join-Path $d 'index.json'",
     "  if (Test-Path -LiteralPath $ix -PathType Leaf) {",
     '    $j = Get-Content -LiteralPath $ix -Raw -Encoding UTF8 -ErrorAction SilentlyContinue',
     '    if ($j) { Write-Output $j.TrimEnd() }',

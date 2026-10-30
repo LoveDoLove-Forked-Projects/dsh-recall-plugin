@@ -133,6 +133,7 @@ export const en: Record<string, string> = {
 
   // ---- 错误码文案 ----
   'err.STALE': 'Project files changed after the preview; preview again to confirm',
+  'err.DUMP_FAILED': 'Could not read snapshots from disk; the list and bulk delete are unavailable. Check "Recent errors" and retry',
   'err.AGENT_BUSY': 'The agent is running; stop it before recalling',
   'err.NO_SNAPSHOT': 'No project snapshot is available for this message',
   'err.NO_STORE': 'Snapshot storage is unavailable',
@@ -178,6 +179,7 @@ export const en: Record<string, string> = {
   'manage.search.placeholder': 'Search workspace / session title / message / ID',
   'manage.search.aria': 'Search snapshots',
   'manage.empty': 'Send a message in any workspace and its snapshot will appear here.',
+  'manage.loadFailed': 'Could not read snapshots from disk',
   'manage.emptyFiltered': 'No matching snapshots',
   'manage.errors.title': 'Recent errors ({n})',
   'manage.errors.collapse': 'Collapse',

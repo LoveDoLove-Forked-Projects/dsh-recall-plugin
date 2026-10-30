@@ -68,7 +68,7 @@ export function groupByLineage(ids: Array<string | null | undefined>, lineage: L
 }
 
 export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc: ClientSessionsService, workspacesSvc?: ClientWorkspacesService, uiWorkspaceSvc?: ClientUiWorkspaceService): { ManageCard: () => import('react').ReactNode } {
-  const { api, clockText, sizeText, buildTree, t } = util
+  const { api, clockText, sizeText, buildTree, messageFor, t } = util
 
   // 树行内的删除按钮：垃圾桶图标 + 稳定命中区，紧贴会话/快照名渲染（不再排到
   // 行尾——文本 chip 逐行右对齐成一列，用户实测反馈容易点错行）。颜色随主题：
@@ -108,6 +108,9 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
   // 全部操作走 Host 的 manage/status 端点（串行队列在 Host 侧保证）。
   function ManageCard() {
     const [items, setItems] = React.useState<ManageListItem[] | null>(null)
+    // 列表读取失败（issue #30 遗留项）：旧行为是静默空树，用户只能翻日志。
+    // null=没失败；字符串=失败文案（DUMP_FAILED 走 err.* 词典，其余回落 host message）
+    const [listError, setListError] = React.useState<string | null>(null)
     const [usage, setUsage] = React.useState<number | null>(null)
     const [errors, setErrors] = React.useState<StatusErrorItem[] | null>(null)
     const [state, setState] = React.useState({ busy: false, message: '', error: false })
@@ -162,8 +165,11 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
     // 透传进请求载荷（JSON.stringify 事件 -> 循环引用抛错，按钮整只失效）
     function refresh(overLimit?: number): void {
       const useLimit = overLimit || limit
-      api<ManageListOk>('manage', { op: 'list', limit: useLimit }).then((res) => {
+      // 响应可能是 ErrBody（DUMP_FAILED 等）：类型上显式带错误支，避免把
+      // 「读取失败」当成「加载中」一直转骨架
+      api<ManageListOk | { ok: false; code?: string; message?: string }>('manage', { op: 'list', limit: useLimit }).then((res) => {
         if (res && res.ok) {
+          setListError(null)
           setItems(res.items || [])
           setTotal(typeof res.total === 'number' ? res.total : (res.items || []).length)
           fetchTitles(res.items || [])
@@ -181,6 +187,12 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
               }
             }).catch(() => {}) // 二段刷新失败静默（旧列表仍可用；不循环重试，等手动刷新）
           }
+        } else if (res) {
+          // 读取失败：把 items 从 null 置空（否则骨架条永远在转，形似「还在加载」），
+          // 并在树位置显示可重试的失败提示——旧行为只有一棵空树
+          setListError(messageFor(res, t('manage.loadFailed')))
+          setItems([])
+          setTotal(0)
         }
         // F1：加载 fork lineage（版本家族），列表成功后异步补齐，不阻塞首屏
         api<ManageLineageOk>('manage', { op: 'lineage' }).then((res) => {
@@ -486,6 +498,13 @@ export function buildSnapshotManager(React: ReactApi, util: UtilApi, sessionsSvc
           onChange: (e) => setQuery(e.target.value),
         })
       ),
+      // 读取失败提示：role=alert 让读屏立即播报；「重试」复用 refresh，不新造入口
+      listError
+        ? React.createElement('div', { key: 'list-error', className: 'dsh-recall-list-error', role: 'alert' },
+            React.createElement('span', { className: 'dsh-recall-list-error-text' }, listError),
+            React.createElement('button', { type: 'button', className: 'dsh-recall-ex-chip', onClick: () => refresh() }, t('common.retry'))
+          )
+        : null,
       // V3 加载骨架：items===null 表示首查未回——用 5 条 pulse 灰条占位替代
       // 打开快照管理时的一段空白；aria-hidden 纯装饰不打扰读屏
       items === null

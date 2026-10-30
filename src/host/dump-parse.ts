@@ -10,6 +10,13 @@
 
 import type { IndexEntry, LineageEntry } from '../types/payloads.js'
 
+// index.json 在磁盘上的形态（空仓回收判据，issue #30 遗留项）：
+// present=文件在（内容好坏由 entries 判）、absent=从来没有过（刚建仓没拍过快照，
+// 可回收）、quarantined=损坏后被改名隔离（保留现场待复查）、foreign=目录里既没有
+// index 也没有 store 布局（git/ 或 root.txt），不是我们的仓，一律不碰。
+// unknown 只出现在旧版脚本（无 STATE 段）的输出里，按「不可回收」保守处理。
+export type StoreIndexState = 'present' | 'absent' | 'quarantined' | 'foreign' | 'unknown'
+
 // storesDumpScript 单 store 段结构（root 对应 root.txt 的 RootRecord 形状；
 // entries/lineage 分别对应 index.json / lineage.json 的条目形状）
 export interface StoreDumpInfo {
@@ -17,10 +24,11 @@ export interface StoreDumpInfo {
   root: string | null
   entries: IndexEntry[] | null
   lineage: LineageEntry[] | null
+  indexState: StoreIndexState
 }
 
-// 解析 storesDumpScript 的定界输出：dir → { root, entries, lineage }。逐行
-// 状态机（==DIR / ROOT / INDEXBEGIN..INDEXEND / LINEAGEBEGIN..LINEAGEEND），
+// 解析 storesDumpScript 的定界输出：dir → { root, entries, lineage, indexState }。
+// 逐行状态机（==DIR / STATE / ROOT / INDEXBEGIN..INDEXEND / LINEAGEBEGIN..LINEAGEEND），
 // 单个 store 的 JSON 损坏只丢它自己。
 // PF-4：LINEAGE 段承载 lineage.json 原文（与 INDEX 段同构）——manage lineage
 // 原实现对每个 root 串行 loadLineage（每 root 一条进程，20 工作区 ≈ 10s），
@@ -56,8 +64,9 @@ export function parseStoresDump(text: string): Map<string, StoreDumpInfo> {
     cur = null
   }
   for (const line of String(text).split(/\r?\n/)) {
-    if (line.indexOf('==DIR ') === 0) { flush(); cur = { dir: line.slice(6).trim(), root: null, entries: null, lineage: null }; inIndex = false; inLineage = false; indexLines = []; lineageLines = []; continue }
+    if (line.indexOf('==DIR ') === 0) { flush(); cur = { dir: line.slice(6).trim(), root: null, entries: null, lineage: null, indexState: 'unknown' }; inIndex = false; inLineage = false; indexLines = []; lineageLines = []; continue }
     if (!cur) continue
+    if (line.indexOf('STATE ') === 0) { const v = line.slice(6).trim(); if (v === 'present' || v === 'absent' || v === 'quarantined' || v === 'foreign') cur.indexState = v; continue }
     if (line.indexOf('ROOT ') === 0) { const v = line.slice(5).trim(); cur.root = v || null; continue }
     if (line === 'INDEXBEGIN') { inIndex = true; indexLines = []; continue }
     if (line === 'INDEXEND') { inIndex = false; continue }

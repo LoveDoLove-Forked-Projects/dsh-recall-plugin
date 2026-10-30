@@ -140,6 +140,7 @@ export const zh: Record<string, string> = {
 
   // ---- 错误码文案（host 静态 message 的本地化副本；动态细节码不在表内）----
   'err.STALE': '预览后项目文件发生了变化，请重新预览确认',
+  'err.DUMP_FAILED': '读取磁盘快照失败，列表与批量删除暂不可用；请查看「最近错误」后重试',
   'err.AGENT_BUSY': 'Agent 正在运行中，请先停止后再撤回',
   'err.NO_SNAPSHOT': '该消息没有可用的项目快照',
   'err.NO_STORE': '快照存储不可用',
@@ -185,6 +186,7 @@ export const zh: Record<string, string> = {
   'manage.search.placeholder': '搜索工作区 / 会话标题 / 消息内容 / ID',
   'manage.search.aria': '搜索快照',
   'manage.empty': '在任意工作区发送一条消息后，这里会出现快照。',
+  'manage.loadFailed': '读取磁盘快照失败',
   'manage.emptyFiltered': '无匹配快照',
   'manage.errors.title': '最近错误 ({n})',
   'manage.errors.collapse': '收起',

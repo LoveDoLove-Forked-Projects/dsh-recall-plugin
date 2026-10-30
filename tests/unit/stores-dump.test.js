@@ -101,3 +101,35 @@ describe('parseStoresDump LINEAGE 段（PF-4）', () => {
     expect(parseStoresDump(null)).toEqual(new Map())
   })
 })
+
+// issue #30 遗留项：STATE 段是空仓回收判据的唯一来源。缺段（旧版脚本输出）
+// 必须落 unknown——回收侧只认 absent，unknown 保守不删。
+describe('parseStoresDump STATE 段（空仓回收判据）', () => {
+  function parseOne(stateLine) {
+    const text = [
+      '==DIR /store-a',
+      ...(stateLine ? [stateLine] : []),
+      'ROOT D:/ws',
+      'INDEXBEGIN',
+      'INDEXEND',
+      'LINEAGEBEGIN',
+      'LINEAGEEND',
+    ].join('\n')
+    return parseStoresDump(text).get('/store-a')
+  }
+
+  it('四种形态各自解析', () => {
+    expect(parseOne('STATE present').indexState).toBe('present')
+    expect(parseOne('STATE absent').indexState).toBe('absent')
+    expect(parseOne('STATE quarantined').indexState).toBe('quarantined')
+    expect(parseOne('STATE foreign').indexState).toBe('foreign')
+  })
+
+  it('无 STATE 段（旧脚本）→ unknown，不是 absent（防误删）', () => {
+    expect(parseOne(null).indexState).toBe('unknown')
+  })
+
+  it('非法取值 → unknown（不把未知形态当可回收）', () => {
+    expect(parseOne('STATE something-new').indexState).toBe('unknown')
+  })
+})

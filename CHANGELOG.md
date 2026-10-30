@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### 修复
+
+- **磁盘枚举失败不再表现成「没有快照」**：此前快照管理读不到磁盘时会静默返回空列表，界面只剩一棵空树，用户以为快照都没了（issue #30 报告的现场就是这样）。现在失败原因进「最近错误」，列表 / 按工作区或会话批量删除 / 全部删除回 `DUMP_FAILED`，卡片显示可重试的错误条；「全部删除」也不再用「已删除 0 条」掩盖枚举失败。
+- **建过仓但从没拍过快照的空仓不再永久占盘**：dump 脚本为每个 store 增发 `STATE` 段（`present` / `absent` / `quarantined` / `foreign`），「立即 gc」据此把「有 store 布局但从未生成索引」的空壳整目录回收；损坏隔离现场（`index.json.corrupt-*`）、旧版脚本输出与非本插件的目录一律保留。
+
+### 文档
+
+- 新增 [plan-dump-visible-and-empty-reclaim.md](docs/plans/completed/plan-dump-visible-and-empty-reclaim.md)：两条遗留的问题、判据表与测试清单；AGENTS 已知坑补 I46，compat-audit 补 I46 详情。
+
 ## [2.6.0] - 2026-10-30
 
 ### 新增

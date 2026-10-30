@@ -222,6 +222,10 @@ export const CSS = [
   // 对齐；此前复用 ex-note 左对齐正文样式，空列表区显得是「缺了一行」而非
   // 一个状态
   '.dsh-recall-empty{color:var(--dsw-alias-label-tertiary);font-size:13px;line-height:1.5;text-align:center;padding:24px 0}',
+  // 列表读取失败条（issue #30 遗留项）：error 前景 + 换行不裁切，右侧带重试 chip。
+  // 与空态区分开——「没有快照」和「读不到快照」在用户眼里必须是两件事
+  '.dsh-recall-list-error{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.5}',
+  '.dsh-recall-list-error-text{flex:1;min-width:0;word-break:break-word}',
   '.dsh-recall-ex-status-success{color:var(--dsw-alias-state-success-primary)}',
   // V6 健康徽章（git 可用性）：pill 配色直接复用官方状态行配对——成功用
   // success-tertiary 底、失败用 interactive-bg-hover-danger 底（error 无

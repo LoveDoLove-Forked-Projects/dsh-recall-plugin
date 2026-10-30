@@ -47,6 +47,10 @@ export const RECALL_UNKNOWN_OP = 'UNKNOWN_OP' as const
 export const RECALL_FORMAT_BLOCKED = 'FORMAT_BLOCKED' as const
 // 未知 API 端点（/api/recall/<name> 无对应端点；exact 路由未命中由宿主返回 404）
 export const RECALL_UNKNOWN_ENDPOINT = 'UNKNOWN_ENDPOINT' as const
+// 磁盘 store 枚举（dump）失败：快照管理列表 / 批量删除 / 全部删除拿不到磁盘真值。
+// 旧行为是静默返回空 Map（界面只有一棵空树），现已 fail-loud——错误细节同时进
+// 「最近错误」。client 预期：显示失败提示并给重试入口，不要展示成「没有快照」。
+export const RECALL_DUMP_FAILED = 'DUMP_FAILED' as const
 
 // 语义锚点：H2 的索引损坏经 status 端点 errors 通道暴露（recordError 文本
 // 前缀 'recall index corrupt'），不作为端点 code 返回。保留单一命名供
@@ -74,6 +78,7 @@ export const ALL_CODES = Object.freeze([
   RECALL_UNKNOWN_OP,
   RECALL_FORMAT_BLOCKED,
   RECALL_UNKNOWN_ENDPOINT,
+  RECALL_DUMP_FAILED,
   RECALL_INDEX_CORRUPT,
 ])
 

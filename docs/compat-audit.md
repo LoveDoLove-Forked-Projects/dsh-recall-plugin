@@ -1675,6 +1675,25 @@
   细节与实测矩阵见 [plans/completed/plan-stores-dump-posix.md](plans/completed/plan-stores-dump-posix.md)。
 
 
+### I46 磁盘枚举失败必须 fail-loud；空仓回收只认 STATE=absent（issue #30 遗留项，2026-10-30）
+
+- **既有行为**：`dumpStores` 一条 shell 枚举全部 store 元数据，供快照管理列表、批量删除、全部删除、
+  「立即 gc」的空仓回收共用；失败时旧实现 `catch` 后返回空 Map（设计上标为「best-effort」）。
+- **问题（issue #30 现场）**：dump 失败时界面只剩一棵空树 + 一句「去发条消息」，用户以为没有快照；
+  运维侧只能翻 stdout 日志。同一轮还发现「建过仓但从没拍过快照」的空壳（没有 `index.json`）
+  永远不满足回收判据，会永久挂在 `~/.dsh/dsh-recall-snapshots/`。
+- **插件对策**：① `dumpStores` 失败先 `recordError` 再抛，`manage` 的 list/delete/deleteAll 回
+  `DUMP_FAILED`，卡片渲染 `role=alert` 的可重试失败条（`lineage` 与单条删除的磁盘兜底仍降级为空/未命中）；
+  ② `storesDumpScript` 每 store 增发 `STATE <present|absent|quarantined|foreign>`，解析进
+  `StoreDumpInfo.indexState`，回收判据改为「索引明确为空数组 **或** `STATE=absent`」；`present`（损坏未隔离）、
+  `quarantined`（隔离现场）、`unknown`（旧版脚本）、`foreign`（非本插件目录）一律保留。
+- **失效症状**：dump 失败 → 空树且无提示（旧）；空壳仓被 gc 反复扫过但永远不回收（旧）。
+- **复查动作**：改 dump 输出格式时同步 `tests/unit/stores-dump.test.js`（STATE 解析）、
+  `tests/unit/stores-dump-script.test.js`（真 bash 执行四形态）、`tests/unit/maintenance-reap.test.js`
+  （回收判据）；`STATE` 取值是回收侧的唯一真相源，新增形态必须先想清楚「能否回收」。
+  细节与实测见 [plans/completed/plan-dump-visible-and-empty-reclaim.md](plans/completed/plan-dump-visible-and-empty-reclaim.md)。
+
+
 ## 与 E1 verify-host 的对应关系
 
 装配层条目（I10 inject 门禁、端点注册、Config schema、卸载清零）由

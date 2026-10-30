@@ -246,8 +246,10 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
     return cwds
   }
 
-  // 一条 shell dump 全部 store 元数据（容器子目录 + 降级候选目录的 root.txt
-  // 与 index.json），manage list 与 delete 兜底共用。
+  // 一条 shell dump 全部 store 元数据（容器子目录 + 降级候选目录的 STATE /
+  // root.txt / index.json / lineage.json），manage list 与 delete 兜底共用。
+  // 失败一律 fail-loud：先记「最近错误」再抛，由调用方决定降级还是摆到用户面前
+  // （旧行为是静默返回空 Map——issue #30 里树连提示都没有，只能翻日志）。
   async function dumpStores(): Promise<Map<string, StoreDumpInfo>> {
     const container = await rt.resolveHomeContainer()
     const extras = Array.from(await collectCwds()).map((cwd) => cwd + (rt.isWin ? '\\' : '/') + '.dsh-recall-snapshots')
@@ -255,10 +257,11 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
       const text = rt.scripts.stripBom(await rt.runShell(rt.scripts.storesDumpScript(container || '', extras), { timeoutMs: 120000, stdoutMaxBytes: 8388608 }))
       return parseStoresDump(text)
     } catch (error) {
-      // 同 refreshListCacheInBackground：dump 失败按空 Map 继续是设计行为，
-      // 但失败原因必须留痕，否则列表缺数据时无从排查
-      console.error('recall stores dump failed:', String((error as Error && (error as Error).stack) || error))
-      return new Map()
+      const detail = String((error as Error && (error as Error).stack) || error)
+      console.error('recall stores dump failed:', detail)
+      // 设置页「最近错误」是用户唯一能自查的面，dump 失败必须落进去
+      rt.recordError('recall stores dump failed: ' + detail)
+      throw error instanceof Error ? error : new Error(String(error))
     }
   }
 
@@ -266,7 +269,10 @@ export function apply(ctx: HostContext, config: ResolvedConfig) {
   // 兜底路径用它消灭「列表可见但内存缺失 ⇒ 误报不存在」。
   async function locateSnapshotOnDisk(id: string): Promise<{ store: StoreInfo; root: string } | null> {
     if (!id) return null
-    const dump = await dumpStores()
+    // dump 失败这里降级为「找不到」：失败原因已进最近错误，单条删除还有内存命中
+    // 路径，不该因为一次枚举失败把用户挡在错误码前
+    let dump: Map<string, StoreDumpInfo>
+    try { dump = await dumpStores() } catch (error) { return null }
     const hints = new Map()
     for (const [root, st] of state.stores.entries()) {
       if (st && st.dir) hints.set(st.dir, root)

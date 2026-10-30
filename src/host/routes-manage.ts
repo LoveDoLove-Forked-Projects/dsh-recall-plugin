@@ -57,6 +57,13 @@ export function createRoutesManage(deps: RoutesManageDeps) {
   } = deps
   const { sessionTitles, messageTexts, liveTitleFast, liveMessageTextFast } = sessionInfo
 
+  // dump 失败统一出口：细节已由 dumpStores 写入「最近错误」，端点只回一句可行动
+  // 的话——把 shell 栈丢进 UI 既看不懂又会撑爆 toast。issue #30 之前这里是空树，
+  // 用户没有任何「失败了」的信号。
+  function dumpFailed(): { ok: false; code: typeof E.RECALL_DUMP_FAILED; message: string } {
+    return { ok: false, code: E.RECALL_DUMP_FAILED, message: '读取磁盘快照失败，列表与批量删除不可用；请查看「最近错误」中的原因后重试' }
+  }
+
   // PF-6：list items 构建（磁盘 dump + 内存并集 + 排序）从 list 分支抽出——
   // 同步路径与 stale 后台刷新共用同一实现（改一处漏一处的风险随合并消失）。
   async function buildListItems(): Promise<ManageListItem[]> {
@@ -478,7 +485,9 @@ export function createRoutesManage(deps: RoutesManageDeps) {
           if (stale) refreshListCacheInBackground()
           return { ok: true, items: listCache.items.slice(0, safeLimit), total: listCache.items.length, stale }
         }
-        const allItems = await buildListItems()
+        // dump 失败不再静默成空列表：返回 DUMP_FAILED 让卡片显示失败与重试入口
+        let allItems: ManageListItem[]
+        try { allItems = await buildListItems() } catch (error) { return dumpFailed() }
         listCache.at = Date.now()
         listCache.items = allItems
         listCache.stale = false
@@ -613,17 +622,22 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         const id = args && args.messageId ? String(args.messageId) : ''
         if (scope === 'workspace') {
           if (!root) return { ok: false, code: E.RECALL_NO_ROOT, message: '缺少工作区路径' }
-          const deleted = await deleteSnapshotsByFilter((rec) => rec.root === root, sessionId)
+          // 列表缓存空时这一步要全量 dump——失败必须报错，不能删掉 0 条还回 ok
+          let deleted: number
+          try { deleted = await deleteSnapshotsByFilter((rec) => rec.root === root, sessionId) } catch (error) { return dumpFailed() }
           return { ok: true, deleted }
         }
         if (scope === 'session') {
           if (!targetSessionId) return { ok: false, code: E.RECALL_NO_SESSION, message: '缺少会话 ID' }
           // 树形中会话挂在具体工作区下，客户端会传 root 限定范围；不传则保持
           // 旧语义（删该会话全部工作区的快照），兼容老调用方。
-          const deleted = await deleteSnapshotsByFilter(
-            (rec) => rec.sessionId === targetSessionId && (!root || rec.root === root),
-            sessionId
-          )
+          let deleted: number
+          try {
+            deleted = await deleteSnapshotsByFilter(
+              (rec) => rec.sessionId === targetSessionId && (!root || rec.root === root),
+              sessionId
+            )
+          } catch (error) { return dumpFailed() }
           return { ok: true, deleted }
         }
         // 管理列表来自磁盘（跨工作区全量），而内存 state.snapshots 只含当前
@@ -670,7 +684,10 @@ export function createRoutesManage(deps: RoutesManageDeps) {
         return { ok: true }
       }
       if (op === 'deleteAll') {
-        const result = await deleteAllSnapshots()
+        // 「全部删除」把枚举到的磁盘仓当目标：dump 失败时继续等于「知道几个删几个」
+        // 却回成功，必然漏删——直接报错让用户重试
+        let result: Awaited<ReturnType<typeof deleteAllSnapshots>>
+        try { result = await deleteAllSnapshots() } catch (error) { return dumpFailed() }
         if (result.failed > 0) {
           return {
             ok: false,

@@ -86,3 +86,49 @@ describe('manage list messageText 字段存在性（client 冷读契约）', () 
     expect(res.items[0].messageText).toBe('你好')
   })
 })
+
+// issue #30 遗留项：dump 失败必须摆到用户面前。旧实现 catch 后返回空 Map，
+// 列表只剩一句「去发条消息」的空态——用户以为没有快照，其实是一个都读不到。
+describe('dump 失败 fail-loud（DUMP_FAILED）', () => {
+  function failingDeps(extra) {
+    return Object.assign({
+      supported: true,
+      listCache: { items: null, at: 0, stale: false, refreshing: null },
+      dumpStores: async () => { throw new Error('exit 1') },
+      state: { stores: new Map(), snapshots: new Map() },
+      sessionInfo: {
+        sessionTitles: new Map(),
+        messageTexts: new Map(),
+        liveTitleFast: () => null,
+        liveMessageTextFast: () => null,
+      },
+      enqueueMany: (roots, fn) => fn(),
+      // 端点用 E.RECALL_* 取码（真实 deps 由 index.js 注入错误码表）
+      E: { RECALL_DUMP_FAILED: 'DUMP_FAILED' },
+    }, extra || {})
+  }
+
+  it('list：dump 抛错 → ok:false + DUMP_FAILED，且不把空结果写进缓存', async () => {
+    const deps = failingDeps()
+    const routes = createRoutesManage(deps)
+    const res = await routes.manage({ op: 'list' })
+    expect(res.ok).toBe(false)
+    expect(res.code).toBe('DUMP_FAILED')
+    expect(res.message).toContain('最近错误')
+    expect(deps.listCache.items).toBe(null)
+  })
+
+  it('deleteAll：dump 抛错 → 报错而非「已删除 0 条」', async () => {
+    const routes = createRoutesManage(failingDeps())
+    const res = await routes.manage({ op: 'deleteAll' })
+    expect(res.ok).toBe(false)
+    expect(res.code).toBe('DUMP_FAILED')
+  })
+
+  it('lineage：dump 抛错仍降级为空（树退化为无版本家族标记，不阻断列表）', async () => {
+    const routes = createRoutesManage(failingDeps())
+    const res = await routes.manage({ op: 'lineage' })
+    expect(res.ok).toBe(true)
+    expect(res.lineage).toEqual([])
+  })
+})

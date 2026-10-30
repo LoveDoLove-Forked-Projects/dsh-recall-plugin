@@ -146,3 +146,55 @@ describe('M3-2 空仓目录回收', () => {
     expect(calls.some((c) => c.startsWith('RM '))).toBe(false)
   })
 })
+
+// issue #30 遗留项：从没拍过快照的空壳（index.json 从未生成）以前永远不被
+// 回收——判据只看「index.json 明确为空数组」。现在 dump 的 STATE 段给出
+// absent/quarantined/foreign 三态，回收侧只放行 absent。
+describe('M3-3 从未拍过快照的空仓回收（STATE=absent）', () => {
+  it('STATE=absent + 无 tag + 内存无快照 → 整目录删除', async () => {
+    const { state, calls, ctx, rt, config } = setup()
+    state.stores.set('R1', { dir: 'D1', git: 'D1/git/.git', repo: 'D1/git', home: true, excludeFile: 'E1', maxFileBytes: 1 })
+    const maint = createMaintenance(ctx, rt, { saveIndex: async () => {} }, config, {
+      dumpStores: dump([['D1', { root: 'R1', entries: null, indexState: 'absent' }]]),
+    })
+    await maint.runGcAll()
+    expect(calls).toContain('RM D1')
+    expect(state.stores.has('R1')).toBe(false)
+  })
+
+  it('STATE=quarantined（索引损坏已隔离，待复查）→ 不删', async () => {
+    const { calls, ctx, rt, config } = setup()
+    const maint = createMaintenance(ctx, rt, { saveIndex: async () => {} }, config, {
+      dumpStores: dump([['D1', { root: 'R1', entries: null, indexState: 'quarantined' }]]),
+    })
+    await maint.runGcAll()
+    expect(calls.some((c) => c.startsWith('RM '))).toBe(false)
+  })
+
+  it('STATE=foreign（不是本插件的目录）→ 不删', async () => {
+    const { calls, ctx, rt, config } = setup()
+    const maint = createMaintenance(ctx, rt, { saveIndex: async () => {} }, config, {
+      dumpStores: dump([['D1', { root: 'R1', entries: null, indexState: 'foreign' }]]),
+    })
+    await maint.runGcAll()
+    expect(calls.some((c) => c.startsWith('RM '))).toBe(false)
+  })
+
+  it('STATE=absent 但磁盘仍有 snap-* tag → 不删（索引丢了但快照还在）', async () => {
+    const { calls, ctx, rt, config } = setup({ reply: (cmd) => (cmd.startsWith('TAGS ') ? 'snap-m1\n' : '') })
+    const maint = createMaintenance(ctx, rt, { saveIndex: async () => {} }, config, {
+      dumpStores: dump([['D1', { root: 'R1', entries: null, indexState: 'absent' }]]),
+    })
+    await maint.runGcAll()
+    expect(calls.some((c) => c.startsWith('RM '))).toBe(false)
+  })
+
+  it('present + entries=null（损坏但未隔离）→ 不删', async () => {
+    const { calls, ctx, rt, config } = setup()
+    const maint = createMaintenance(ctx, rt, { saveIndex: async () => {} }, config, {
+      dumpStores: dump([['D1', { root: 'R1', entries: null, indexState: 'present' }]]),
+    })
+    await maint.runGcAll()
+    expect(calls.some((c) => c.startsWith('RM '))).toBe(false)
+  })
+})

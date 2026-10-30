@@ -29,6 +29,8 @@ interface MountOptions {
   lineage?: unknown[]
   total?: number
   staleFirst?: boolean
+  // list 失败态（issue #30 遗留项）：把该对象原样回给 client，验失败提示与重试
+  listError?: unknown
   deleteAll?: unknown
   byId?: Record<string, unknown>
   archivedSessionIds?: readonly string[]
@@ -41,6 +43,7 @@ async function mount(opts: MountOptions = {}) {
     const op = args.op
     if (op === 'list') {
       listCalls++
+      if (opts.listError) return opts.listError
       const stale = Boolean(opts.staleFirst) && listCalls === 1
       return { ok: true, items, total: opts.total ?? items.length, stale }
     }
@@ -278,6 +281,25 @@ describe('snapshot-manager：操作区与错误区', () => {
     await click(buttons[0]) // 刷新（无加载更多时排首位）
     await flush()
 
+    expect(manageCalls(fetchStub, 'list').length).toBe(2)
+  })
+})
+// issue #30 遗留项：列表读取失败不能表现成「没有快照」或「还在加载」。旧实现
+// 只有一棵空树 + 永久骨架，用户唯一的线索是去翻配置文件。
+describe('snapshot-manager：列表读取失败（DUMP_FAILED）', () => {
+  it('ok:false → 显示 alert 失败条并能重试，骨架退出', async () => {
+    const { container, fetchStub } = await mount({
+      listError: { ok: false, code: 'DUMP_FAILED', message: '读取磁盘快照失败' },
+    })
+    const banner = q(container, '.dsh-recall-list-error') as HTMLElement | null
+    expect(banner).toBeTruthy()
+    expect(banner!.getAttribute('role')).toBe('alert')
+    // 失败 ≠ 加载中：骨架条必须消失
+    expect(q(container, '.dsh-recall-tree-skeleton')).toBe(null)
+    // 重试入口复用 refresh：点一次再发一次 list
+    const retry = qa(banner as HTMLElement, 'button')[0]
+    await click(retry)
+    await flush()
     expect(manageCalls(fetchStub, 'list').length).toBe(2)
   })
 })

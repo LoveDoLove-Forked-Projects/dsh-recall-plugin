@@ -335,8 +335,10 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
   // M3-2：整目录回收——M1 只清对象库（目录与 root.txt 还在），这一步把「确认
   // 没有任何可回退数据」的空仓库目录整个删掉（issue #18 报告者手工做的那步）。
   // 逐条保守判定，任一条不满足就留着：
-  //   * entries 必须是**明确解析出来的空数组**（index.json 存在且为 []）：
-  //     entries 为 null 表示索引缺失或损坏（可能是待复查的隔离现场），不删；
+  //   * 「没有可回退数据」＝ 索引明确为空数组（拍过快照、后来删光了）**或**
+  //     indexState 为 absent（建过仓但从没拍过快照——issue #30 遗留的空壳）。
+  //     其余一律不删：present/quarantined 的 entries=null 是损坏/隔离现场（待
+  //     复查），unknown 是旧版脚本的输出（看不出形态），foreign 不是我们的目录；
   //   * 任何 snap-* tag 存在即代表有可回退快照，不删（以磁盘真值二次确认）；
   //   * 内存里还有该目录/该 root 的快照，不删。
   // 删前留 console.error（不可逆操作必须可追溯，同 purgeSession 的纪律）；
@@ -347,7 +349,9 @@ export function createMaintenance(ctx: HostContext, rt: Runtime, snaps: Snapshot
     let removed = 0
     for (const [dir, info] of disk) {
       if (!dir || !info) continue
-      if (!Array.isArray(info.entries) || info.entries.length) continue
+      const emptyIndex = Array.isArray(info.entries) && info.entries.length === 0
+      const neverCaptured = info.entries === null && info.indexState === 'absent'
+      if (!emptyIndex && !neverCaptured) continue
       if (memorySnapshotCount(dir, info.root) > 0) continue
       const store = rt.storeFromDir(dir, false)
       try {

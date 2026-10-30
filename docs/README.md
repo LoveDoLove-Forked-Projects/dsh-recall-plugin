@@ -50,6 +50,7 @@ docs/
 │       ├── plan-snapshot-guard-failclosed.md   # 快照护栏 fail-closed 与大文件前置剔除（issue #29，2026-10-30 归档）：扫描失败不再放行 add + exclude-only pathspec + 昂贵失败立即退避，双平台实弹 7/7
 │       ├── plan-queue-and-budget.md            # per-root 任务队列 + 单次快照时限配置 + web 新会话 cwd 归属核查（2026-10-30 归档）
 │       ├── plan-stores-dump-posix.md          # POSIX dump 脚本行边界缺陷（issue #30，2026-10-30 归档）：空仓 set -e 退出 1 + 内容无尾换行致段尾粘连；测试升级为真跑 bash
+│       ├── plan-dump-visible-and-empty-reclaim.md # dump 失败可见化 + 空仓回收（issue #30 遗留项，2026-10-30 归档）：DUMP_FAILED 错误条与重试；STATE 段驱动空壳回收
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿 / 性能回退已修复）

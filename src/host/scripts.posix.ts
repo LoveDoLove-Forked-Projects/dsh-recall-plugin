@@ -802,8 +802,8 @@ export function listSubdirsScript(dir: string): string {
 }
 
 // 批量 dump 全部 store 元数据（与 pwsh 版 storesDumpScript 同格式、
-// 同语义，见其注释）：一条 shell 拿全部目录的 root.txt + index.json +
-// lineage.json（PF-4）。
+// 同语义，见其注释）：一条 shell 拿全部目录的 STATE + root.txt + index.json +
+// lineage.json（PF-4；STATE 为 issue #30 遗留的空仓回收判据）。
 // bash 3.2 兼容：数组 + += 均可用，glob 无匹配时字面量经 [ -d ] 过滤。
 // root.txt 经 tr 去掉可能的 CRLF 再拼单行，防标记结构被打乱。
 export function storesDumpScript(container: string, extraDirs: string[]): string {
@@ -822,6 +822,18 @@ export function storesDumpScript(container: string, extraDirs: string[]): string
     'for d in "${dirs[@]}"; do',
     '  [ -d "$d" ] || continue',
     '  echo "==DIR $d"',
+    // STATE 供空仓回收判定（present/absent/quarantined/foreign）：判据留在
+    // 脚本侧是因为只有这里能看文件系统——absent 表示「从没拍过快照的真仓」
+    // （git/ 或 root.txt 在），foreign 表示不是我们的目录，两者不能混。
+    '  if [ -f "$d/index.json" ]; then',
+    "    echo 'STATE present'",
+    '  elif ls "$d"/index.json.corrupt-* >/dev/null 2>&1; then',
+    "    echo 'STATE quarantined'",
+    '  elif [ -d "$d/git" ] || [ -f "$d/root.txt" ]; then',
+    "    echo 'STATE absent'",
+    '  else',
+    "    echo 'STATE foreign'",
+    '  fi',
     '  if [ -f "$d/root.txt" ]; then',
     '    printf "ROOT %s\\n" "$(cat "$d/root.txt" 2>/dev/null | tr -d \'\\r\\n\')"',
     '  else',
