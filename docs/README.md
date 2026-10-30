@@ -47,6 +47,7 @@ docs/
 │       ├── plan-dsh-0.1.7-adapt.md          # dsh 0.1.7-alpha.1 适配（2026-09-23 归档）：shell 接缝换 execute / settings 换 SettingsForms 双分支 + M5 双平台实弹全过（WSL 硬指标零 shell.run）
 │       ├── plan-quality-hardening.md         # 质量加固专项 A1–A8（2026-09-30 归档）：client UI 测试体系 / intent journal 崩溃恢复 / 磁盘格式守卫 / i18n 双语层 / logger / 严格索引 / format.md / catch 纪律；活体冒烟 R-1〜R-6 全过（实弹掘出并修复 4 个真实缺陷）
 │       ├── plan-warmup-unhandled-rejection.md  # 启动预热 IIFE 未捕获拒绝加固（2026-09-30 归档）：随质量加固批次实弹复现 fatal 后修复（IIFE 接 catch + 诊断）
+│       ├── plan-snapshot-guard-failclosed.md   # 快照护栏 fail-closed 与大文件前置剔除（issue #29，2026-10-30 归档）：扫描失败不再放行 add + exclude-only pathspec + 昂贵失败立即退避，双平台实弹 7/7
 ├── upgrade-assessments/   # dsh 版本升级影响评估（版本快照，随版本归档，无完成态流转）
 │   ├── dsh-0.1.3-alpha.1.md    # 0.1.3-alpha.1 影响评估（2026-09-04，契约零破坏 / 行为级影响）
 │   ├── dsh-0.1.3-alpha.2.md    # 0.1.3-alpha.2 影响评估（2026-09-08，门禁实跑全绿 / 性能回退已修复）

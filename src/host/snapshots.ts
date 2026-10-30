@@ -33,8 +33,11 @@ export function parseSkipped(out: unknown): string[] {
 // issue #24：快照前置护栏标记。脚本在 add 之前遍历工作区统计「纳入总量」与
 // 耗时，任一超限输出「SNAP_LIMIT <bytes|time> <实测> <上限>」后退出（不建
 // 快照）。旧脚本无该行 → 返回 null，走原成功路径（升级期兼容）。
+// issue #29：'scan' 不是脚本的 SNAP_LIMIT 输出，而是 host 把「统计失败」
+// （SNAP_SCAN_FAIL）折成同一形状——两者都要走「停用该工作区 + 反馈」通道，
+// 共用 TTL/配置变化重试逻辑，value 此时是 git 退出码、limit 恒 0。
 export interface SnapshotLimit {
-  kind: 'bytes' | 'time'
+  kind: 'bytes' | 'time' | 'scan'
   value: number
   limit: number
 }
@@ -53,6 +56,29 @@ export function parseSnapshotLimit(out: unknown): SnapshotLimit | null {
   return null
 }
 
+// issue #29：预算扫描失败的哨兵（ls-files 非零退出）。与 SNAP_LIMIT 同为
+// 「本次不建快照」通道，区别是规模未知——一律按停用处理，绝不放行 add。
+// 旧脚本无这两行 → 返回 null，走原成功路径（升级期兼容）。
+export interface ScanFail {
+  rc: number
+  message: string
+}
+
+export function parseScanFail(out: unknown): ScanFail | null {
+  let rc: number | null = null
+  let message = ''
+  for (const line of String(out || '').split(/\r?\n/)) {
+    // 前缀长度含尾随空格：SNAP_SCAN_FAIL = 15、SNAP_SCAN_ERR = 14
+    if (line.indexOf('SNAP_SCAN_FAIL ') === 0) {
+      const n = parseInt(line.slice(15).trim(), 10)
+      if (Number.isFinite(n)) rc = n
+    } else if (line.indexOf('SNAP_SCAN_ERR ') === 0) {
+      message = line.slice(14).trim()
+    }
+  }
+  return rc === null ? null : { rc, message }
+}
+
 // 字节数的可读文本：≥1MB 用 MB，更小用 KB（避免「0 MB / 0 MB」这种
 // 测试态/小工作区下无信息的文案）
 function bytesText(bytes: number): string {
@@ -66,6 +92,10 @@ function bytesText(bytes: number): string {
 // 以为工作区真的这么大，进而去调大上限——那反而把 gitignore 里的垃圾真的收进
 // 对象库，与该护栏的初衷相反。
 export function buildSnapshotLimitNotice(limit: SnapshotLimit): string {
+  if (limit.kind === 'scan') {
+    // 不嵌 stderr（含路径必被 140 字符截断成残句）：原因由「最近错误」承载
+    return '无法统计该工作区的快照范围（git 退出码 ' + limit.value + '），本次快照已跳过；该工作区暂停快照约 10 分钟，修复后自动恢复，详情见「最近错误」'
+  }
   if (limit.kind === 'bytes') {
     return '该工作区可纳入快照的文件总量超过上限（约 ' + bytesText(limit.value) + ' / ' + bytesText(limit.limit) + '，已按 .gitignore 与排除表过滤），已停用快照；可调大「工作区总量上限」或补充排除表后自动恢复'
   }
@@ -368,6 +398,9 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   const FUSE_AFTER = 3
   const FUSE_BACKOFF_BASE_MS = 5 * 60 * 1000
   const FUSE_BACKOFF_CAP_MS = 60 * 60 * 1000
+  // issue #29：分钟级失败视为「昂贵失败」——它多半是规模或环境问题而非偶发
+  // 抖动，免费重试两次的代价（每条消息再付分钟级 + GB 级写入）远超收益
+  const EXPENSIVE_FAIL_MS = 60 * 1000
   const snapFailures = new Map()
 
   // issue #24：护栏停用记录（root → 判定结果 + 触发时的配置值 + 时间）。
@@ -378,6 +411,20 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   const SNAP_LIMIT_RETRY_MS = 10 * 60 * 1000
   const snapLimits = new Map<string, SnapshotLimit & { at: number; maxWorkspaceBytes: number; scanBudgetMs: number }>()
   const limitBlockedAt = new Map<string, number>()
+
+  // 停用记录（超限/统计失败共用）：触发时的配置值一并存下，配置变化即可重试
+  function markSnapshotLimited(root: string, limit: SnapshotLimit): void {
+    snapLimits.set(root, { ...limit, at: Date.now(), maxWorkspaceBytes: config.maxWorkspaceBytes, scanBudgetMs: config.scanBudgetMs })
+  }
+
+  // 停用类 recordError 的 5 分钟节流：停用期内每条消息都走同一分支，
+  // 逐条记录会把最近错误环刷成同一条（与 quarantineErrorThrottled 同款纪律）
+  function noteSnapshotBlocked(root: string, detail: string): void {
+    const last = limitBlockedAt.get(root) || 0
+    if (Date.now() - last < 5 * 60 * 1000) return
+    limitBlockedAt.set(root, Date.now())
+    rt.recordError(detail)
+  }
 
   // ---- A3：磁盘格式版本守卫 ----
   // 补「新读旧」方向的防线：读取侧字段全部可选化只解决旧插件读新格式；
@@ -761,21 +808,29 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       return
     }
     await loadIndex(root, sessionId)
+    // issue #29：失败耗时是「昂贵失败」的判定依据（见 EXPENSIVE_FAIL_MS）
+    const captureStartedAt = Date.now()
     try {
       const out = await rt.runShell(S.snapshotScript(root, store, state.gitExe || '', messageId, BASE()), { timeoutMs: 600000, stdoutMaxBytes: 65536 })
       // issue #24：前置扫描判定超限——本次不建快照，并按停用语义走反馈
       //（不是失败：不 prune、不进熔断），后续快照由上方短路跳过
       const limit = parseSnapshotLimit(out)
       if (limit) {
-        snapLimits.set(root, { ...limit, at: Date.now(), maxWorkspaceBytes: config.maxWorkspaceBytes, scanBudgetMs: config.scanBudgetMs })
+        markSnapshotLimited(root, limit)
         const notice = buildSnapshotLimitNotice(limit)
-        // 最近错误 5 分钟一条：停用期内每条消息都会走到这里
-        const last = limitBlockedAt.get(root) || 0
-        if (Date.now() - last >= 5 * 60 * 1000) {
-          limitBlockedAt.set(root, Date.now())
-          rt.recordError('recall snapshot disabled for ' + root + ': ' + notice)
-        }
+        noteSnapshotBlocked(root, 'recall snapshot disabled for ' + root + ': ' + notice)
         setFeedback(messageId, { failed: true, kind: 'workspaceLimit', error: notice })
+        return
+      }
+      // issue #29：统计失败 = 规模未知，同样停用该工作区（不 prune、不进熔断：
+      // 脚本在 add 之前就退出了，没有残骸要清）。stderr 原文只进「最近错误」
+      const scanFail = parseScanFail(out)
+      if (scanFail) {
+        const pseudo: SnapshotLimit = { kind: 'scan', value: scanFail.rc, limit: 0 }
+        markSnapshotLimited(root, pseudo)
+        const notice = buildSnapshotLimitNotice(pseudo)
+        noteSnapshotBlocked(root, 'recall snapshot scan failed for ' + root + ': rc=' + scanFail.rc + ' ' + scanFail.message)
+        setFeedback(messageId, { failed: true, kind: 'scanFail', error: notice })
         return
       }
       snapFailures.delete(root)
@@ -788,7 +843,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
       // 分类后的提示替代原始 stderr 直传（M1-D4）：识别为环境错误时给
       // 可行动文案，未识别时 buildFeedbackError 内部回落原文截断（保现状）
       setFeedback(messageId, { failed: true, ...buildFeedbackError(String(error)) })
-      await handleSnapshotFailure(root, store)
+      await handleSnapshotFailure(root, store, Date.now() - captureStartedAt)
     }
   }
 
@@ -829,7 +884,7 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
   // （见 index.js 事件接线），这两个动作留在 catch 里顺势排队执行，
   // 与下一次快照天然互斥，无 git 锁竞态；自身整体 best-effort，
   // 清理失败不该让队列任务以异常收场。
-  async function handleSnapshotFailure(root: string, store: StoreInfo | null): Promise<void> {
+  async function handleSnapshotFailure(root: string, store: StoreInfo | null, elapsedMs = 0): Promise<void> {
     if (store && state.gitExe) {
       try {
         await rt.runShell(S.pruneScript(store, state.gitExe), { timeoutMs: 600000, stdoutMaxBytes: 4096 })
@@ -840,13 +895,18 @@ export function createSnapshots(ctx: HostContext, rt: Runtime, config: ResolvedC
     }
     const f = snapFailures.get(root) || { count: 0, skipUntil: 0 }
     f.count++
+    const expensive = elapsedMs >= EXPENSIVE_FAIL_MS
+    // issue #29：昂贵失败跳过前两次免费重试——否则 600 秒超时要连付三轮才退避
+    if (expensive && f.count < FUSE_AFTER) f.count = FUSE_AFTER
     if (f.count >= FUSE_AFTER) {
       const backoff = Math.min(FUSE_BACKOFF_BASE_MS * 2 ** (f.count - FUSE_AFTER), FUSE_BACKOFF_CAP_MS)
       const wasFused = Date.now() < f.skipUntil
       f.skipUntil = Date.now() + backoff
       // 只在「未熔断→熔断」的跳变沿记录：熔断期间每条消息都会走上面的
       // 静默跳过分支，逐条记录会把最近错误环形缓冲刷成同一条目
-      if (!wasFused) rt.recordError('recall snapshot fused after ' + f.count + ' consecutive failures, backoff ' + Math.round(backoff / 60000) + 'min for: ' + root)
+      if (!wasFused) {
+        rt.recordError('recall snapshot fused after ' + f.count + ' consecutive failures, backoff ' + Math.round(backoff / 60000) + 'min for: ' + root + (expensive ? ' (last failure took ' + Math.round(elapsedMs / 1000) + 's)' : ''))
+      }
     }
     snapFailures.set(root, f)
   }

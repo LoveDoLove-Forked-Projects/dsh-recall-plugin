@@ -8,7 +8,7 @@
  * 恰好同名的 `build/` 子树）被挡下，root 整体仍进快照，单会话可积到 GB 级。
  *
  * 判定只需「目录名」一维，故复用脚本侧 oversize 目录跳过的同一判据（见
- * scripts.pwsh.ts / scripts.posix.ts 的 oversizeBlock：无通配、无内部斜杠、
+ * scripts.pwsh.ts / scripts.posix.ts 的 oversizeListBlock：无通配、无内部斜杠、
  * 非 `!` 反选、非 `#` 注释）。两处必须同形态——改判据要同步脚本侧，脚本侧由
  * scripts-contract.test.js 钉文本、本模块由 exclude-patterns.test.js 钉行为。
  */

@@ -26,7 +26,7 @@ export const UTF8_PRELUDE = '$OutputEncoding = [Text.UTF8Encoding]::new($false)\
 
 // 超大文件跳过阈值：git 对象库对大文件极不友好，回退语义也不该被一个
 // 200MB 的构建产物拖垮。默认值与 config.js 的 maxFileBytes 一致；实际
-// 生效值以 store.maxFileBytes（用户 config 可调）经 oversizeBlock 注入为准。
+// 生效值以 store.maxFileBytes（用户 config 可调）经 oversizeListBlock 注入为准。
 // issue #24 起默认 8MB：100MB 的首拍会把下载/素材目录的大文件整批写进对象库。
 export const MAX_FILE_BYTES = 8388608
 
@@ -80,8 +80,8 @@ function dropGitlinksBlock() {
 
 // exclude 表里 basename 形式（无通配、无内部斜杠、非 ! 反选）的 pattern 按
 // gitignore 语义匹配任意层级同名目录，遍历时把这类目录名收进 HashSet 整棵子树跳过。
-// 被 oversizeBlock（超大文件扫描）与 reparseDirsBlock（重解析点发现）共用：两处
-// 必须同判据，判据本身与 scripts.posix.ts 的 oversizeBlock / exclude-patterns.ts 的
+// 被 oversizeListBlock（超大文件扫描）与 reparseDirsBlock（重解析点发现）共用：两处
+// 必须同判据，判据本身与 scripts.posix.ts 的 oversizeListBlock / exclude-patterns.ts 的
 // dirNamePatterns 三处同源——改判据要同步那两个文件。
 // 依赖外层已定义的 $lines。
 function dirSkipSetBlock(name: string): string {
@@ -107,7 +107,7 @@ function dirSkipSetBlock(name: string): string {
 // 排除表。本函数由 excludeSyncBlock 在 add -A **之前**调用，git 因此根本不进入它们；
 // 已跟踪的旧幽灵条目由 excludeSyncBlock 既有的 ls-files -i -c 分支一次清掉。路径带 `/`
 // 中缀即按 gitignore 锚定到仓库根（=工作区 root），与本意一致。
-// 遍历成本：只枚举目录、不 stat 文件，且与 oversizeBlock 同一套目录名剪枝——无重解析点
+// 遍历成本：只枚举目录、不 stat 文件，且与 oversizeListBlock 同一套目录名剪枝——无重解析点
 // 的工作区不产生任何 exclude 差异，条件化比对因此跳过重写与清理循环（零常态开销）。
 // 平台差异：POSIX 的 git 把指向目录的符号链接记成 120000 条目、不递归，故那里不做本发现
 //（见 scripts.posix.ts 同名注释）；POSIX 的 bind mount 环不覆盖，记为已知缺口。
@@ -163,9 +163,26 @@ function reparseDirsBlock(): string {
 // （node_modules/target/dist 等大目录不再被全树扫）。复杂 pattern 不参与
 // 跳过、回退全扫该子树——多扫不漏检，fail-open 语义不变。
 // 依赖外层已定义的 $git/$g/$root；$lines 由前置的 excludeSyncBlock 定义。
-function oversizeBlock(maxBytes: number): string {
+// issue #29：改成「先出清单、再让 add 排除」——此前 add 先写全部大文件对象、
+// 之后才把条目移出 index，一个「小文件少 + 大文件多」的工作区能在预算通过后
+// 仍写满磁盘。清单只给 add 用（带 :(top) 前缀，见 add 前的 Set-Location），
+// rel 数组留在脚本作用域供 add 后的兜底剔除复用；空清单等价全量 add。
+// 遍历会多列被 .gitignore 排除的大文件：多排除几个 git 本来就不加的路径无害。
+function oversizeRemoveBlock(): string {
+  return [
+    'for ($i = 0; $i -lt $oversizeRel.Count; $i += 100) {',
+    '  $batch = $oversizeRel.GetRange($i, [Math]::Min(100, $oversizeRel.Count - $i))',
+    // --work-tree 不可省：bare 影子仓库下裸 update-index 会 fatal，pwsh 不抛
+    // → 大文件静默留在 index 里，maxFileBytes 的承诺形同虚设
+    '  & $git --literal-pathspecs --git-dir=$g --work-tree=$root update-index --force-remove -- $batch',
+    '}'
+  ].join('\n')
+}
+
+function oversizeListBlock(maxBytes: number): string {
   return [
     dirSkipSetBlock('oversizeSkip'),
+    '$oversizeP = Join-Path $g ("oversize-pathspec." + $PID)',
     '$oversizeStack = [System.Collections.Generic.Stack[string]]::new()',
     '$oversizeStack.Push($root)',
     '$oversizeRel = [System.Collections.Generic.List[string]]::new()',
@@ -185,13 +202,53 @@ function oversizeBlock(maxBytes: number): string {
     '    }',
     '  } catch {}',
     '}',
-    'for ($i = 0; $i -lt $oversizeRel.Count; $i += 100) {',
-    '  $batch = $oversizeRel.GetRange($i, [Math]::Min(100, $oversizeRel.Count - $i))',
-    // --work-tree 不可省：bare 影子仓库下裸 update-index 会 fatal，pwsh 不抛
-    // → 大文件静默留在 index 里，maxFileBytes 的承诺形同虚设
-    '  & $git --literal-pathspecs --git-dir=$g --work-tree=$root update-index --force-remove -- $batch',
-    '}'
+    // 清单必须存在（--pathspec-from-file 指错会让 add fatal）：无大文件时写空文件，
+    // 后续按长度 0 判定「不传该参数」
+    "if ($oversizeRel.Count -gt 0) {",
+    '  $oversizeSb = [System.Text.StringBuilder]::new()',
+    '  foreach ($r in $oversizeRel) { [void]$oversizeSb.Append(":(top,exclude,literal)").Append($r).Append([char]0) }',
+    "  [System.IO.File]::WriteAllText($oversizeP, $oversizeSb.ToString(), (New-Object System.Text.UTF8Encoding($false)))",
+    '} else {',
+    '  Set-Content -LiteralPath $oversizeP -Value "" -NoNewline -Encoding ascii -ErrorAction SilentlyContinue',
+    '}',
+    oversizeRemoveBlock(),
   ].join('\n')
+}
+
+// issue #29：add 前置（探测 + 切 cwd）收在一处——snapshot/diff/rollback 三处
+// add 共用同一形态，漏改一处就会让该链路重新写大文件。
+// 必须切到 root：pathspec 的隐含全集会被 cwd 前缀裁切，:(top) 救不回来（实测），
+// 而脚本 cwd 是宿主工作目录（可能在工作区子目录里）。
+// 旧 git（<2.25）无 --pathspec-from-file：探测失败就不传该参数，退回裸 add——
+// 与现状同行为，总好过带未知选项让整条快照 fatal。探测结果缓存进 git-dir。
+function oversizeAddPrepBlock(): string {
+  return [
+    '$paArgs = @()',
+    'if ((Test-Path -LiteralPath $oversizeP) -and ((Get-Item -LiteralPath $oversizeP).Length -gt 0)) {',
+    "  $paOk = Join-Path $g 'pathspec-from-file.ok'",
+    '  $paDetect = Test-Path -LiteralPath $paOk',
+    '  if (-not $paDetect) {',
+    '    $paHit = @()',
+    '    $paEap = $ErrorActionPreference',
+    "    $ErrorActionPreference = 'Continue'",
+    '    try {',
+    "      $paHit = @(& $git add -h 2>&1 | Select-String -SimpleMatch '--pathspec-from-file')",
+    '    } finally { $ErrorActionPreference = $paEap }',
+    '    if ($paHit.Count -gt 0) {',
+    "      Set-Content -LiteralPath $paOk -Value 1 -Encoding ascii -ErrorAction SilentlyContinue",
+    '      $paDetect = $true',
+    '    }',
+    '  }',
+    '  if ($paDetect) { $paArgs = @(("--pathspec-from-file=" + $oversizeP), "--pathspec-file-nul") }',
+    '}',
+    'Set-Location -LiteralPath $root',
+  ].join('\n')
+}
+
+// 清单文件是每次脚本新进程的临时物（文件名带 $PID）：add 段走完就删，
+// 残留只会出现在 add fatal 的罕见路径（体积小、下次同名不覆盖也不影响结果）
+function oversizeCleanupBlock(): string {
+  return 'Remove-Item -LiteralPath $oversizeP -ErrorAction SilentlyContinue'
 }
 
 // issue #24：快照前置护栏——统计「真正会进快照的文件总量」与耗时，任一超限
@@ -206,8 +263,10 @@ function oversizeBlock(maxBytes: number): string {
 // 共用同一套排除引擎，两个开关都不能省：-c 省了会低估（已跟踪文件不会因后来
 // 命中 .gitignore 被移出快照），--exclude-standard 省了连被 ignore 的文件都会
 // 列出来（实测）。
-// 失败即 fail-open 不判定（不回落目录遍历）：两套口径并存会让同一工作区随
-// git 状态跳变，且此刻 add 多半也会失败，护栏已无意义。
+// issue #29：统计失败改为 fail-closed——规模未知就不许 add。此前 fail-open 的
+// 取舍在 $HOME 级工作区上是灾难（ls-files 一失败，10 分钟 + 10 GB 的 add 照跑）。
+// 失败走哨兵 + exit 0 而非非零退出：没跑 add 就没有残骸，不该触发失败清扫与 prune；
+// stderr 落地后随 SNAP_SCAN_ERR 回传，原文进「最近错误」供排障。
 // 依赖外层已定义的 $git/$g/$root。
 function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number): string {
   const limit = maxBytes > 0 ? String(maxBytes) : '0'
@@ -219,27 +278,43 @@ function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number
     "$limitHit = ''",
     '$limitRc = 0',
     '$limitFiles = @()',
+    // 临时文件名带 $PID：脚本每次都是新进程，避免同一 store 上的残留互相覆盖
+    '$limitErrFile = Join-Path $g ("limit-scan-err." + $PID)',
     // PS 5.1：native stderr 在 EAP=Stop 下会被包成 ErrorRecord 直接抛（pwsh 7
     // 不抛），一条 warning 就能让整条快照挂掉——与下方 add 段同款临时降级
     '$limitEap = $ErrorActionPreference',
     "$ErrorActionPreference = 'Continue'",
     'try {',
-    // -z：路径含换行也不分裂（实测 PS 5.1/7 的 @() 都保留 NUL）
-    "  $limitFiles = @(((& $git -c core.quotePath=false --git-dir=$g --work-tree=$root ls-files -z -co --exclude-standard 2>$null) -join '').Split([char]0))",
+    // -z：路径含换行也不分裂（实测 PS 5.1/7 的 @() 都保留 NUL）；stderr 落文件
+    // 而不是 $null——失败原因是 issue #29 的第一诉求，不能再吞掉
+    "  $limitFiles = @(((& $git -c core.quotePath=false --git-dir=$g --work-tree=$root ls-files -z -co --exclude-standard 2>$limitErrFile) -join '').Split([char]0))",
     '  $limitRc = $LASTEXITCODE',
     '} finally { $ErrorActionPreference = $limitEap }',
-    'if ($limitRc -eq 0) {',
-    '  foreach ($limitRel in $limitFiles) {',
+    'if ($limitRc -ne 0) {',
+    "  $limitMsg = ''",
+    // 只取首个非空行：PS 5.1 把 native stderr 写成 ErrorRecord（后续行是
+    // 调用点/脚本路径上下文），整段压平会把噪声塞进「最近错误」
+    '  try {',
+    '    $limitLines = @(Get-Content -LiteralPath $limitErrFile -Encoding UTF8 -ErrorAction SilentlyContinue | Where-Object { $_.Trim() })',
+    "    if ($limitLines.Count -gt 0) { $limitMsg = ($limitLines[0] -replace '\\s+', ' ').Trim() }",
+    '  } catch {}',
+    '  Remove-Item -LiteralPath $limitErrFile -ErrorAction SilentlyContinue',
+    '  if ($limitMsg.Length -gt 300) { $limitMsg = $limitMsg.Substring(0, 300) }',
+    "  Write-Output ('SNAP_SCAN_FAIL ' + $limitRc)",
+    "  Write-Output ('SNAP_SCAN_ERR ' + $limitMsg)",
+    '  exit 0',
+    '}',
+    'Remove-Item -LiteralPath $limitErrFile -ErrorAction SilentlyContinue',
+    'foreach ($limitRel in $limitFiles) {',
     // 两道守卫吸收两类异常条目：5.1 的 Split 会留尾部空串；目录条目（嵌套仓库
     // 输出 `dir/`）的 Length 为空或抛——两者都不该计入（add 侧同样不纳入）
-    '    if (-not $limitRel) { continue }',
-    '    if (' + budget + ' -gt 0 -and $limitSw.ElapsedMilliseconds -gt ' + budget + ') { $limitHit = \'time\'; break }',
-    "    try { $limitLen = [System.IO.FileInfo]::new($root + '/' + $limitRel).Length } catch { $limitLen = [long]0 }",
-    // 口径 = 实际会进快照的字节：超过单文件上限的文件随后被 oversizeBlock
+    '  if (-not $limitRel) { continue }',
+    '  if (' + budget + ' -gt 0 -and $limitSw.ElapsedMilliseconds -gt ' + budget + ') { $limitHit = \'time\'; break }',
+    "  try { $limitLen = [System.IO.FileInfo]::new($root + '/' + $limitRel).Length } catch { $limitLen = [long]0 }",
+    // 口径 = 实际会进快照的字节：超过单文件上限的文件随后被 oversizeListBlock
     // 移出 index，不该计入总量（否则一个 300MB 视频就能把干净项目误判超限）
-    '    if ($limitLen -gt 0 -and $limitLen -le ' + fileLimit + ') { $limitBytes += $limitLen }',
-    '    if (' + limit + ' -gt 0 -and $limitBytes -gt ' + limit + ') { $limitHit = \'bytes\'; break }',
-    '  }',
+    '  if ($limitLen -gt 0 -and $limitLen -le ' + fileLimit + ') { $limitBytes += $limitLen }',
+    '  if (' + limit + ' -gt 0 -and $limitBytes -gt ' + limit + ') { $limitHit = \'bytes\'; break }',
     '}',
     "if ($limitHit -eq 'bytes') { Write-Output ('SNAP_LIMIT bytes ' + $limitBytes + ' ' + " + limit + "); exit 0 }",
     "if ($limitHit -eq 'time') { Write-Output ('SNAP_LIMIT time ' + $limitSw.ElapsedMilliseconds + ' ' + " + budget + "); exit 0 }",
@@ -452,7 +527,10 @@ export function snapshotScript(root: string, store: ScriptStore, gitExe: string,
     excludeSyncBlock(store.excludeFile, base),
     // issue #24：总量/预算护栏先于 add——超限时连 add 都不跑
     limitScanBlock(store.maxWorkspaceBytes, store.maxFileBytes, store.scanBudgetMs),
+    // issue #29：大文件清单先于 add——add 带 exclude 后不再为它们写对象
+    oversizeListBlock(store.maxFileBytes),
     attrsMigrateBlock(),
+    oversizeAddPrepBlock(),
     // fail-open add（issue #7 加固）：--ignore-errors 让「个别路径无法索引」
     // （无提交的嵌入式仓库、不可读文件等）以退出码 1 结束但索引照常落盘，
     // 快照缺个别路径可接受，好过整条快照 fatal。退出码 ≥2 才是真 fatal
@@ -466,13 +544,16 @@ export function snapshotScript(root: string, store: ScriptStore, gitExe: string,
     // 后按 "unable to index file 'X'" 提取被跳过的路径，以 SNAP_SKIP 行
     // 回传 JS 侧做用户可见提示。
     "$ErrorActionPreference = 'Continue'",
-    "$addLog = (@(& $git --git-dir=$g --work-tree=$root add -A --ignore-errors 2>&1) | ForEach-Object { [string]$_ }) -join \"`n\"",
+    "$addLog = (@(& $git --git-dir=$g --work-tree=$root add -A --ignore-errors @paArgs 2>&1) | ForEach-Object { [string]$_ }) -join \"`n\"",
     '$addRc = $LASTEXITCODE',
     "$ErrorActionPreference = 'Stop'",
     'if ($addRc -ge 2) { throw ("git add fatal (exit " + $addRc + "): " + $addLog) }',
     "foreach ($m in [regex]::Matches($addLog, \"unable to index file '([^']+)'\") ) { Write-Output ('SNAP_SKIP ' + $m.Groups[1].Value) }",
     dropGitlinksBlock(),
-    oversizeBlock(store.maxFileBytes),
+    // 兜底：旧 git 走裸 add 时大文件仍会被重新索引，这里按清单再清一次；
+    // pathspec 生效时它是空操作（清单条目本就不在 index）
+    oversizeRemoveBlock(),
+    oversizeCleanupBlock(),
     '$tree = (& $git --git-dir=$g --work-tree=$root write-tree).Trim()',
     "$commit = (& $git --git-dir=$g -c user.name=dsh-recall -c user.email=recall@dsh.local commit-tree $tree -m ('snapshot ' + " + psq(messageId) + ")).Trim()",
     '& $git --git-dir=$g tag -f ' + psq('snap-' + messageId) + ' $commit | Out-Null',
@@ -507,14 +588,19 @@ export function diffScript(root: string, store: ScriptStore, gitExe: string, tag
     '$root = ' + psq(root),
     dropGitlinksBlock(),
     excludeSyncBlock(store.excludeFile, base),
+    // issue #29：与 snapshotScript 同形——大文件不进 add（否则 preview 一次
+    // 也要为它们写对象），清单随 add 后的兜底剔除一起收口
+    oversizeListBlock(store.maxFileBytes),
+    oversizeAddPrepBlock(),
     // fail-open add：语义同 snapshotScript（--ignore-errors 跳过无法索引的
     // 路径、≥2 显式 throw 防「旧索引假成功」）；此处不提取 SNAP_SKIP——
     // 被跳过的路径不进索引，diff 天然不显示、rollback 的删除清单来自当前
     // 索引也天然不会误删它们
-    '& $git --git-dir=$g --work-tree=$root add -A --ignore-errors',
+    '& $git --git-dir=$g --work-tree=$root add -A --ignore-errors @paArgs',
     'if ($LASTEXITCODE -ge 2) { throw ("git add fatal (exit " + $LASTEXITCODE + ")") }',
     dropGitlinksBlock(),
-    oversizeBlock(store.maxFileBytes),
+    oversizeRemoveBlock(),
+    oversizeCleanupBlock(),
     '$curOut = & $git -c core.quotePath=false --git-dir=$g --work-tree=$root ls-files --stage',
     // 旧 tag 的树里可能仍有 gitlink（修复前留下的），从目标侧一并剔除，
     // 否则 diff 会报出“恢复 dsh-recall-plugin”这类幻影条目
@@ -577,11 +663,15 @@ export function rollbackScript(root: string, store: ScriptStore, gitExe: string,
     '$root = ' + psq(root),
     dropGitlinksBlock(),
     excludeSyncBlock(store.excludeFile, base),
+    // issue #29：同 snapshotScript（回退前的当前清单同样不该为大文件写对象）
+    oversizeListBlock(store.maxFileBytes),
+    oversizeAddPrepBlock(),
     // fail-open add：语义同 snapshotScript 同款注释（diff/rollback 复用）
-    '& $git --git-dir=$g --work-tree=$root add -A --ignore-errors',
+    '& $git --git-dir=$g --work-tree=$root add -A --ignore-errors @paArgs',
     'if ($LASTEXITCODE -ge 2) { throw ("git add fatal (exit " + $LASTEXITCODE + ")") }',
     dropGitlinksBlock(),
-    oversizeBlock(store.maxFileBytes),
+    oversizeRemoveBlock(),
+    oversizeCleanupBlock(),
     // 同 diffScript：-z 的 NUL 输出会被 PowerShell 捕获丢弃，改为逐行 + quotePath=false
     '$curOut = & $git -c core.quotePath=false --git-dir=$g --work-tree=$root ls-files --stage',
     "$targetOut = @(& $git -c core.quotePath=false --git-dir=$g ls-tree -r " + psq(tag) + " | Where-Object { -not $_.StartsWith('160000') })",
@@ -929,7 +1019,7 @@ export function countObjectsScript(store: ScriptStore, gitExe: string): string {
   ].join('\n')
 }
 
-// 目录总大小（字节）：.NET 手动栈遍历（PF-3，容错语义同 oversizeBlock——
+// 目录总大小（字节）：.NET 手动栈遍历（PF-3，容错语义同 oversizeListBlock——
 // 逐目录 try/catch 跳过不可访问目录）替代 Get-ChildItem -Recurse 逐文件
 // 管道求和，GB 级快照库从秒级降到亚秒。$sum 初始化 [long]0 防溢出，目录
 // 为空/全跳过时输出 0（旧实现的 .Sum 为 null，JS 侧 parseInt||0 兜底等价）。

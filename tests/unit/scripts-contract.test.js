@@ -245,8 +245,47 @@ describe('关键模板结构断言', () => {
     expect(s).toContain("xargs -0 stat -f '%z %HT'")
     expect(s).toContain('tolower($0) ~ /directory/')
     expect(s).toContain('rm -f "$limit_tmp"')
-    // set -e 下条件位置豁免：ls-files 失败只让 limit_scan_ok 保持 0（fail-open）
-    expect(s).toContain('limit_scan_ok=0')
+  })
+
+  // issue #29：统计失败 = 规模未知，必须**停在 add 之前**（fail-closed）。
+  // fail-open 的代价在 $HOME 级工作区上实测是「每条消息 10 分钟 + 10 GB」。
+  it('issue #29：统计失败在 add 之前早退，且 stderr 可回传', () => {
+    for (const module of [pwsh, posix]) {
+      const s = module.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+      expect(s).toContain('SNAP_SCAN_FAIL')
+      expect(s).toContain('SNAP_SCAN_ERR')
+      expect(s.indexOf('SNAP_SCAN_FAIL')).toBeLessThan(s.indexOf('add -A'))
+      // fail-open 的旧开关变量必须消失（它就是「失败后继续 add」的伏笔）
+      expect(s).not.toContain('limit_scan_ok')
+    }
+    // posix：stderr 落临时文件（原先是 2>/dev/null，把失败原因整条吞掉）
+    const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect(posixSnap).toContain('2> "$limit_err"')
+    expect(posixSnap).not.toContain('ls-files -z -co --exclude-standard > "$limit_tmp" 2>/dev/null')
+    // pwsh：stderr 落 $PID 命名的临时文件后压平回传
+    const pwshSnap = pwsh.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect(pwshSnap).toContain('2>$limitErrFile')
+  })
+
+  // issue #29 第二刀：> maxFileBytes 的文件不该「先写对象、再移出 index」。
+  // exclude-only pathspec 挡在写对象之前；cwd 必须切到工作区根——pathspec 的
+  // 隐含全集会被 cwd 前缀裁切，:(top) 救不回来（2026-10-30 实测）。
+  it('issue #29：大文件清单先于 add，add 带 exclude pathspec 且先切 cwd', () => {
+    for (const module of [pwsh, posix]) {
+      const s = module.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+      const addAt = s.indexOf('add -A')
+      expect(s).toContain(':(top,exclude,literal)')
+      expect(s).toContain('pathspec-file-nul')
+      expect(s).toContain('pathspec-from-file.ok')
+      expect(s.indexOf('pathspec-from-file.ok')).toBeLessThan(addAt)
+    }
+    const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    // 清单（含 rel 版）在 add 之前生成：先剔旧 index 条目，再让 add 不写它们
+    expect(posixSnap.indexOf('oversize_r="$g/oversize-rel.$$"')).toBeLessThan(posixSnap.indexOf('add -A'))
+    expect(posixSnap.indexOf('cd "$root"')).toBeLessThan(posixSnap.indexOf('add -A'))
+    const pwshSnap = pwsh.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
+    expect(pwshSnap.indexOf('$oversizeRel = [System.Collections.Generic.List[string]]::new()')).toBeLessThan(pwshSnap.indexOf('add -A'))
+    expect(pwshSnap.indexOf('Set-Location -LiteralPath $root')).toBeLessThan(pwshSnap.indexOf('add -A'))
   })
 
   // 影子仓库是 `git init --bare` 建的：裸 `--git-dir` 下 git 认为没有工作树，
@@ -425,11 +464,11 @@ describe('关键模板结构断言', () => {
     expect(pwshSnap).not.toContain("Replace('\\','/')\n        & $git")
     // posix：xargs -0 自适应批次（空格/中文路径不分裂）。用途各自钉住——
     // excludeSync 清命中条目（有 root / 无 root 两条分支各一条）、oversize
-    // 剔大文件（都用 --literal-pathspecs），外加 issue #28 护栏的 stat 两种
-    // 方言（GNU %F / BSD %HT）各一处
+    // 剔大文件（issue #29 起 add 前一次 + add 后兜底一次，都用 --literal-pathspecs），
+    // 外加 issue #28 护栏的 stat 两种方言（GNU %F / BSD %HT）各一处
     const posixSnap = posix.snapshotScript('ROOT', FAKE_STORE, 'git-exe', 'm1', [])
-    expect(posixSnap.match(/xargs -0/g).length).toBe(5)
-    expect(posixSnap.match(/xargs -0 "\$git" --literal-pathspecs/g).length).toBe(3)
+    expect(posixSnap.match(/xargs -0/g).length).toBe(6)
+    expect(posixSnap.match(/xargs -0 "\$git" --literal-pathspecs/g).length).toBe(4)
     expect(posixSnap.match(/xargs -0 stat /g).length).toBe(2)
     // oversize 侧不再逐条（" $rel" 逐条退役）；dropGitlinks 的逐条 "$p" 是
     // PF-9 方案明确「保留不动」的（gitlink 常态 0 条，无收益）

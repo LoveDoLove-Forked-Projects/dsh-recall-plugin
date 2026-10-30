@@ -152,7 +152,7 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 | --- | --- | --- |
 | `gcSnaps` | 50 | 每积累多少条快照触发一次 `git gc`（env `DSH_RECALL_GC_SNAPS` 可强制覆盖） |
 | `gcHours` | 24 | 距上次 gc 超过多少小时触发（与条数先到先触发；env `DSH_RECALL_GC_HOURS`） |
-| `maxFileBytes` | 8388608（8MB） | 超过该大小的文件不进快照、不被回退触碰 |
+| `maxFileBytes` | 8388608（8MB） | 超过该大小的文件不进快照、不被回退触碰；在 `git add` 之前就按清单剔除，不写对象（旧 git 退回「先加后剔」） |
 | `maxWorkspaceBytes` | 268435456（256MB） | 单工作区可纳入快照的文件总量上限，口径与 `git add` 一致（`.gitignore`、`.git/info/exclude`、全局 excludesFile 都算数）。超过时**停用该工作区快照**（不截断——截断快照回退时会误删未纳入的文件），并在最近消息上提示；调大该值或补充排除表后自动恢复；0 = 不限制 |
 | `scanBudgetMs` | 10000（10 秒） | 快照前统计纳入总量的时间预算。超过时停用本次快照并提示（防病态大目录拖死启动）；0 = 不限制 |
 | `maxSnapshotsPerWorkspace` | 500 | 每个工作区保留的最大快照数，超限自动删除最旧的；0 = 不限制 |
@@ -195,7 +195,7 @@ peerDependencies 按 minor 版本线开窗，与 `dsh.compatibility.dshReleases`
 
 使用中最常遇到的几类问题与排查路径；更完整的设计边界见上文「已知限制」，环境类失败（git 缺失 / 磁盘满 / 无权限等）的原因在设置卡片「最近错误」里可查。
 
-**消息旁没有「↶ 撤回」按钮？** 按概率排查：① 装完没重启 DSH 进程——重启后硬刷新页面（Ctrl+Shift+R）；② git CLI 不在 PATH——页面顶部会有安装提示；③ 该消息发送于插件启用之前——快照只在消息发送时创建，历史消息无快照；④ 该工作区被停用快照——工作区开在 `dist/`、`target/` 这类命中基础排除表目录形态的位置，或超出 `maxWorkspaceBytes` / `scanBudgetMs` 护栏，最近消息上会给出恢复提示（调大上限或补充排除表后自动恢复）。
+**消息旁没有「↶ 撤回」按钮？** 按概率排查：① 装完没重启 DSH 进程——重启后硬刷新页面（Ctrl+Shift+R）；② git CLI 不在 PATH——页面顶部会有安装提示；③ 该消息发送于插件启用之前——快照只在消息发送时创建，历史消息无快照；④ 该工作区被停用快照——工作区开在 `dist/`、`target/` 这类命中基础排除表目录形态的位置，或超出 `maxWorkspaceBytes` / `scanBudgetMs` 护栏，或快照前的范围统计本身失败（`git ls-files` 报错，原因见「最近错误」，10 分钟后自动重试）；最近消息上会给出恢复提示（调大上限或补充排除表后自动恢复）。
 
 **撤回后个别文件没有恢复？** 该文件不在快照里：超过 `maxFileBytes`（默认 8MB）、命中排除表，或位于嵌套 git 仓库 / win32 目录重解析点内（见「已知限制」）。撤回前确认面板的清单就是实际回退范围，以它为准。
 

@@ -61,7 +61,7 @@ tag 是快照的**真相源**：`index.json` 丢失后，`rebuildOrphans` 依 ta
 | `time` | number | 快照时间（毫秒）；`time=0` 表示重建时拿不到时间的孤儿条目，清理时按最旧优先 |
 | `root` | string | 工作区绝对路径（跨工作区展示的映射来源） |
 | `sessionId` | string | 所属会话；孤儿为空串 |
-| `feedback` | 可选 | 仅「需要解释」的消息写入，两种形状互斥：`{ failed: true, error?, kind? }`（快照失败，`kind` 为环境错误分类）与 `{ skipped: string[] }`（fail-open 跳过的路径清单） |
+| `feedback` | 可选 | 仅「需要解释」的消息写入，两种形状互斥：`{ failed: true, error?, kind? }`（快照失败，`kind` 为环境错误分类或设计性停用标记 `workspaceLimit` / `scanFail`）与 `{ skipped: string[] }`（fail-open 跳过的路径清单） |
 
 读取与损坏处理：
 

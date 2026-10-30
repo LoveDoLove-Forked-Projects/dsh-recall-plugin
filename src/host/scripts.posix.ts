@@ -29,7 +29,7 @@ export function psq(value: string): string {
 export const UTF8_PRELUDE = 'export LC_ALL=C'
 
 // 超大文件跳过阈值（字节），默认值与 config.js 的 maxFileBytes 一致；
-// 实际生效值以 store.maxFileBytes（用户 config 可调）经 oversizeBlock 注入为准。
+// 实际生效值以 store.maxFileBytes（用户 config 可调）经 oversizeListBlock 注入为准。
 // issue #24 起默认 8MB（同 pwsh 侧，两套模板必须同值）。
 export const MAX_FILE_BYTES = 8388608
 
@@ -76,7 +76,7 @@ function dropGitlinksBlock() {
 }
 
 // exclude 表 basename 形式 pattern（见 pwsh 版同注释）转 find 的目录剪枝前缀。
-// 只服务 oversizeBlock：issue #28 起 limitScanBlock 的清单由 git 给，不再自己
+// 只服务 oversizeListBlock：issue #28 起 limitScanBlock 的清单由 git 给，不再自己
 // 遍历工作区，也就不再需要这份剪枝数组。
 // 依赖前置的 excludeSyncBlock 定义的 $new_exc。
 // 括号是数组元素里的**数据**，不经过 shell 分词——写成 "\(" 时 bash 不剥
@@ -106,26 +106,62 @@ function dirPruneArgsBlock() {
 // 也不怕）；2>/dev/null 容忍个别不可访问子目录（杀软锁定、异常 ACL），
 // 漏看个别文件是 fail-open，可接受——与 pwsh 版同策略。
 // 阈值按调用注入（store.maxFileBytes，config 可调），不读模块常量。
-// 依赖外层已定义的 $git/$g/$root。
-// PF-9 合批：find 命中经管道剥前缀后 xargs -0 多路径合参——xargs 自适应
-// 批次（规避 ARG_MAX）等价 win32 侧显式 100 条/批；-0 保证路径不分裂；
-// xargs 失败/空输入 || true 兜住（fail-open 语义与逐条版一致，残留条目
-// 不进 index 的代价由下次快照幂等重试）。
-function oversizeBlock(maxBytes: number): string {
+// issue #29：改成「先出清单、再让 add 排除」——此前 add 先写全部大文件对象、
+// 之后才把条目移出 index，一个「小文件少 + 大文件多」的工作区能在预算通过后
+// 仍写满磁盘。清单双份：pathspec 版给 add（带 :(top) 前缀，见 add 前的 cd），
+// rel 版给 update-index 与降级兜底；空清单等价全量 add，故清单写失败也安全。
+// find 会多列被 .gitignore 排除的大文件：多排除几个 git 本来就不加的路径无害。
+// 依赖外层已定义的 $git/$g/$root 与 excludeSyncBlock 的 $new_exc。
+// PF-9 合批：xargs -0 自适应批次（规避 ARG_MAX）等价 win32 侧显式 100 条/批。
+function oversizeRemoveBlock(): string {
+  // --work-tree 不可省：bare 影子仓库下裸 update-index fatal（被 || true 吞掉
+  // 后大文件会静默留在 index 里），maxFileBytes 的承诺会形同虚设
+  return "xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" --work-tree=\"$root\" update-index --force-remove -- < \"$oversize_r\" 2>/dev/null || true"
+}
+
+function oversizeListBlock(maxBytes: number): string {
   return [
     dirPruneArgsBlock(),
+    'oversize_p="$g/oversize-pathspec.$$"',
+    'oversize_r="$g/oversize-rel.$$"',
+    ': > "$oversize_p"',
+    ': > "$oversize_r"',
     'find "$root" "${oversize_prune[@]}" -type f -size +' + String(maxBytes || MAX_FILE_BYTES) + 'c -print0 2>/dev/null | while IFS= read -r -d \'\' f; do',
-    '  printf \'%s\\0\' "${f#"$root"/}"',
-    // --work-tree 不可省：bare 影子仓库下裸 update-index fatal（被 || true 吞掉
-    // 后大文件会静默留在 index 里），maxFileBytes 的承诺会形同虚设
-    "done | xargs -0 \"$git\" --literal-pathspecs --git-dir=\"$g\" --work-tree=\"$root\" update-index --force-remove -- 2>/dev/null || true",
+    '  oversize_rel="${f#"$root"/}"',
+    '  printf \'%s\\0\' ":(top,exclude,literal)$oversize_rel" >> "$oversize_p"',
+    '  printf \'%s\\0\' "$oversize_rel" >> "$oversize_r"',
+    'done',
+    oversizeRemoveBlock(),
+  ].join('\n')
+}
+
+// issue #29：add 前置（探测 + 切 cwd）收在一处——snapshot 与 collectLists 两处
+// add 共用同一形态，漏改一处就会让该链路重新写大文件。
+// 必须 cd 到 root：pathspec 的隐含全集会被 cwd 前缀裁切，:(top) 救不回来（实测），
+// 而脚本 cwd 是宿主工作目录（可能在工作区子目录里）。
+// 旧 git（<2.25）无 --pathspec-from-file：探测失败就不传该参数，退回裸 add——
+// 与现状同行为，总好过带未知选项让整条快照 fatal。探测结果缓存进 git-dir。
+function oversizeAddPrepBlock(): string {
+  return [
+    'pa_args=()',
+    'if [ -s "$oversize_p" ]; then',
+    '  if [ -f "$g/pathspec-from-file.ok" ] || "$git" add -h 2>&1 | grep -q -- \'--pathspec-from-file\'; then',
+    '    printf \'1\\n\' > "$g/pathspec-from-file.ok" 2>/dev/null || true',
+    '    pa_args=(--pathspec-from-file="$oversize_p" --pathspec-file-nul)',
+    '  fi',
+    'fi',
+    'cd "$root"',
   ].join('\n')
 }
 
 // issue #24：快照前置护栏——统计「真正会进快照的文件总量」与耗时，任一超限即
 // 整体停用本次快照（输出 SNAP_LIMIT 后 exit 0），不执行 add。停用而非截断的
 // 理由、issue #28 的口径修正（清单由 git 给、-c/--exclude-standard 为何都必须
-// 带上、失败为何 fail-open）与 pwsh 版同名函数注释一致，此处不重复。
+// 带上）与 pwsh 版同名函数注释一致，此处不重复。
+// issue #29：统计失败改为 fail-closed——规模未知就不许 add。此前 fail-open 的
+// 取舍在 $HOME 级工作区上是灾难（ls-files 一失败，10 分钟 + 10 GB 的 add 照跑）。
+// 失败走哨兵 + exit 0 而非非零退出：没跑 add 就没有残骸，不该触发失败清扫与 prune；
+// stderr 随 SNAP_SCAN_ERR 回传，原文进「最近错误」供排障。
 // GNU find 有 -printf、macOS BSD find 没有：探测后二选一（只用来判别 stat 方言）。
 // 批量 stat 而非逐文件 fork——十万文件量级逐次 fork 会退化成十万次进程。
 // 预算只有秒精度（date +%s）：遍历中无法中断，事后比较已足够——超预算即停用，
@@ -139,13 +175,22 @@ function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number
   return [
     'limit_start=$(date +%s)',
     'limit_tmp="$g/limit-scan.$$"',
-    'limit_scan_ok=0',
-    // set -e：条件位置豁免，ls-files 失败不终止脚本——fail-open 只放行不判定
-    'if "$git" -c core.quotePath=false --git-dir="$g" --work-tree="$root" ls-files -z -co --exclude-standard > "$limit_tmp" 2>/dev/null; then',
-    '  limit_scan_ok=1',
+    'limit_err="$g/limit-scan-err.$$"',
+    // set -e：条件位置豁免，失败由 else 分支显式处理（不许穿透到 add）
+    'if "$git" -c core.quotePath=false --git-dir="$g" --work-tree="$root" ls-files -z -co --exclude-standard > "$limit_tmp" 2> "$limit_err"; then',
+    '  :',
+    'else',
+    '  limit_rc=$?',
+    // 压平成单行才能随哨兵回传；截 300 字符防一条巨长 stderr 撑爆错误环
+    '  limit_msg=$(head -c 300 "$limit_err" 2>/dev/null | tr "\\n\\r" "  ")',
+    '  rm -f "$limit_tmp" "$limit_err"',
+    '  printf \'SNAP_SCAN_FAIL %s\\n\' "$limit_rc"',
+    '  printf \'SNAP_SCAN_ERR %s\\n\' "$limit_msg"',
+    '  exit 0',
     'fi',
+    'rm -f "$limit_err"',
     'limit_sizes=""',
-    'if [ "$limit_scan_ok" = 1 ] && [ -s "$limit_tmp" ]; then',
+    'if [ -s "$limit_tmp" ]; then',
     // ls-files 输出相对 root 的路径，而脚本 cwd 是宿主工作目录：必须 cd 进去再 stat
     '  if find "$root" -maxdepth 0 -printf \'\' >/dev/null 2>&1; then',
     "    limit_sizes=$(cd \"$root\" && xargs -0 stat -c '%s %F' -- < \"$limit_tmp\" 2>/dev/null || true)",
@@ -156,7 +201,7 @@ function limitScanBlock(maxBytes: number, fileMaxBytes: number, budgetMs: number
     'rm -f "$limit_tmp"',
     // 目录条目（嵌套仓库在 ls-files 里输出 `dir/`）不计入：add 侧同样不纳入它
     // 的内容（gitlink 被剔除 / 无提交时 unable to index）；越过单文件上限的也
-    // 不计入——oversizeBlock 随后会把它移出 index
+    // 不计入——oversizeListBlock 随后会把它移出 index
     'limit_total=$(printf \'%s\\n\' "$limit_sizes" | awk -v lim=' + limit + ' -v flim=' + fileLimit + ' \'{ if (tolower($0) ~ /directory/) next; if ($1 <= flim) { s += $1; if (lim > 0 && s > lim) { print "OVER " s; exit } } } END { if (lim <= 0 || s <= lim) print s }\')',
     'limit_elapsed=$(( $(date +%s) - limit_start ))',
     'case "$limit_total" in',
@@ -357,14 +402,17 @@ export function snapshotScript(root: string, store: ScriptStore, gitExe: string,
     excludeSyncBlock(store.excludeFile, base),
     // issue #24：总量/预算护栏先于 add——超限时连 add 都不跑
     limitScanBlock(store.maxWorkspaceBytes, store.maxFileBytes, store.scanBudgetMs),
+    // issue #29：大文件清单先于 add——add 带 exclude 后不再为它们写对象
+    oversizeListBlock(store.maxFileBytes),
     attrsMigrateBlock(),
+    oversizeAddPrepBlock(),
     // fail-open add（issue #7 加固，语义见 pwsh 版同款注释）：--ignore-errors
     // 下「无法索引的路径」以退出码 1 结束但索引已落盘；≥2 才是真 fatal，
     // 显式退出让 runShell 抛错（set -e 对 add 非零本会终止，但 || rc=$?
     // 捕获后必须自检，否则 tolerated/fatal 无法区分）。stderr 合并进变量
     // 供 fatal 时带回诊断与 SNAP_SKIP 提取。
     'addrc=0',
-    'add_log=$("$git" --git-dir="$g" --work-tree="$root" add -A --ignore-errors 2>&1) || addrc=$?',
+    'add_log=$("$git" --git-dir="$g" --work-tree="$root" add -A --ignore-errors "${pa_args[@]}" 2>&1) || addrc=$?',
     'if [ "$addrc" -ge 2 ]; then printf \'%s\\n\' "$add_log" >&2; exit "$addrc"; fi',
     "printf '%s\\n' \"$add_log\" | sed -n \"s/^error: unable to index file '\\(.*\\)'$/\\1/p\" | sort -u | while IFS= read -r sk; do",
     // 循环体用 if/fi 而非 && 列表：&& 列表条件为假时整条管道退出码为 1，
@@ -372,7 +420,9 @@ export function snapshotScript(root: string, store: ScriptStore, gitExe: string,
     '  if [ -n "$sk" ]; then printf \'SNAP_SKIP %s\\n\' "$sk"; fi',
     'done',
     dropGitlinksBlock(),
-    oversizeBlock(store.maxFileBytes),
+    // 兜底：旧 git 走裸 add 时大文件仍会被重新索引，这里按清单再清一次
+    oversizeRemoveBlock(),
+    'rm -f "$oversize_p" "$oversize_r"',
     'tree=$("$git" --git-dir="$g" --work-tree="$root" write-tree)',
     'commit=$("$git" --git-dir="$g" -c user.name=dsh-recall -c user.email=recall@dsh.local commit-tree "$tree" -m ' + psq('snapshot ' + messageId) + ')',
     '"$git" --git-dir="$g" tag -f ' + psq('snap-' + messageId) + ' "$commit" >/dev/null',
@@ -397,14 +447,18 @@ function collectListsBlock(store: ScriptStore, gitExe: string, root: string, tag
     'root=' + psq(root),
     dropGitlinksBlock(),
     excludeSyncBlock(store.excludeFile, base),
+    // issue #29：与 snapshotScript 同形——大文件不进 add（否则 preview 一次
+    // 也要为它们写对象），清单随 add 后的兜底剔除一起收口
+    oversizeListBlock(store.maxFileBytes),
+    oversizeAddPrepBlock(),
     // fail-open add（语义见 snapshotScript 同款注释）：diff/rollback 的当前
     // 清单来自这次 add 后的索引——被跳过的路径不进清单，diff 不显示、
     // rollback 删除清单也不会误删它们；≥2 显式退出防「旧索引假成功」
     'addrc=0',
-    '"$git" --git-dir="$g" --work-tree="$root" add -A --ignore-errors || addrc=$?',
+    '"$git" --git-dir="$g" --work-tree="$root" add -A --ignore-errors "${pa_args[@]}" || addrc=$?',
     '[ "$addrc" -le 1 ] || exit "$addrc"',
     dropGitlinksBlock(),
-    oversizeBlock(store.maxFileBytes),
+    oversizeRemoveBlock(),
     'tmpc=' + psq(store.dir + '/diff-cur.$$'),
     'tmpt=' + psq(store.dir + '/diff-tgt.$$'),
     '"$git" -c core.quotePath=false --git-dir="$g" --work-tree="$root" ls-files --stage | grep -v \'^160000 \' > "$tmpc" || true',
@@ -423,7 +477,7 @@ export function diffScript(root: string, store: ScriptStore, gitExe: string, tag
   return [
     'set -e -o pipefail',
     collectListsBlock(store, gitExe, root, tag, base),
-    "trap 'rm -f \"$tmpc\" \"$tmpt\"' EXIT",
+    "trap 'rm -f \"$tmpc\" \"$tmpt\" \"$oversize_p\" \"$oversize_r\"' EXIT",
     'awk -F\'\\t\' -v OFS=\'\\t\' \'',
     '  FNR==1 { fidx++ }',
     '  fidx==1 { split($1, a, " "); cur[$2]=a[2]; next }',
@@ -464,7 +518,7 @@ export function rollbackScript(root: string, store: ScriptStore, gitExe: string,
     'set -e -o pipefail',
     collectListsBlock(store, gitExe, root, tag, base),
     'tmpr=' + psq(store.dir + '/diff-restore.$$'),
-    "trap 'rm -f \"$tmpc\" \"$tmpt\" \"$tmpr\"' EXIT",
+    "trap 'rm -f \"$tmpc\" \"$tmpt\" \"$tmpr\" \"$oversize_p\" \"$oversize_r\"' EXIT",
     // 恢复集 = 目标有、当前无或 sha 不同（awk 结构与 diffScript 同款：
     // cur 侧 "mode sha stage<TAB>path" 取 a[2]，target 侧 "mode type sha<TAB>path" 取 a[3]）
     'awk -F\'\\t\' \'',
@@ -500,7 +554,7 @@ export function rollbackScript(root: string, store: ScriptStore, gitExe: string,
     '  fi',
     'fi',
     'tmpd=' + psq(store.dir + '/diff-del.$$'),
-    "trap 'rm -f \"$tmpc\" \"$tmpt\" \"$tmpr\" \"$tmpd\"' EXIT",
+    "trap 'rm -f \"$tmpc\" \"$tmpt\" \"$tmpr\" \"$tmpd\" \"$oversize_p\" \"$oversize_r\"' EXIT",
     'awk -F\'\\t\' \'',
     '  FNR==1 { fidx++ }',
     '  fidx==1 { cur[$2]=1; next }',

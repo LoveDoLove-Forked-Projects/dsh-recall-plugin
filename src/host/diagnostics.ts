@@ -23,7 +23,9 @@ export type EnvErrorKind = 'git' | 'space' | 'permission' | 'lock' | 'mkdir'
 // workspaceLimit（issue #24）不是环境失败而是设计性停用：工作区纳入总量或
 // 扫描耗时超过护栏，快照被整体跳过。单列成员让客户端能按 kind 走提示分支，
 // 不污染 EnvErrorKind（后者驱动 ENV_HINTS 的 Record 完整性）。
-export type FeedbackKind = EnvErrorKind | 'unknown' | 'workspaceLimit'
+// scanFail（issue #29）同属设计性停用：预算扫描的 ls-files 失败，规模未知
+// 故本次不建快照——与「超限」分开建模，排障时不至于让人去调上限。
+export type FeedbackKind = EnvErrorKind | 'unknown' | 'workspaceLimit' | 'scanFail'
 
 // 分类模式表，按根因优先级排列（同一文本命中多类时先命中者胜——
 // 如 `Unable to create '…lock': No space left on device` 同时命中 lock 与

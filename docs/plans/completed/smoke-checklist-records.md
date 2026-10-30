@@ -324,3 +324,20 @@
 - **缺陷 1（翻页器不出场）**：`pagers:0` 但 `tails:2`、localStorage 里家族已写入。两个原因叠加：① 首版只在 `visible` 为真时渲染，而 `visible` 靠 `ref.current.closest('[data-turn-tail]')` 判定——返回 `null` 时 ref 从未挂载，永远判不出「我是最后一个回合」（自锁）；② list 槽注册只给了 `name`，缺 `id`，条目未登场。修复：容器无条件渲染、空则 `:empty` 隐藏；注册补 `{ id, order, inject(sessionId) }`（对照官方 `dsh-client-ui-message-feedback` 写法）
 - **缺陷 2（会话 id 拿不到）**：assistant-actions 槽 props 只有 `messageId`，无法查版本家族。修复：用槽的 `inject(sessionId)` 回调注入；并保留两条兜底——消息行上的 `data-recall-session` 与 `activeSession` 共享位
 - **收尾**：7901 已停、浏览器已关、启动日志清理；`link` 模式保留（用户要求）
+
+## 2026-10-30 快照护栏 fail-closed 批次（issue #29，M1/M2/M3 活体验收）
+
+- **环境**：Windows 10 ｜ dsh 0.2.2-alpha.2 ｜ 插件 2.5.2（工作区 `lib/` 产物，web profile 常驻 link）｜ 冒烟工作区 `D:\tmp\dsh-p29-smoke`（`src/app.txt`、`中文 说明.txt`、10 MB `src/video.bin`）｜ headless 宿主走 `--patch D:\tmp\p29-patch.yml` 临时 overlay 挂载插件（不改 profile 的 package.json / bundles）
+- **链路一（headless，真实消息 → 快照）**：`dsh headless --patch … "…"` 在冒烟工作区跑一条真实用户消息（模型凭据缺失、回复阶段报 `MISSING_CREDENTIAL`，但消息已落盘并触发快照，符合「快照只看 user/message」的既有语义）。store `ffc35831…` 生成 `snap-7185f91f-…`、`index.json` 一条记录（root/sessionId/time 正确）；`ls-files` 仅 `src/app.txt` 与 `中文 说明.txt`，10 MB `src/video.bin` 不在树里（headless 用默认 `maxFileBytes=8MB`）；`pathspec-from-file.ok` 探测缓存已落盘，说明走的是 exclude pathspec 分支而非裸 add
+- **链路二（headless，坏 index → fail-closed）**：把 `index` 写成垃圾字节后再发一条真实消息，日志出现 `recall snapshot scan failed for D:\tmp\dsh-p29-smoke: rc=128 git.exe : fatal: …index file smaller than expected`；快照侧**零副作用**——tag 仍只有 1 个、`count-objects` 仍是 5、`index.json` 无新条目、`oversize-*` / `limit-scan-*` 无残留（原 `index` 已从备份还原）
+- **链路三（web 宿主，preview → execute 全链）**：`dsh web --no-open --port 3099` → `GET /?token=…` 换 cookie → `init` 返回根与配置 → 改 `src/app.txt`、新增 `newfile.txt`、删 `中文 说明.txt` 后 `preview` 返回 4 条变更（`restored 中文 说明.txt`、`added newfile.txt`、`modified src/app.txt`、`added src/video.bin`）+ `treeId 8d9679ae…` → 透传 `previewTreeId` 调 `execute(scope=both)` 返回 `{ok:true,count:4}`，工作区恢复为快照状态（新增文件被删、改名文件与内容均还原）
+- **磁盘侧**：`execute` 生成 `snap-pre-rollback-1793336682191`（安全快照，未进 `index.json`），`recall-intent.json` 执行后已清除（无残留）；`lineage.json` 未生成（`cutSeq=null`，见发现②）
+- **发现**：① 两代执行通道都过了一遍——headless 的 `ctx.shell` 是 bash（走直连 `powershell.exe` 通道，issue #15 路径），web 宿主是 pwsh（走官方通道），两边的 `snapshotScript` 均正常；② `preview`/`execute` 的 `cutSeq` 为 `null`——web 宿主读不到 headless 进程写入的会话切点（跨宿主、非 live 会话的 `readSession`/`observeSession` 均未命中），因此只回退文件、不 fork，属既有降级语义而非本次改动引入；③ `preview` 把 `src/video.bin` 列为 `added` 并最终删除它，原因是快照由 headless（8 MB 阈值）建、回退由 web（用户配置 100 MB）执行——跨配置差异下的既有「快照即真相源」语义，确认面板已明确列出
+- **收尾**：3099 已停（无残留监听）、`D:\tmp\dsh-p29-smoke` 与 patch/日志已清理、临时 store `ffc35831…` 已删除；profile 未做任何持久改动
+
+### 附：sticky 停用活体（同进程三条消息 + TTL 恢复）
+
+- **方法**：`dsh web --no-open --port 3098` + agent-browser 驱动 UI 连续发消息（新会话实际落在 `D:\tmp\recall-h0`——新会话 cwd 跟随最近工作区，不随宿主启动目录）。判定探针是 store 的 `heartbeat`：`snapshotScript` 开头写入，**被 sticky 短路时脚本根本不会被调用**，心跳即不变；tags 与日志作为辅助证据
+- **时间线**：① 第一条（13:58:39）正常快照，tags 67、心跳 `36760 1793339919`；② 破坏 `git/.git/index` 后第二条（13:59:26）日志 `recall snapshot scan failed … rc=128 … index file smaller than expected`，tags 仍 67、心跳刷新为 `1793339966`（脚本跑了、add 没跑）；③ 第三条（TTL 内）**心跳未变**（仍 `36760 1793339966`、mtime 13:59:26）、tags 仍 67、日志无新行 → sticky 短路生效，脚本零调用；④ 还原 `index` 并等到 TTL 到期（14:09:48）后第四条自动重试成功，tags 68、心跳刷新为 `1793340588`
+- **界面侧**：第一条消息旁有「撤回」按钮，第二/三条无按钮（无快照）——与 sticky 语义一致
+- **收尾**：agent-browser 已 close、3098 已停（仅剩 TIME_WAIT）、`D:\tmp\dsh-p29-sticky` 与快照文本已删；`D:\tmp\recall-h0` 的测试会话「Sticky 冒烟测试确认」保留（4 条消息、2 个快照）供复验，被破坏的 `index` 已从备份还原
